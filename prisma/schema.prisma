@@ -1,0 +1,241 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum ImportJobStatus {
+  UPLOADED
+  VALIDATED
+  IMPORTED
+  FAILED
+}
+
+enum ProjectStatus {
+  NEW
+  ACTIVE
+  HOLD
+  DONE
+  CANCELLED
+}
+
+enum ProjectStepStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+  SKIPPED
+}
+
+enum MonthEndStatus {
+  OPEN
+  CLOSED
+}
+
+model User {
+  id               Int                  @id @default(autoincrement())
+  name             String
+  email            String?              @unique
+  isActive         Boolean              @default(true) @map("is_active")
+  createdAt        DateTime             @default(now()) @map("created_at")
+  updatedAt        DateTime             @updatedAt @map("updated_at")
+  ownedProjects    Project[]            @relation("ProjectOwner")
+  assignedSteps    ProjectStep[]        @relation("StepAssignee")
+  mappingPresets   CsvMappingPreset[]   @relation("MappingPresetCreator")
+  importJobs       ImportJob[]          @relation("ImportUploadedBy")
+  templatesCreated WorkflowTemplate[]   @relation("TemplateCreator")
+  stepHistories    ProjectStepHistory[] @relation("StepHistoryChangedBy")
+  monthEndsClosed  MonthEndClosing[]    @relation("MonthEndClosedBy")
+
+  @@map("users")
+}
+
+model ConstructionType {
+  id        Int                @id @default(autoincrement())
+  code      String             @unique
+  name      String             @unique
+  createdAt DateTime           @default(now()) @map("created_at")
+  zones     Zone[]
+  templates WorkflowTemplate[]
+  projects  Project[]
+
+  @@map("construction_types")
+}
+
+model Zone {
+  id                 Int               @id @default(autoincrement())
+  constructionTypeId Int               @map("construction_type_id")
+  code               String
+  name               String
+  sortOrder          Int               @map("sort_order")
+  constructionType   ConstructionType  @relation(fields: [constructionTypeId], references: [id], onDelete: Cascade)
+  templateSteps      WorkflowTemplateStep[]
+  projectSteps       ProjectStep[]
+
+  @@unique([constructionTypeId, code])
+  @@index([constructionTypeId, sortOrder])
+  @@map("zones")
+}
+
+model CsvMappingPreset {
+  id          Int       @id @default(autoincrement())
+  name        String    @unique
+  mappingJson Json      @map("mapping_json")
+  createdBy   Int?      @map("created_by")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  creator     User?     @relation("MappingPresetCreator", fields: [createdBy], references: [id])
+  importJobs  ImportJob[]
+
+  @@map("csv_mapping_presets")
+}
+
+model ImportJob {
+  id              Int               @id @default(autoincrement())
+  fileName        String            @map("file_name")
+  mappingPresetId Int?              @map("mapping_preset_id")
+  mappingJson     Json              @map("mapping_json")
+  status          ImportJobStatus
+  totalRows       Int               @default(0) @map("total_rows")
+  successRows     Int               @default(0) @map("success_rows")
+  errorRows       Int               @default(0) @map("error_rows")
+  uploadedBy      Int?              @map("uploaded_by")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  finishedAt      DateTime?         @map("finished_at")
+  mappingPreset   CsvMappingPreset? @relation(fields: [mappingPresetId], references: [id])
+  uploader        User?             @relation("ImportUploadedBy", fields: [uploadedBy], references: [id])
+  rows            ImportRow[]
+  sourceProjects  Project[]
+
+  @@map("import_jobs")
+}
+
+model ImportRow {
+  id               Int       @id @default(autoincrement())
+  importJobId      Int       @map("import_job_id")
+  rowNo            Int       @map("row_no")
+  rawJson          Json      @map("raw_json")
+  validationErrors Json?     @map("validation_errors")
+  projectId        Int?      @map("project_id")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  importJob        ImportJob @relation(fields: [importJobId], references: [id], onDelete: Cascade)
+
+  @@unique([importJobId, rowNo])
+  @@map("import_rows")
+}
+
+model WorkflowTemplate {
+  id                 Int                  @id @default(autoincrement())
+  constructionTypeId Int                  @map("construction_type_id")
+  version            Int
+  name               String
+  isActive           Boolean              @default(false) @map("is_active")
+  validFrom          DateTime?            @map("valid_from")
+  validTo            DateTime?            @map("valid_to")
+  createdBy          Int?                 @map("created_by")
+  createdAt          DateTime             @default(now()) @map("created_at")
+  constructionType   ConstructionType     @relation(fields: [constructionTypeId], references: [id], onDelete: Cascade)
+  creator            User?                @relation("TemplateCreator", fields: [createdBy], references: [id])
+  steps              WorkflowTemplateStep[]
+
+  @@unique([constructionTypeId, version])
+  @@index([constructionTypeId, isActive])
+  @@map("workflow_templates")
+}
+
+model WorkflowTemplateStep {
+  id           Int              @id @default(autoincrement())
+  templateId   Int              @map("template_id")
+  stepOrder    Int              @map("step_order")
+  stepCode     String           @map("step_code")
+  stepName     String           @map("step_name")
+  zoneId       Int              @map("zone_id")
+  standardDays Int?             @map("standard_days")
+  isRequired   Boolean          @default(true) @map("is_required")
+  template     WorkflowTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  zone         Zone             @relation(fields: [zoneId], references: [id])
+  projectSteps ProjectStep[]
+
+  @@unique([templateId, stepOrder])
+  @@unique([templateId, stepCode])
+  @@map("workflow_template_steps")
+}
+
+model Project {
+  id                 Int              @id @default(autoincrement())
+  salesforceRecordId String           @unique @map("salesforce_record_id")
+  projectName        String           @map("project_name")
+  constructionTypeId Int              @map("construction_type_id")
+  customerName       String?          @map("customer_name")
+  ownerUserId        Int?             @map("owner_user_id")
+  status             ProjectStatus    @default(NEW)
+  startDate          DateTime?        @map("start_date")
+  dueDate            DateTime?        @map("due_date")
+  sourceImportJobId  Int?             @map("source_import_job_id")
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @updatedAt @map("updated_at")
+  constructionType   ConstructionType @relation(fields: [constructionTypeId], references: [id])
+  owner              User?            @relation("ProjectOwner", fields: [ownerUserId], references: [id])
+  sourceImportJob    ImportJob?       @relation(fields: [sourceImportJobId], references: [id])
+  steps              ProjectStep[]
+
+  @@index([constructionTypeId, status])
+  @@index([ownerUserId, status])
+  @@map("projects")
+}
+
+model ProjectStep {
+  id             Int               @id @default(autoincrement())
+  projectId      Int               @map("project_id")
+  templateStepId Int?              @map("template_step_id")
+  stepOrder      Int               @map("step_order")
+  stepCode       String            @map("step_code")
+  stepName       String            @map("step_name")
+  zoneId         Int               @map("zone_id")
+  assigneeUserId Int?              @map("assignee_user_id")
+  status         ProjectStepStatus @default(TODO)
+  plannedDate    DateTime?         @map("planned_date")
+  dueDate        DateTime?         @map("due_date")
+  completedAt    DateTime?         @map("completed_at")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+  project        Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  templateStep   WorkflowTemplateStep? @relation(fields: [templateStepId], references: [id])
+  zone           Zone              @relation(fields: [zoneId], references: [id])
+  assignee       User?             @relation("StepAssignee", fields: [assigneeUserId], references: [id])
+  histories      ProjectStepHistory[]
+
+  @@unique([projectId, stepOrder])
+  @@index([projectId, stepOrder])
+  @@index([assigneeUserId, status, dueDate])
+  @@map("project_steps")
+}
+
+model ProjectStepHistory {
+  id            Int                @id @default(autoincrement())
+  projectStepId Int                @map("project_step_id")
+  oldStatus     ProjectStepStatus? @map("old_status")
+  newStatus     ProjectStepStatus  @map("new_status")
+  changedBy     Int?               @map("changed_by")
+  comment       String?
+  changedAt     DateTime           @default(now()) @map("changed_at")
+  projectStep   ProjectStep        @relation(fields: [projectStepId], references: [id], onDelete: Cascade)
+  changer       User?              @relation("StepHistoryChangedBy", fields: [changedBy], references: [id])
+
+  @@index([projectStepId, changedAt])
+  @@map("project_step_histories")
+}
+
+model MonthEndClosing {
+  id          Int            @id @default(autoincrement())
+  yearMonth   String         @unique @map("year_month")
+  status      MonthEndStatus @default(OPEN)
+  closedBy    Int?           @map("closed_by")
+  closedAt    DateTime?      @map("closed_at")
+  summaryJson Json?          @map("summary_json")
+  createdAt   DateTime       @default(now()) @map("created_at")
+  closer      User?          @relation("MonthEndClosedBy", fields: [closedBy], references: [id])
+
+  @@map("month_end_closings")
+}

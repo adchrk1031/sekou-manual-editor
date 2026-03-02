@@ -1,0 +1,9 @@
+.git
+.next
+node_modules
+backups
+docs
+Code.gs
+Editor.html
+index.html
+*.log

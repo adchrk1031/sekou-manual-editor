@@ -1,0 +1,11 @@
+<svg width="1200" height="320" viewBox="0 0 1200 320" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <g>
+    <path d="M56 145C93 103 157 74 244 60" stroke="#1AB9C9" stroke-width="24" stroke-linecap="round"/>
+    <path d="M48 188C88 146 151 117 238 103" stroke="#1AB9C9" stroke-width="24" stroke-linecap="round"/>
+    <path d="M42 231C80 190 144 160 230 148" stroke="#1AB9C9" stroke-width="24" stroke-linecap="round"/>
+    <path d="M34 276C66 245 116 223 178 213" stroke="#1AB9C9" stroke-width="24" stroke-linecap="round"/>
+    <rect x="248" y="42" width="36" height="82" rx="8" fill="#1AB9C9" transform="rotate(8 248 42)"/>
+    <rect x="238" y="103" width="30" height="48" rx="7" fill="#1AB9C9" transform="rotate(8 238 103)"/>
+  </g>
+  <text x="330" y="243" fill="#1D1A21" font-size="220" font-weight="700" letter-spacing="5" font-family="Arial, Helvetica, sans-serif">REZIL</text>
+</svg>

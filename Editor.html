@@ -1,0 +1,371 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body { font-family: "Noto Sans JP", sans-serif; margin: 0; color: #111; background: #f5f7fb; }
+      .container { padding: 14px; }
+      .panel { background: #fff; border: 1px solid #dfe3eb; border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+      .panel h3 { margin: 0 0 8px 0; font-size: 13px; }
+      .progress { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+      .step { border: 1px solid #dfe3eb; border-radius: 8px; padding: 6px; font-size: 11px; text-align: center; background: #fafbff; }
+      .row { margin-bottom: 12px; }
+      .label { display: block; font-size: 12px; margin-bottom: 4px; color: #444; }
+      input[type="text"], textarea, select { width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 6px; padding: 8px; font-size: 13px; }
+      textarea { min-height: 80px; resize: vertical; }
+      .works { border: 1px solid #ddd; border-radius: 8px; padding: 8px; max-height: 180px; overflow: auto; }
+      .works label { display: block; font-size: 13px; margin: 4px 0; }
+      .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+      button { border: 0; border-radius: 8px; padding: 8px 12px; cursor: pointer; font-size: 13px; }
+      .btn-main { background: #0b57d0; color: #fff; }
+      .btn-sub { background: #efefef; }
+      .btn-preview { background: #0f766e; color: #fff; }
+      .muted { font-size: 12px; color: #666; }
+      .result { margin-top: 10px; font-size: 12px; }
+      .result a { color: #0b57d0; }
+      .summary { font-size: 12px; line-height: 1.7; color: #333; }
+      .danger { color: #b42318; font-size: 12px; }
+
+      .schedule-tools { display: flex; gap: 8px; margin-bottom: 8px; }
+      .schedule-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+      .schedule-table th, .schedule-table td { border: 1px solid #d8dee8; padding: 6px; font-size: 12px; vertical-align: middle; }
+      .schedule-table th { background: #f8fafc; }
+      .schedule-table input[type="text"] { font-size: 12px; padding: 6px; }
+      .schedule-table .mini { width: 72px; }
+      .schedule-table .note { width: 100%; }
+      .schedule-table .chk { text-align: center; }
+      .tag { display: inline-block; padding: 2px 8px; border: 1px solid #d4dbe6; border-radius: 999px; font-size: 11px; color: #334155; background: #f8fafc; }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="panel">
+        <h3>施工計画書エディタ</h3>
+        <div class="progress">
+          <div class="step">1. 案件選択</div>
+          <div class="step">2. 内容確認</div>
+          <div class="step">3. プレビュー/出力</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="row">
+          <label class="label">案件</label>
+          <select id="projectSelect"></select>
+        </div>
+        <div class="summary" id="projectSummary">案件を選択してください。</div>
+      </div>
+
+      <div class="panel">
+        <div class="row">
+          <label class="label">工事項目（自動判定 + 手動調整）</label>
+          <div id="worksBox" class="works"></div>
+        </div>
+
+        <div class="row">
+          <label class="label">特記事項</label>
+          <textarea id="noteSpecial" placeholder="個別案件の補足を入力"></textarea>
+        </div>
+
+        <div class="row">
+          <label class="label">承認事項 追記</label>
+          <textarea id="noteApprovalExtra" placeholder="個別案件で追加したい承認事項"></textarea>
+        </div>
+
+        <div class="row">
+          <label class="label">写真ラベル（後貼り用）</label>
+          <input id="photoA" type="text" value="写真A（着工前）" />
+          <input id="photoB" type="text" value="写真B（施工中）" style="margin-top:6px" />
+          <input id="photoC" type="text" value="写真C（施工後）" style="margin-top:6px" />
+          <input id="photoD" type="text" value="写真D（その他）" style="margin-top:6px" />
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>工程表エディタ <span class="tag">見やすく編集しやすい</span></h3>
+        <div class="schedule-tools">
+          <button class="btn-sub" id="btnScheduleReset">工事項目から自動再生成</button>
+          <button class="btn-sub" id="btnScheduleAdd">行追加</button>
+        </div>
+        <table class="schedule-table">
+          <thead>
+            <tr>
+              <th style="width:25%">項目</th>
+              <th style="width:11%">開始</th>
+              <th style="width:11%">終了</th>
+              <th style="width:8%">停電</th>
+              <th>バー表示文字</th>
+              <th>備考</th>
+              <th style="width:9%">操作</th>
+            </tr>
+          </thead>
+          <tbody id="scheduleBody"></tbody>
+        </table>
+      </div>
+
+      <div class="panel">
+        <div class="actions">
+          <button class="btn-sub" id="btnSave">下書き保存</button>
+          <button class="btn-preview" id="btnPreview">プレビュー</button>
+          <button class="btn-main" id="btnPdf" style="grid-column:1 / span 2;">PDF作成</button>
+        </div>
+      </div>
+      <div class="danger" id="validation"></div>
+      <div class="result muted" id="result"></div>
+    </div>
+
+    <script>
+      let init = { projects: [], workMaster: [] };
+      let currentProjectId = "";
+
+      function selectedWorkCodes() {
+        return Array.from(document.querySelectorAll('input[name="workCode"]:checked')).map((e) => e.value);
+      }
+
+      function scheduleRowsFromUI() {
+        const rows = [];
+        document.querySelectorAll('#scheduleBody tr').forEach((tr) => {
+          rows.push({
+            label: tr.querySelector('[data-f="label"]').value.trim(),
+            start: tr.querySelector('[data-f="start"]').value.trim(),
+            end: tr.querySelector('[data-f="end"]').value.trim(),
+            outage: tr.querySelector('[data-f="outage"]').checked,
+            text: tr.querySelector('[data-f="text"]').value.trim(),
+            note: tr.querySelector('[data-f="note"]').value.trim()
+          });
+        });
+        return rows;
+      }
+
+      function getPayload() {
+        return {
+          projectId: currentProjectId,
+          selectedWorkCodes: selectedWorkCodes(),
+          noteSpecial: document.getElementById("noteSpecial").value,
+          noteApprovalExtra: document.getElementById("noteApprovalExtra").value,
+          photoA: document.getElementById("photoA").value,
+          photoB: document.getElementById("photoB").value,
+          photoC: document.getElementById("photoC").value,
+          photoD: document.getElementById("photoD").value,
+          scheduleRows: scheduleRowsFromUI()
+        };
+      }
+
+      function renderProjectOptions() {
+        const select = document.getElementById("projectSelect");
+        select.innerHTML = "";
+        if (!init.projects.length) {
+          const opt = document.createElement("option");
+          opt.value = "";
+          opt.textContent = "案件一覧にデータがありません";
+          select.appendChild(opt);
+          currentProjectId = "";
+          setActionDisabled(true);
+          setResult("まず「案件一覧」シートに project_id を含む案件を1件以上追加してください。");
+          return;
+        }
+
+        init.projects.forEach((p) => {
+          const opt = document.createElement("option");
+          opt.value = p.project_id;
+          opt.textContent = `${p.project_id} | ${p.property_name}`;
+          select.appendChild(opt);
+        });
+
+        currentProjectId = init.projects[0].project_id;
+        select.value = currentProjectId;
+        setActionDisabled(false);
+      }
+
+      function renderWorkMaster(autoSelectedCodes) {
+        const box = document.getElementById("worksBox");
+        box.innerHTML = "";
+        init.workMaster.forEach((w) => {
+          const label = document.createElement("label");
+          const checked = autoSelectedCodes.includes(w.work_code) ? "checked" : "";
+          label.innerHTML = `<input type="checkbox" name="workCode" value="${w.work_code}" ${checked}> ${w.work_name}`;
+          box.appendChild(label);
+        });
+
+        box.querySelectorAll('input[name="workCode"]').forEach((el) => {
+          el.addEventListener('change', () => buildScheduleFromSelectedWorks());
+        });
+      }
+
+      function renderScheduleRows(rows) {
+        const body = document.getElementById('scheduleBody');
+        body.innerHTML = '';
+        rows.forEach((r) => addScheduleRow({
+          label: r.label || '',
+          start: r.start || toHHMM(r.startMin),
+          end: r.end || toHHMM(r.endMin),
+          outage: !!r.outage,
+          text: r.text || '',
+          note: r.note || ''
+        }));
+      }
+
+      function addScheduleRow(data = {}) {
+        const body = document.getElementById('scheduleBody');
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><input data-f="label" type="text" value="${escapeAttr(data.label || '')}" placeholder="作業名"></td>
+          <td><input data-f="start" class="mini" type="text" value="${escapeAttr(data.start || '09:00')}" placeholder="09:00"></td>
+          <td><input data-f="end" class="mini" type="text" value="${escapeAttr(data.end || '10:00')}" placeholder="10:00"></td>
+          <td class="chk"><input data-f="outage" type="checkbox" ${data.outage ? 'checked' : ''}></td>
+          <td><input data-f="text" type="text" value="${escapeAttr(data.text || '')}" placeholder="全館停電 など"></td>
+          <td><input data-f="note" class="note" type="text" value="${escapeAttr(data.note || '')}" placeholder="備考"></td>
+          <td><button type="button" class="btn-sub">削除</button></td>
+        `;
+        tr.querySelector('button').addEventListener('click', () => tr.remove());
+        body.appendChild(tr);
+      }
+
+      function buildScheduleFromSelectedWorks() {
+        if (!currentProjectId) return;
+        const payload = {
+          projectId: currentProjectId,
+          selectedWorkCodes: selectedWorkCodes()
+        };
+        google.script.run
+          .withSuccessHandler((rows) => renderScheduleRows(rows || []))
+          .withFailureHandler((err) => setResult(`工程の自動生成失敗: ${err.message || err}`))
+          .getDefaultScheduleForEditor(payload);
+      }
+
+      function loadProjectDetail(projectId) {
+        currentProjectId = projectId;
+        google.script.run.withSuccessHandler((res) => {
+          renderWorkMaster((res.selectedWorks || []).map((w) => w.work_code));
+
+          const p = res.project || {};
+          document.getElementById("projectSummary").innerHTML =
+            `案件ID: ${p.project_id || "-"}<br>物件名: ${p.property_name || "-"}<br>件名: ${p.title_subject || "-"}`;
+          document.getElementById("noteSpecial").value = p.note_special || "";
+          document.getElementById("noteApprovalExtra").value = p.note_approval_extra || "";
+          document.getElementById("photoA").value = p.photo_slot_a_label || "写真A（着工前）";
+          document.getElementById("photoB").value = p.photo_slot_b_label || "写真B（施工中）";
+          document.getElementById("photoC").value = p.photo_slot_c_label || "写真C（施工後）";
+          document.getElementById("photoD").value = p.photo_slot_d_label || "写真D（その他）";
+
+          buildScheduleFromSelectedWorks();
+        }).getProjectForEditor(projectId);
+      }
+
+      function setResult(text, html) {
+        const el = document.getElementById("result");
+        if (html) {
+          el.innerHTML = html;
+        } else {
+          el.textContent = text;
+        }
+      }
+
+      function setActionDisabled(disabled) {
+        document.getElementById("btnSave").disabled = disabled;
+        document.getElementById("btnPdf").disabled = disabled;
+        document.getElementById("btnPreview").disabled = disabled;
+        document.getElementById("projectSelect").disabled = disabled;
+        document.getElementById("btnScheduleReset").disabled = disabled;
+        document.getElementById("btnScheduleAdd").disabled = disabled;
+      }
+
+      function validate() {
+        const selected = selectedWorkCodes();
+        const validation = document.getElementById("validation");
+        if (!currentProjectId) {
+          validation.textContent = "案件を選択してください。";
+          return false;
+        }
+        if (!selected.length) {
+          validation.textContent = "工事項目を1つ以上選択してください。";
+          return false;
+        }
+
+        const rows = scheduleRowsFromUI();
+        if (!rows.length) {
+          validation.textContent = "工程表を1行以上入力してください。";
+          return false;
+        }
+
+        const timeOk = rows.every((r) => /^\d{1,2}:\d{2}$/.test(r.start) && /^\d{1,2}:\d{2}$/.test(r.end));
+        if (!timeOk) {
+          validation.textContent = "工程表の時刻は HH:MM 形式で入力してください（例 09:30）。";
+          return false;
+        }
+
+        validation.textContent = "";
+        return true;
+      }
+
+      function toHHMM(minute) {
+        if (minute === undefined || minute === null || Number.isNaN(Number(minute))) return '09:00';
+        const n = Number(minute);
+        const h = Math.floor(n / 60);
+        const m = n % 60;
+        return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+      }
+
+      function escapeAttr(s) {
+        return String(s)
+          .replace(/&/g, '&amp;')
+          .replace(/"/g, '&quot;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;');
+      }
+
+      document.getElementById("projectSelect").addEventListener("change", (e) => {
+        loadProjectDetail(e.target.value);
+      });
+
+      document.getElementById("btnScheduleReset").addEventListener("click", () => {
+        buildScheduleFromSelectedWorks();
+      });
+
+      document.getElementById("btnScheduleAdd").addEventListener("click", () => {
+        addScheduleRow({ label: '', start: '09:00', end: '10:00', outage: false, text: '', note: '' });
+      });
+
+      document.getElementById("btnSave").addEventListener("click", () => {
+        if (!currentProjectId) {
+          setResult("案件が未選択です。案件一覧にデータを追加してください。");
+          return;
+        }
+        if (!validate()) return;
+        const payload = getPayload();
+        google.script.run
+          .withSuccessHandler(() => setResult("下書きを保存しました。"))
+          .withFailureHandler((err) => setResult(`保存失敗: ${err.message || err}`))
+          .saveProjectNotes(payload);
+      });
+
+      document.getElementById("btnPreview").addEventListener("click", () => {
+        if (!validate()) return;
+        const payload = getPayload();
+        setResult("プレビューを開いています...");
+        google.script.run
+          .withSuccessHandler(() => setResult("プレビューを表示しました。"))
+          .withFailureHandler((err) => setResult(`プレビュー失敗: ${err.message || err}`))
+          .openPreviewFromPayload(payload);
+      });
+
+      document.getElementById("btnPdf").addEventListener("click", () => {
+        if (!validate()) return;
+        const payload = getPayload();
+        setResult("PDFを作成中...");
+        google.script.run
+          .withSuccessHandler((res) => {
+            setResult("", `PDF作成完了: <a target="_blank" href="${res.fileUrl}">${res.fileName}</a>`);
+          })
+          .withFailureHandler((err) => setResult(`PDF作成失敗: ${err.message || err}`))
+          .generatePdf(payload);
+      });
+
+      google.script.run.withSuccessHandler((res) => {
+        init = res;
+        renderProjectOptions();
+        if (currentProjectId) loadProjectDetail(currentProjectId);
+      }).getInitData();
+    </script>
+  </body>
+</html>

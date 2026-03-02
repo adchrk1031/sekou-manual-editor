@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MNP物販サポートサービス | 株式会社C-Creation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --main: #00529A;
+      --accent: #FF8C00;
+      --accent-hover: #FFA500;
+      --base: #F0F7FF;
+      --text: #333333;
+      --alert: #E64A19;
+      --white: #ffffff;
+      --line: #d5e6f7;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Noto Sans JP", sans-serif;
+      color: var(--text);
+      line-height: 1.8;
+      background: #fff;
+    }
+
+    .container {
+      width: min(1100px, calc(100% - 40px));
+      margin: 0 auto;
+    }
+
+    section {
+      padding: 100px 0;
+    }
+
+    h1, h2, h3, p {
+      margin: 0;
+    }
+
+    h2 {
+      color: var(--main);
+      font-size: clamp(1.8rem, 2.8vw, 2.4rem);
+      line-height: 1.4;
+      margin-bottom: 18px;
+      font-weight: 800;
+    }
+
+    .lead {
+      font-size: 1.05rem;
+      margin-bottom: 34px;
+    }
+
+    .section-alt {
+      background: var(--base);
+    }
+
+    .hero {
+      padding: 120px 0 110px;
+      background: linear-gradient(145deg, #003763 0%, #00529A 45%, #0a3962 100%);
+      color: var(--white);
+    }
+
+    .hero h1 {
+      font-size: clamp(2rem, 4.2vw, 3.2rem);
+      line-height: 1.35;
+      font-weight: 800;
+      margin-bottom: 16px;
+      letter-spacing: 0.02em;
+    }
+
+    .accent-number {
+      color: var(--accent);
+      font-weight: 800;
+    }
+
+    .hero-sub {
+      font-size: 1.08rem;
+      opacity: 0.95;
+      margin-bottom: 34px;
+    }
+
+    .point-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(240px, 1fr));
+      gap: 10px 14px;
+      margin: 0 0 34px;
+      padding: 0;
+      list-style: none;
+    }
+
+    .point-list li {
+      background: rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.24);
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-weight: 500;
+    }
+
+    .hero-lead {
+      margin-bottom: 34px;
+      color: #eef6ff;
+    }
+
+    .cta-wrap {
+      margin-top: 10px;
+    }
+
+    .cta-button {
+      display: inline-block;
+      background: var(--accent);
+      color: #fff;
+      text-decoration: none;
+      font-weight: 700;
+      border-radius: 999px;
+      padding: 15px 30px;
+      font-size: 1rem;
+      transition: background-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+      box-shadow: 0 8px 20px rgba(255, 140, 0, 0.28);
+    }
+
+    .cta-button:hover {
+      background: var(--accent-hover);
+      transform: translateY(-2px);
+      box-shadow: 0 12px 24px rgba(255, 140, 0, 0.35);
+    }
+
+    .cta-note {
+      margin-top: 10px;
+      font-size: 0.92rem;
+      opacity: 0.95;
+    }
+
+    .steps-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 18px;
+      margin-top: 22px;
+      margin-bottom: 30px;
+    }
+
+    .step-card {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+      overflow: hidden;
+    }
+
+    .photo-placeholder {
+      background: #cfd6de;
+      color: #6d747c;
+      font-weight: 700;
+      text-align: center;
+      letter-spacing: 0.08em;
+      padding: 44px 10px;
+      font-size: 0.95rem;
+    }
+
+    .step-body {
+      padding: 18px 16px 20px;
+    }
+
+    .step-title {
+      color: var(--main);
+      font-size: 1.03rem;
+      line-height: 1.5;
+      margin-bottom: 10px;
+      font-weight: 700;
+    }
+
+    .summary-box {
+      border: 2px solid var(--main);
+      background: #fff;
+      border-radius: 12px;
+      padding: 20px 22px;
+    }
+
+    .summary-box p {
+      margin-bottom: 8px;
+      font-weight: 700;
+      color: var(--main);
+    }
+
+    .benefit-list,
+    .safety-list,
+    .check-list {
+      margin: 0;
+      padding-left: 1.2em;
+    }
+
+    .benefit-list li,
+    .safety-list li,
+    .check-list li {
+      margin-bottom: 10px;
+    }
+
+    .strong-line {
+      margin-top: 22px;
+      font-weight: 700;
+    }
+
+    .cta-section {
+      text-align: center;
+    }
+
+    .cta-card {
+      margin-top: 26px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 30px 24px;
+    }
+
+    .meta {
+      margin-top: 12px;
+      font-size: 0.95rem;
+      color: #555;
+    }
+
+    .alert {
+      color: var(--alert);
+      margin-top: 16px;
+      font-weight: 700;
+      font-size: 0.96rem;
+    }
+
+    footer {
+      padding: 44px 0 50px;
+      background: #0d2742;
+      color: #dde9f7;
+      text-align: center;
+    }
+
+    footer .company {
+      font-size: 1.05rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: #fff;
+    }
+
+    @media (max-width: 1024px) {
+      .steps-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .point-list {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 767px) {
+      section {
+        padding: 80px 0;
+      }
+
+      .hero {
+        padding: 96px 0 84px;
+      }
+
+      .container {
+        width: min(1100px, calc(100% - 28px));
+      }
+
+      .steps-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .cta-button {
+        width: 100%;
+        text-align: center;
+      }
+    }
+  </style>
+</head>
+<body>
+  <section class="hero">
+    <div class="container">
+      <h1>「あと<span class="accent-number">5万円</span>」を、迷わずつくる。</h1>
+      <p class="hero-sub">通信関連の特典を活用し、進め方まで整理された物販サポート。</p>
+
+      <ul class="point-list">
+        <li>スキル／経験 不要</li>
+        <li>初期費用 原則0円</li>
+        <li>判断はプロが設計</li>
+        <li>短期間で完結する設計（詳細は面談で説明）</li>
+        <li>日常の空き時間で進められる範囲から調整可能</li>
+      </ul>
+
+      <p class="hero-lead">
+        「何を選べばいいかわからない」「お金がかかりそうで怖い」「手間が多くて続かなさそう」<br />
+        そう感じて、動けずにいる人は少なくありません。<br />
+        でも、それはあなたの問題ではありません。多くの副業や物販は、判断も行動も、すべて個人任せ。だから迷い、途中で止まってしまいます。<br />
+        私たちは、通信関連の特典を活用した物販を、迷わず進められる形に整理しました。
+      </p>
+
+      <div class="cta-wrap">
+        <a href="#" class="cta-button">まずは無料面談で話を聞いてみる</a>
+        <p class="cta-note">※30秒で登録完了／無理な勧誘はありません</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="container">
+      <h2>やることは、この流れだけ。</h2>
+      <p class="lead">何を選ぶか、いつ動くか、どこで進めるか。迷いやすい判断は、あらかじめ運営側で整理しています。</p>
+
+      <div class="steps-grid">
+        <article class="step-card">
+          <div class="photo-placeholder">PHOTO</div>
+          <div class="step-body">
+            <h3 class="step-title">STEP1｜条件を確認する</h3>
+            <p>アンケートと面談で、今の状況や進められる条件を整理します。</p>
+          </div>
+        </article>
+
+        <article class="step-card">
+          <div class="photo-placeholder">PHOTO</div>
+          <div class="step-body">
+            <h3 class="step-title">STEP2｜案内に沿って手続きを進める</h3>
+            <p>必要な手続きは、整理された案内に沿って進めます。</p>
+          </div>
+        </article>
+
+        <article class="step-card">
+          <div class="photo-placeholder">PHOTO</div>
+          <div class="step-body">
+            <h3 class="step-title">STEP3｜特典を商品に交換する</h3>
+            <p>受け取った特典を、指定された条件の商品に交換します。</p>
+          </div>
+        </article>
+
+        <article class="step-card">
+          <div class="photo-placeholder">PHOTO</div>
+          <div class="step-body">
+            <h3 class="step-title">STEP4｜売却して利益を形にする</h3>
+            <p>商品は、弊社が買い取り、または最適な売却先を案内する形で進めます。売却条件や進行内容は、事前に共有した上で対応します。</p>
+          </div>
+        </article>
+      </div>
+
+      <div class="summary-box">
+        <p>STEP1〜3：あなたと担当が一緒に進行</p>
+        <p>STEP4：弊社が責任をもって対応</p>
+        <div>参加者が行うのは、案内の確認と必要な手続きが中心です。商品選定や売却判断を、一人で行う必要はありません。</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section-alt">
+    <div class="container">
+      <h2>月に5万円増えたら、できること</h2>
+      <p class="lead">月に<span class="accent-number">5万円</span>。年間で考えると、<span class="accent-number">60万円</span>。</p>
+      <ul class="benefit-list">
+        <li>外食や買い物で、我慢する回数が減る</li>
+        <li>旅行や帰省を、1回多く選べる</li>
+        <li>将来のための貯金に、余裕を持って回せる</li>
+      </ul>
+      <p class="strong-line">生活が劇的に変わるわけではありません。でも、<strong>「我慢しなくていい選択肢」</strong>が増えます。この小さな余裕が、気持ちの余裕につながっていきます。</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="container">
+      <h2>無理なく続けられることを、最優先にしています。</h2>
+      <p class="lead">
+        この取り組みでは、「一時的にうまくいくか」よりも、再現性と継続性を重視しています。<br />
+        この仕組みは、企業が広告や販促として用意している特典制度を活用し、その一部を参加者の収益として還元する形で成り立っています。だから、誰かが無理をしたり、どこかに歪みが生まれる設計ではありません。
+      </p>
+      <ul class="safety-list">
+        <li>利益につながりやすい条件を事前に整理</li>
+        <li>進め方をルール化・チェックリスト化</li>
+        <li>判断が必要な部分を運営側が担当</li>
+      </ul>
+      <p class="strong-line">
+        こうした設計により、その都度「これで合っているのか」と悩み続ける必要がありません。<br />
+        進め方やペースは人それぞれ異なるため、一人ひとりの状況に合わせて、最初に整理した上で進めます。
+      </p>
+    </div>
+  </section>
+
+  <section class="section-alt cta-section">
+    <div class="container">
+      <h2>まずは、あなたの場合を整理しませんか？</h2>
+      <p class="lead">
+        この仕組みは、状況によって進め方や組み方が変わります。<br />
+        そのため最初に、今の状況で無理なく進められるかどうかをオンライン面談で確認します。
+      </p>
+
+      <div class="cta-card">
+        <ul class="check-list">
+          <li>今の状況で進められる形かどうか</li>
+          <li>全体の流れと注意点</li>
+          <li>必要な時間やスケジュール感</li>
+        </ul>
+        <p class="strong-line">無理に進める前提ではありません。内容を聞いた上で、判断していただけます。</p>
+        <a href="#" class="cta-button">オンライン面談で、あなたの場合を整理する（無料）</a>
+        <p class="meta">所要時間：30分前後 / スマホから参加OK / 内容を聞いた上で判断できます</p>
+        <p class="alert">※特典制度や条件は変更が多いため、条件が良い今のうちに、一度確認しておくことをおすすめします。</p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="container">
+      <p class="company">株式会社C-Creation</p>
+      <p>副業を含むキャリア支援を通じて、「余裕」と「選択肢」を増やすサポートを行っています。</p>
+    </div>
+  </footer>
+</body>
+</html>
