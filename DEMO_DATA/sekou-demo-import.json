@@ -1,0 +1,54 @@
+{
+  "app": "sekou-manual-editor",
+  "exportedAt": "2026-03-03T00:00:00.000Z",
+  "items": [
+    {
+      "key": "sekou-project-index-v1",
+      "value": "[\"PJ-DEMO-0001\"]"
+    },
+    {
+      "key": "sekou-project-data-v1:PJ-DEMO-0001",
+      "value": "{\"projectId\":\"PJ-DEMO-0001\",\"propertyName\":\"デモタワーA棟\",\"propertyAddress\":\"東京都港区デモ1-2-3\",\"titleSubject\":\"受変電設備点検工事\",\"workDateStart\":\"2026-03-10\",\"workDateEnd\":\"2026-03-11\",\"outageDateStart\":\"2026-03-10\",\"outageDateEnd\":\"2026-03-10\",\"outageTimeStart\":\"09:00\",\"outageTimeEnd\":\"12:00\",\"outageEnabled\":true,\"flags\":{\"KOUATSU_CABLE\":true,\"UGS\":false,\"PAS\":true,\"GROUND_A\":false,\"GROUND_B\":false,\"GROUND_C\":true},\"selectedWorkCodes\":[\"KOUATSU_CABLE\",\"PAS\",\"GROUND_C\"],\"noteSpecial\":\"住民掲示は1週間前に掲出\",\"noteApprovalExtra\":\"作業前に安全KY実施\",\"coverRecipientSuffix\":\"管理組合御中\",\"pdfCompanyName\":\"デモ電設株式会社\",\"pdfTeam\":\"東京第一工事部\",\"pdfContactPerson\":\"デモ 太郎\",\"pdfAddress\":\"東京都港区デモ1-2-3\",\"pdfEmail\":\"demo@example.com\",\"pdfTel\":\"03-1234-5678\",\"pdfFax\":\"03-1234-5679\",\"layoutImageDataUrl\":\"\",\"layoutAnnotations\":[],\"layoutAnnotationsV2\":[],\"scheduleRows\":[{\"id\":\"row_demo_outage\",\"label\":\"停電時間\",\"startDate\":\"2026-03-10\",\"start\":\"09:00\",\"endDate\":\"2026-03-10\",\"end\":\"12:00\",\"outage\":true,\"text\":\"全館停電\",\"note\":\"\"},{\"id\":\"row_demo_work\",\"label\":\"高圧ケーブル交換\",\"startDate\":\"2026-03-10\",\"start\":\"10:00\",\"endDate\":\"2026-03-10\",\"end\":\"16:00\",\"outage\":false,\"text\":\"盤内作業\",\"note\":\"養生実施\"}],\"detailPhotos\":[{\"id\":\"detail_a\",\"label\":\"写真A（着工前）\",\"dataUrl\":\"\",\"layoutAnnotations\":[],\"layoutAnnotationsV2\":[]},{\"id\":\"detail_b\",\"label\":\"写真B（施工中）\",\"dataUrl\":\"\",\"layoutAnnotations\":[],\"layoutAnnotationsV2\":[]}],\"layoutPhotos\":[{\"id\":\"layout_a\",\"label\":\"写真A（配置図）\",\"dataUrl\":\"\",\"layoutAnnotations\":[],\"layoutAnnotationsV2\":[]},{\"id\":\"layout_b\",\"label\":\"写真B（配置図）\",\"dataUrl\":\"\",\"layoutAnnotations\":[],\"layoutAnnotationsV2\":[]}],\"relatedParties\":{\"owner\":{\"enabled\":true,\"title\":\"発注者\",\"company\":\"デモ管理組合\",\"person\":\"山田 花子\",\"office\":\"管理事務所\",\"tel\":\"03-2000-0001\"},\"utility\":{\"enabled\":true,\"title\":\"電力会社\",\"company\":\"デモ電力\",\"person\":\"佐藤 次郎\",\"office\":\"東京支店\",\"tel\":\"03-2000-0002\"},\"contractor\":{\"enabled\":true,\"title\":\"施工会社\",\"company\":\"デモ電設株式会社\",\"person\":\"デモ 太郎\",\"office\":\"東京第一工事部\",\"tel\":\"03-1234-5678\"},\"management\":{\"enabled\":true,\"title\":\"管理会社\",\"company\":\"デモ管理サービス\",\"person\":\"高橋 三郎\",\"office\":\"設備課\",\"tel\":\"03-2000-0003\"},\"residents\":{\"enabled\":true,\"title\":\"居住者\",\"company\":\"居住者代表\",\"person\":\"鈴木 一郎\",\"office\":\"-\",\"tel\":\"03-2000-0004\"}},\"approvalStatus\":\"draft\",\"approvalComment\":\"\",\"approvedBy\":\"\",\"approvedAt\":\"\"}"
+    },
+    {
+      "key": "sekou-csv-editor-v1",
+      "value": "{\"headers\":[\"案件ID\",\"物件名\",\"住所\",\"件名\",\"工事開始日\",\"工事終了日\",\"停電開始日\",\"停電終了日\",\"停電開始時間\",\"停電終了時間\"],\"rows\":[{\"案件ID\":\"PJ-DEMO-0001\",\"物件名\":\"デモタワーA棟\",\"住所\":\"東京都港区デモ1-2-3\",\"件名\":\"受変電設備点検工事\",\"工事開始日\":\"2026-03-10\",\"工事終了日\":\"2026-03-11\",\"停電開始日\":\"2026-03-10\",\"停電終了日\":\"2026-03-10\",\"停電開始時間\":\"09:00\",\"停電終了時間\":\"12:00\"}]}"
+    },
+    {
+      "key": "sekou-tool-template-schedule-v1",
+      "value": "[{\"id\":\"tmpl_schedule_demo_01\",\"name\":\"標準停電テンプレ\",\"createdAt\":\"2026-03-03T00:00:00.000Z\",\"payload\":[{\"id\":\"row_demo_outage\",\"label\":\"停電時間\",\"startDate\":\"2026-03-10\",\"start\":\"09:00\",\"endDate\":\"2026-03-10\",\"end\":\"12:00\",\"outage\":true,\"text\":\"全館停電\",\"note\":\"\"},{\"id\":\"row_demo_work\",\"label\":\"高圧ケーブル交換\",\"startDate\":\"2026-03-10\",\"start\":\"10:00\",\"endDate\":\"2026-03-10\",\"end\":\"16:00\",\"outage\":false,\"text\":\"盤内作業\",\"note\":\"養生実施\"}]}]"
+    },
+    {
+      "key": "sekou-tool-template-detail-photos-v1",
+      "value": "[{\"id\":\"tmpl_detail_photo_01\",\"name\":\"写真4枠テンプレ\",\"createdAt\":\"2026-03-03T00:00:00.000Z\",\"payload\":[{\"id\":\"p1\",\"label\":\"写真A（着工前）\",\"dataUrl\":\"\",\"layoutAnnotations\":[],\"layoutAnnotationsV2\":[]},{\"id\":\"p2\",\"label\":\"写真B（施工中）\",\"dataUrl\":\"\",\"layoutAnnotations\":[],\"layoutAnnotationsV2\":[]},{\"id\":\"p3\",\"label\":\"写真C（施工後）\",\"dataUrl\":\"\",\"layoutAnnotations\":[],\"layoutAnnotationsV2\":[]},{\"id\":\"p4\",\"label\":\"写真D（その他）\",\"dataUrl\":\"\",\"layoutAnnotations\":[],\"layoutAnnotationsV2\":[]}]}]"
+    },
+    {
+      "key": "sekou-tool-template-parties-v1",
+      "value": "[{\"id\":\"tmpl_party_01\",\"name\":\"体制表テンプレ（基本）\",\"createdAt\":\"2026-03-03T00:00:00.000Z\",\"payload\":{\"owner\":{\"enabled\":true,\"title\":\"発注者\",\"company\":\"デモ管理組合\",\"person\":\"山田 花子\",\"office\":\"管理事務所\",\"tel\":\"03-2000-0001\"},\"utility\":{\"enabled\":true,\"title\":\"電力会社\",\"company\":\"デモ電力\",\"person\":\"佐藤 次郎\",\"office\":\"東京支店\",\"tel\":\"03-2000-0002\"},\"contractor\":{\"enabled\":true,\"title\":\"施工会社\",\"company\":\"デモ電設株式会社\",\"person\":\"デモ 太郎\",\"office\":\"東京第一工事部\",\"tel\":\"03-1234-5678\"},\"management\":{\"enabled\":true,\"title\":\"管理会社\",\"company\":\"デモ管理サービス\",\"person\":\"高橋 三郎\",\"office\":\"設備課\",\"tel\":\"03-2000-0003\"},\"residents\":{\"enabled\":true,\"title\":\"居住者\",\"company\":\"居住者代表\",\"person\":\"鈴木 一郎\",\"office\":\"-\",\"tel\":\"03-2000-0004\"}}}]"
+    },
+    {
+      "key": "sekou-tool-template-layout-v1",
+      "value": "[{\"id\":\"tmpl_layout_01\",\"name\":\"配置図テンプレ（空）\",\"createdAt\":\"2026-03-03T00:00:00.000Z\",\"payload\":{\"layoutImageDataUrl\":\"\",\"layoutPhotos\":[{\"id\":\"layout_a\",\"label\":\"写真A（配置図）\",\"dataUrl\":\"\",\"layoutAnnotations\":[],\"layoutAnnotationsV2\":[]},{\"id\":\"layout_b\",\"label\":\"写真B（配置図）\",\"dataUrl\":\"\",\"layoutAnnotations\":[],\"layoutAnnotationsV2\":[]}],\"layoutAnnotations\":[],\"layoutAnnotationsV2\":[]}}]"
+    },
+    {
+      "key": "sekou-tool-users-v1",
+      "value": "[{\"id\":\"user_demo_admin\",\"name\":\"デモ管理者\",\"email\":\"admin.demo@example.com\",\"password\":\"demo1234\",\"role\":\"admin\",\"active\":true,\"approvalStatus\":\"approved\",\"approvedAt\":\"2026-03-03T00:00:00.000Z\",\"approvedById\":\"system\",\"approvedByName\":\"システム\",\"createdAt\":\"2026-03-03T00:00:00.000Z\",\"createdById\":\"system\",\"createdByName\":\"システム\",\"lastLoginAt\":\"\"},{\"id\":\"user_demo_editor\",\"name\":\"デモ編集者\",\"email\":\"editor.demo@example.com\",\"password\":\"demo1234\",\"role\":\"editor\",\"active\":true,\"approvalStatus\":\"approved\",\"approvedAt\":\"2026-03-03T00:00:00.000Z\",\"approvedById\":\"user_demo_admin\",\"approvedByName\":\"デモ管理者\",\"createdAt\":\"2026-03-03T00:00:00.000Z\",\"createdById\":\"user_demo_admin\",\"createdByName\":\"デモ管理者\",\"lastLoginAt\":\"\"}]"
+    },
+    {
+      "key": "sekou-auth-attempts-v1",
+      "value": "[]"
+    },
+    {
+      "key": "sekou-auth-login-guard-v1",
+      "value": "{}"
+    },
+    {
+      "key": "sekou-tool-audit-v1",
+      "value": "[]"
+    },
+    {
+      "key": "sekou-tool-revision-v1",
+      "value": "[]"
+    }
+  ]
+}
