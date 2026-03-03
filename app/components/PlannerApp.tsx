@@ -473,6 +473,17 @@ type UserCreateNotice = {
   text: string;
 };
 
+type LocalStorageExportItem = {
+  key: string;
+  value: string;
+};
+
+type LocalStorageExportPayload = {
+  app: "sekou-manual-editor";
+  exportedAt: string;
+  items: LocalStorageExportItem[];
+};
+
 type OutageWindow = Pick<Project, "outageDateStart" | "outageTimeStart" | "outageDateEnd" | "outageTimeEnd">;
 
 type OutageTraceEntry = {
@@ -2935,6 +2946,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   const layoutEditorHistorySerializedRef = useRef("");
   const layoutEditorHistorySuppressRef = useRef(false);
   const projectPickerRef = useRef<HTMLDivElement | null>(null);
+  const importFileInputRef = useRef<HTMLInputElement | null>(null);
   const projectsRef = useRef<Project[]>(projects);
 
   const persistProjectsToStorage = useCallback((targetProjects: Project[]): void => {
@@ -4299,6 +4311,98 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     }
     createRevision(selectedProject, `手動履歴保存 ${new Date().toLocaleString("ja-JP")}`);
     appendAudit("backup_save", "手動で履歴保存", selectedProject.projectId);
+  }
+
+  function exportLocalStorageData(): void {
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      const items: LocalStorageExportItem[] = [];
+      for (let i = 0; i < window.localStorage.length; i += 1) {
+        const key = window.localStorage.key(i);
+        if (!key) {
+          continue;
+        }
+        items.push({
+          key,
+          value: window.localStorage.getItem(key) ?? "",
+        });
+      }
+      items.sort((a, b) => a.key.localeCompare(b.key, "ja"));
+      const payload: LocalStorageExportPayload = {
+        app: "sekou-manual-editor",
+        exportedAt: new Date().toISOString(),
+        items,
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], {
+        type: "application/json;charset=utf-8",
+      });
+      const url = window.URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      const suffix = new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-");
+      anchor.href = url;
+      anchor.download = `sekou-localstorage-export-${suffix}.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      window.URL.revokeObjectURL(url);
+      setUserManageNotice({ type: "ok", text: `データをエクスポートしました（${items.length}件）。` });
+    } catch {
+      setUserManageNotice({ type: "error", text: "データのエクスポートに失敗しました。" });
+    }
+  }
+
+  function isLocalStorageExportPayload(value: unknown): value is LocalStorageExportPayload {
+    if (!value || typeof value !== "object") {
+      return false;
+    }
+    const candidate = value as Partial<LocalStorageExportPayload> & { items?: unknown };
+    if (candidate.app !== "sekou-manual-editor") {
+      return false;
+    }
+    if (!Array.isArray(candidate.items)) {
+      return false;
+    }
+    return candidate.items.every((item) => {
+      if (!item || typeof item !== "object") {
+        return false;
+      }
+      const record = item as Partial<LocalStorageExportItem>;
+      return typeof record.key === "string" && typeof record.value === "string";
+    });
+  }
+
+  function openImportFileDialog(): void {
+    importFileInputRef.current?.click();
+  }
+
+  async function importLocalStorageData(event: ChangeEvent<HTMLInputElement>): Promise<void> {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+    try {
+      const raw = await file.text();
+      const parsed: unknown = JSON.parse(raw);
+      if (!isLocalStorageExportPayload(parsed)) {
+        throw new Error("invalid-structure");
+      }
+      const ok = window.confirm("現在のデータを上書きしてインポートします。よろしいですか？");
+      if (!ok) {
+        return;
+      }
+      window.localStorage.clear();
+      parsed.items.forEach((item) => {
+        window.localStorage.setItem(item.key, item.value);
+      });
+      alert("データをインポートしました。画面を再読み込みします。");
+      window.location.reload();
+    } catch {
+      alert("インポートに失敗しました。JSON形式とデータ構造を確認してください。");
+    } finally {
+      event.target.value = "";
+    }
   }
 
   function restoreRevision(): void {
@@ -7753,6 +7857,27 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
                   <button type="button" className="btn btn-subtle tracking-history-action-btn" onClick={saveManualRevision} disabled={!canEdit}>
                     <span className="btn-icon"><UiIcon name="save" /></span>現在内容を履歴保存
                   </button>
+                </div>
+                <div className="tracking-history-row">
+                  <div className="mini">この端末のlocalStorage全データをJSONでダウンロードします。</div>
+                  <button type="button" className="btn btn-subtle tracking-history-action-btn" onClick={exportLocalStorageData}>
+                    <span className="btn-icon"><UiIcon name="save" /></span>データをエクスポート
+                  </button>
+                </div>
+                <div className="tracking-history-row">
+                  <div className="mini">エクスポート済みJSONを読み込み、localStorageへ上書き保存します。</div>
+                  <div>
+                    <input
+                      ref={importFileInputRef}
+                      type="file"
+                      accept="application/json,.json"
+                      onChange={importLocalStorageData}
+                      style={{ display: "none" }}
+                    />
+                    <button type="button" className="btn btn-subtle tracking-history-action-btn" onClick={openImportFileDialog}>
+                      <span className="btn-icon"><UiIcon name="upload" /></span>データをインポート
+                    </button>
+                  </div>
                 </div>
                 <div className="tracking-history-row">
                   <label className="field tracking-revision-select">
