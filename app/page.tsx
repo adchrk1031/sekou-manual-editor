@@ -10,6 +10,7 @@ import {
   registerInitialAdmin,
   registerSelfUser,
 } from "./components/auth";
+import { pullSharedStorageSnapshot, pushSharedStorageSnapshot } from "./components/sharedStorage";
 
 type AuthTab = "register" | "login";
 
@@ -52,14 +53,25 @@ export default function Page() {
   const isInitialSetup = useMemo(() => !hasUsers, [hasUsers]);
 
   useEffect(() => {
-    const users = ensureUsers();
-    setHasUsers(users.length > 0);
-    setAuthTab(users.length > 0 ? "login" : "register");
-    if (getSessionUser()) {
-      router.replace("/menu");
-      return;
-    }
-    setHydrated(true);
+    let cancelled = false;
+    const bootstrap = async () => {
+      await pullSharedStorageSnapshot();
+      if (cancelled) {
+        return;
+      }
+      const users = ensureUsers();
+      setHasUsers(users.length > 0);
+      setAuthTab(users.length > 0 ? "login" : "register");
+      if (getSessionUser()) {
+        router.replace("/menu");
+        return;
+      }
+      setHydrated(true);
+    };
+    void bootstrap();
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   function refreshUsersState(): void {
@@ -67,18 +79,23 @@ export default function Page() {
     setHasUsers(users.length > 0);
   }
 
-  function onLogin(): void {
+  async function onLogin(): Promise<void> {
     setMessage(null);
+    await pullSharedStorageSnapshot();
+    refreshUsersState();
     const result = loginWithCredentials(loginEmail, loginPassword, "login_page");
     if (result.user) {
+      await pushSharedStorageSnapshot();
       router.push("/menu");
       return;
     }
     setMessage({ type: "error", text: getLoginFailureMessage(result.reason) });
   }
 
-  function onRegister(): void {
+  async function onRegister(): Promise<void> {
     setMessage(null);
+    await pullSharedStorageSnapshot();
+    refreshUsersState();
     const name = registerName.trim();
     const email = registerEmail.trim().toLowerCase();
     const password = registerPassword;
@@ -100,9 +117,11 @@ export default function Page() {
         refreshUsersState();
         return;
       }
+      await pushSharedStorageSnapshot();
       const loginResult = loginWithCredentials(admin.email, admin.password, "login_page");
       refreshUsersState();
       if (loginResult.user) {
+        await pushSharedStorageSnapshot();
         router.push("/menu");
         return;
       }
@@ -114,6 +133,7 @@ export default function Page() {
     }
 
     const created = registerSelfUser(name, email, password);
+    await pushSharedStorageSnapshot();
     refreshUsersState();
     if (!created.user) {
       if (created.error === "duplicate_email") {

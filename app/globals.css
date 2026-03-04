@@ -3535,6 +3535,15 @@ p {
   padding: 8px;
 }
 
+.annotation-toolbar-row-style textarea.control {
+  min-height: 72px;
+  resize: vertical;
+}
+
+.annotation-toolbar-row-style .field-inline.field-inline-wide {
+  align-items: flex-start;
+}
+
 .annotation-color-preset-group {
   display: inline-flex;
   align-items: center;

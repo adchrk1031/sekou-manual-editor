@@ -1,5 +1,7 @@
 "use client";
 
+import { pushSharedStorageSnapshot } from "./sharedStorage";
+
 export type AuthRole = "admin" | "editor" | "viewer";
 export type UserApprovalStatus = "approved" | "pending" | "rejected";
 
@@ -309,6 +311,10 @@ function uid(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 8)}_${Date.now().toString(36)}`;
 }
 
+function syncSharedSnapshotInBackground(): void {
+  void pushSharedStorageSnapshot();
+}
+
 export function ensureUsers(): AuthUser[] {
   if (typeof window === "undefined") {
     return [];
@@ -357,6 +363,7 @@ export function registerInitialAdmin(_name: string, _email: string, _password: s
     createdByName: "初期登録",
   };
   localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(sanitizeUsers([next])));
+  syncSharedSnapshotInBackground();
   return next;
 }
 
@@ -387,6 +394,7 @@ export function registerSelfUser(name: string, email: string, password: string):
     createdByName: "本人申請（セルフ登録）",
   };
   localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(sanitizeUsers([next, ...users])));
+  syncSharedSnapshotInBackground();
   return { user: next };
 }
 
@@ -414,6 +422,7 @@ export function appendLoginAttempt(entry: Omit<LoginAttemptLog, "id" | "at">): v
   };
   const logs = getLoginAttempts();
   localStorage.setItem(ACCESS_LOG_STORAGE_KEY, JSON.stringify([next, ...logs].slice(0, MAX_ACCESS_LOGS)));
+  syncSharedSnapshotInBackground();
 }
 
 export function getSessionUser(): AuthUser | null {
@@ -492,6 +501,7 @@ export function loginWithCredentials(
   writeSession(foundByEmail.id);
   clearLoginGuard(targetEmail);
   appendLoginAttempt({ email: foundByEmail.email, userName: foundByEmail.name, result: "success", source });
+  syncSharedSnapshotInBackground();
   return { user: { ...foundByEmail, lastLoginAt: new Date().toISOString() } };
 }
 
@@ -539,6 +549,7 @@ export function loginWithGoogleEmail(
   writeSession(found.id);
   clearLoginGuard(targetEmail);
   appendLoginAttempt({ email: found.email, userName: found.name, result: "success", source });
+  syncSharedSnapshotInBackground();
   return { user: { ...found, lastLoginAt: new Date().toISOString() } };
 }
 

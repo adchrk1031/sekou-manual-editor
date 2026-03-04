@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { clearSession, getSessionUser, touchSessionActivity } from "../components/auth";
+import { pullSharedStorageSnapshot } from "../components/sharedStorage";
 
 function MenuCardIcon({ type }: { type: "editor" | "csv" | "tracking" }) {
   const common = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
@@ -37,7 +38,8 @@ export default function MenuPage() {
   const [userName, setUserName] = useState("");
 
   useEffect(() => {
-    const checkSession = (): void => {
+    const checkSession = async (): Promise<void> => {
+      await pullSharedStorageSnapshot();
       const user = getSessionUser();
       if (!user) {
         setUserName("");
@@ -46,8 +48,10 @@ export default function MenuPage() {
       }
       setUserName(user.name);
     };
-    checkSession();
-    const timer = window.setInterval(checkSession, 15 * 1000);
+    void checkSession();
+    const timer = window.setInterval(() => {
+      void checkSession();
+    }, 15 * 1000);
     const onActivity = (): void => {
       touchSessionActivity();
     };
@@ -55,7 +59,7 @@ export default function MenuPage() {
       if (event.key && !event.key.startsWith("sekou-tool-session")) {
         return;
       }
-      checkSession();
+      void checkSession();
     };
     window.addEventListener("pointerdown", onActivity, { passive: true });
     window.addEventListener("keydown", onActivity);

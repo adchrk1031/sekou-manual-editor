@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { CSSProperties, ChangeEvent, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode, WheelEvent as ReactWheelEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { clearSession, ensureUsers, getLoginAttempts, getLoginFailureMessage, getSessionUser, loginWithCredentials, type LoginAttemptLog } from "./auth";
+import { SHARED_STORAGE_UPDATED_EVENT, pullSharedStorageSnapshot, pushSharedStorageSnapshot } from "./sharedStorage";
 
 type WorkCode = "KOUATSU_CABLE" | "UGS" | "PAS" | "GROUND_A" | "GROUND_B" | "GROUND_C";
 
@@ -81,6 +82,9 @@ type LayoutTextAnnotation = LayoutAnnotationBase & {
   text: string;
   fontSize: number;
   fontWeight: number;
+  fontFamily: string;
+  textStrokeColor: string;
+  textStrokeWidth: number;
   textAlign: LayoutTextAlign;
 };
 
@@ -104,6 +108,9 @@ type LayoutAnnotationV2Style = {
   textColor: string;
   fontSize: number;
   fontWeight: number;
+  fontFamily: string;
+  textStrokeColor: string;
+  textStrokeWidth: number;
   textAlign: LayoutTextAlign;
 };
 
@@ -534,10 +541,21 @@ const DEFAULT_LAYOUT_MAX_SIZE = 1600;
 const LAYOUT_CANVAS_SIZE = 1000;
 const MAX_ANNOTATION_HISTORY = 150;
 const DEFAULT_ANNOTATION_COLOR = "#d92d20";
+const DEFAULT_ANNOTATION_STROKE_WIDTH = 1;
 const DEFAULT_ANNOTATION_FILL_COLOR = "#f59e0b";
 const DEFAULT_ANNOTATION_FILL_OPACITY = 0.22;
+const DEFAULT_TEXT_FONT_FAMILY = "\"Noto Sans JP\", \"Hiragino Kaku Gothic ProN\", \"Yu Gothic\", sans-serif";
+const DEFAULT_TEXT_STROKE_COLOR = "#ffffff";
+const DEFAULT_TEXT_STROKE_WIDTH = 3;
 const LAYOUT_SNAP_THRESHOLD = 10;
 const USER_LIST_VISIBLE_COUNT = 5;
+const LAYOUT_TEXT_FONT_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: DEFAULT_TEXT_FONT_FAMILY, label: "ゴシック（標準）" },
+  { value: "\"Yu Mincho\", \"Hiragino Mincho ProN\", serif", label: "明朝" },
+  { value: "\"Meiryo\", \"Yu Gothic\", sans-serif", label: "メイリオ" },
+  { value: "\"Arial\", sans-serif", label: "Arial" },
+  { value: "\"Courier New\", monospace", label: "等幅（Monospace）" },
+];
 
 const TEST_EDITOR_USER_PRESETS: Array<{ id: string; name: string; email: string; password: string }> = [
   { id: "user_test_editor_01", name: "テスト編集者1", email: "test.editor01@example.com", password: "testpass01" },
@@ -906,6 +924,10 @@ function LayoutAnnotatedImage({
               />
             );
           }
+          const textStrokeWidth = normalizeTextStrokeWidth(annotation.textStrokeWidth, DEFAULT_TEXT_STROKE_WIDTH);
+          const textStrokeColor = textStrokeWidth > 0
+            ? normalizeAnnotationColor(annotation.textStrokeColor || DEFAULT_TEXT_STROKE_COLOR)
+            : "transparent";
           return (
             <text
               key={annotation.id}
@@ -914,9 +936,10 @@ function LayoutAnnotatedImage({
               fill={annotation.color}
               fontSize={annotation.fontSize}
               fontWeight={annotation.fontWeight}
+              fontFamily={annotation.fontFamily || DEFAULT_TEXT_FONT_FAMILY}
               textAnchor={annotation.textAlign === "center" ? "middle" : annotation.textAlign === "right" ? "end" : "start"}
               transform={rotation ? `rotate(${rotation} ${annotation.x} ${annotation.y})` : undefined}
-              style={{ paintOrder: "stroke", stroke: "rgba(255,255,255,0.9)", strokeWidth: 3 }}
+              style={{ paintOrder: "stroke", stroke: textStrokeColor, strokeWidth: textStrokeWidth }}
             >
               {String(annotation.text || "注記").split("\n").map((line, index) => (
                 <tspan key={`${annotation.id}_line_${index}`} x={annotation.x} dy={index === 0 ? 0 : annotation.fontSize * 1.25}>
@@ -1159,12 +1182,20 @@ function clampCanvasCoord(value: number): number {
   return clamp(value, 0, LAYOUT_CANVAS_SIZE);
 }
 
-function normalizeStrokeWidth(value: unknown, fallback = 5): number {
+function normalizeStrokeWidth(value: unknown, fallback = DEFAULT_ANNOTATION_STROKE_WIDTH): number {
   const num = Number(value);
   if (!Number.isFinite(num)) {
     return fallback;
   }
   return clamp(Math.round(num), 1, 16);
+}
+
+function normalizeTextStrokeWidth(value: unknown, fallback = DEFAULT_TEXT_STROKE_WIDTH): number {
+  const num = Number(value);
+  if (!Number.isFinite(num)) {
+    return fallback;
+  }
+  return clamp(Math.round(num), 0, 12);
 }
 
 function normalizeFillOpacity(value: unknown, fallback = DEFAULT_ANNOTATION_FILL_OPACITY): number {
@@ -1205,6 +1236,12 @@ function normalizeTextAlign(value: unknown): LayoutTextAlign {
     return raw;
   }
   return "left";
+}
+
+function normalizeFontFamily(value: unknown): string {
+  const raw = String(value ?? "").trim();
+  const matched = LAYOUT_TEXT_FONT_OPTIONS.find((option) => option.value === raw);
+  return matched?.value || DEFAULT_TEXT_FONT_FAMILY;
 }
 
 function parseNumericInput(value: string, fallback: number): number {
@@ -1326,12 +1363,15 @@ function createDefaultLayoutAnnotationV2Style(
 ): LayoutAnnotationV2Style {
   return {
     stroke: normalizeAnnotationColor(value?.stroke),
-    strokeWidth: normalizeStrokeWidth(value?.strokeWidth, 6),
+    strokeWidth: normalizeStrokeWidth(value?.strokeWidth, DEFAULT_ANNOTATION_STROKE_WIDTH),
     fill: normalizeAnnotationColor(value?.fill || DEFAULT_ANNOTATION_FILL_COLOR),
     fillOpacity: normalizeFillOpacity(value?.fillOpacity, 0),
     textColor: normalizeAnnotationColor(value?.textColor),
     fontSize: normalizeFontSize(value?.fontSize, 26),
     fontWeight: normalizeFontWeight(value?.fontWeight, 700),
+    fontFamily: normalizeFontFamily(value?.fontFamily),
+    textStrokeColor: normalizeAnnotationColor(value?.textStrokeColor || DEFAULT_TEXT_STROKE_COLOR),
+    textStrokeWidth: normalizeTextStrokeWidth(value?.textStrokeWidth, DEFAULT_TEXT_STROKE_WIDTH),
     textAlign: normalizeTextAlign(value?.textAlign),
   };
 }
@@ -1383,7 +1423,7 @@ function normalizeLayoutAnnotations(value: unknown): LayoutAnnotation[] {
         fromY: clampCanvasCoord(Number(item.fromY ?? 0)),
         toX: clampCanvasCoord(Number(item.toX ?? 0)),
         toY: clampCanvasCoord(Number(item.toY ?? 0)),
-        strokeWidth: normalizeStrokeWidth(item.strokeWidth, 6),
+        strokeWidth: normalizeStrokeWidth(item.strokeWidth, DEFAULT_ANNOTATION_STROKE_WIDTH),
         arrowHead: item.arrowHead === undefined ? true : normalizeAnnotationVisible(item.arrowHead),
       });
       return;
@@ -1408,7 +1448,7 @@ function normalizeLayoutAnnotations(value: unknown): LayoutAnnotation[] {
         y,
         width,
         height,
-        strokeWidth: normalizeStrokeWidth(item.strokeWidth, 6),
+        strokeWidth: normalizeStrokeWidth(item.strokeWidth, DEFAULT_ANNOTATION_STROKE_WIDTH),
       });
       return;
     }
@@ -1433,7 +1473,7 @@ function normalizeLayoutAnnotations(value: unknown): LayoutAnnotation[] {
         width,
         height,
         sides: normalizePolygonSides(item.sides, 6),
-        strokeWidth: normalizeStrokeWidth(item.strokeWidth, 6),
+        strokeWidth: normalizeStrokeWidth(item.strokeWidth, DEFAULT_ANNOTATION_STROKE_WIDTH),
       });
       return;
     }
@@ -1452,6 +1492,9 @@ function normalizeLayoutAnnotations(value: unknown): LayoutAnnotation[] {
         text: String(item.text ?? "注記"),
         fontSize: normalizeFontSize(item.fontSize, 26),
         fontWeight: normalizeFontWeight(item.fontWeight, 700),
+        fontFamily: normalizeFontFamily(item.fontFamily),
+        textStrokeColor: normalizeAnnotationColor(item.textStrokeColor || DEFAULT_TEXT_STROKE_COLOR),
+        textStrokeWidth: normalizeTextStrokeWidth(item.textStrokeWidth, DEFAULT_TEXT_STROKE_WIDTH),
         textAlign: normalizeTextAlign(item.textAlign),
       });
     }
@@ -1541,6 +1584,9 @@ function legacyLayoutAnnotationsToV2(annotations: LayoutAnnotation[]): LayoutAnn
         textColor: annotation.color,
         fontSize: annotation.fontSize,
         fontWeight: annotation.fontWeight,
+        fontFamily: annotation.fontFamily,
+        textStrokeColor: annotation.textStrokeColor,
+        textStrokeWidth: annotation.textStrokeWidth,
         textAlign: annotation.textAlign,
       }),
     };
@@ -1565,7 +1611,7 @@ function layoutAnnotationsV2ToLegacy(annotations: LayoutAnnotationV2[]): LayoutA
         fromY: p1.y,
         toX: p2.x,
         toY: p2.y,
-        strokeWidth: normalizeStrokeWidth(annotation.style.strokeWidth, 6),
+        strokeWidth: normalizeStrokeWidth(annotation.style.strokeWidth, DEFAULT_ANNOTATION_STROKE_WIDTH),
         arrowHead: annotation.arrowHead !== false,
       };
     }
@@ -1593,7 +1639,7 @@ function layoutAnnotationsV2ToLegacy(annotations: LayoutAnnotationV2[]): LayoutA
         y: clampCanvasCoord(top),
         width: clamp(right - left, 1, LAYOUT_CANVAS_SIZE),
         height: clamp(bottom - top, 1, LAYOUT_CANVAS_SIZE),
-        strokeWidth: normalizeStrokeWidth(annotation.style.strokeWidth, 6),
+        strokeWidth: normalizeStrokeWidth(annotation.style.strokeWidth, DEFAULT_ANNOTATION_STROKE_WIDTH),
       };
     }
     if (annotation.type === "polygon") {
@@ -1621,7 +1667,7 @@ function layoutAnnotationsV2ToLegacy(annotations: LayoutAnnotationV2[]): LayoutA
         width: clamp(right - left, 1, LAYOUT_CANVAS_SIZE),
         height: clamp(bottom - top, 1, LAYOUT_CANVAS_SIZE),
         sides: normalizePolygonSides(annotation.sides, 6),
-        strokeWidth: normalizeStrokeWidth(annotation.style.strokeWidth, 6),
+        strokeWidth: normalizeStrokeWidth(annotation.style.strokeWidth, DEFAULT_ANNOTATION_STROKE_WIDTH),
       };
     }
     const p = applyV2TransformToPoint(annotation.x, annotation.y, annotation.transform);
@@ -1639,6 +1685,9 @@ function layoutAnnotationsV2ToLegacy(annotations: LayoutAnnotationV2[]): LayoutA
       text: annotation.text || "注記",
       fontSize: normalizeFontSize(annotation.style.fontSize, 26),
       fontWeight: normalizeFontWeight(annotation.style.fontWeight, 700),
+      fontFamily: normalizeFontFamily(annotation.style.fontFamily),
+      textStrokeColor: normalizeAnnotationColor(annotation.style.textStrokeColor || DEFAULT_TEXT_STROKE_COLOR),
+      textStrokeWidth: normalizeTextStrokeWidth(annotation.style.textStrokeWidth, DEFAULT_TEXT_STROKE_WIDTH),
       textAlign: normalizeTextAlign(annotation.style.textAlign),
     };
   });
@@ -2849,6 +2898,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   const [projectSearchText, setProjectSearchText] = useState<string>("");
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [hydrated, setHydrated] = useState(false);
+  const [sharedStorageReady, setSharedStorageReady] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState("-");
   const [importStatus, setImportStatus] = useState("CSV未取込");
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
@@ -2906,11 +2956,14 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   const [layoutEditorTool, setLayoutEditorTool] = useState<LayoutEditorTool>("select");
   const [layoutEditorArrowHeadEnabled, setLayoutEditorArrowHeadEnabled] = useState(true);
   const [layoutEditorColor, setLayoutEditorColor] = useState(DEFAULT_ANNOTATION_COLOR);
-  const [layoutEditorStrokeWidth, setLayoutEditorStrokeWidth] = useState(6);
+  const [layoutEditorStrokeWidth, setLayoutEditorStrokeWidth] = useState(DEFAULT_ANNOTATION_STROKE_WIDTH);
   const [layoutEditorFillColor, setLayoutEditorFillColor] = useState(DEFAULT_ANNOTATION_FILL_COLOR);
   const [layoutEditorFillOpacity, setLayoutEditorFillOpacity] = useState(DEFAULT_ANNOTATION_FILL_OPACITY);
   const [layoutEditorPolygonSides, setLayoutEditorPolygonSides] = useState(6);
   const [layoutEditorText, setLayoutEditorText] = useState("注意");
+  const [layoutEditorFontFamily, setLayoutEditorFontFamily] = useState(DEFAULT_TEXT_FONT_FAMILY);
+  const [layoutEditorTextStrokeColor, setLayoutEditorTextStrokeColor] = useState(DEFAULT_TEXT_STROKE_COLOR);
+  const [layoutEditorTextStrokeWidth, setLayoutEditorTextStrokeWidth] = useState(DEFAULT_TEXT_STROKE_WIDTH);
   const [layoutEditorAnnotations, setLayoutEditorAnnotations] = useState<LayoutAnnotation[]>([]);
   const [layoutEditorSelectedId, setLayoutEditorSelectedId] = useState("");
   const [layoutEditorSelectedIds, setLayoutEditorSelectedIds] = useState<string[]>([]);
@@ -2940,6 +2993,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   const projectRefCacheRef = useRef<Record<string, Project>>({});
   const projectSerializedCacheRef = useRef<Record<string, string>>({});
   const saveTimerRef = useRef<number | null>(null);
+  const sharedSyncTimerRef = useRef<number | null>(null);
   const outageTraceSeqRef = useRef(0);
   const layoutEditorSvgRef = useRef<SVGSVGElement | null>(null);
   const layoutEditorStageRef = useRef<HTMLDivElement | null>(null);
@@ -2988,7 +3042,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     projectsRef.current = projects;
   }, [projects]);
 
-  useEffect(() => {
+  const loadWorkspaceStateFromStorage = useCallback((preserveSelection: boolean): void => {
     try {
       let loadedProjects: Project[] = [];
       const loadedSerialized: Record<string, string> = {};
@@ -3029,11 +3083,21 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
         }
       }
 
-      if (loadedProjects.length) {
+      if (loadedProjects.length > 0) {
         setProjects(loadedProjects);
-        setSelectedId("");
+        setSelectedId((prev) => {
+          if (!preserveSelection) {
+            return "";
+          }
+          return loadedProjects.some((project) => project.projectId === prev) ? prev : "";
+        });
         projectRefCacheRef.current = Object.fromEntries(loadedProjects.map((project) => [project.projectId, project]));
         projectSerializedCacheRef.current = loadedSerialized;
+      } else if (!preserveSelection) {
+        setProjects([]);
+        setSelectedId("");
+        projectRefCacheRef.current = {};
+        projectSerializedCacheRef.current = {};
       }
 
       if (legacyDateRisks.length > 0 && localStorage.getItem(LEGACY_DATE_TRACE_DEBUG_KEY) === "1") {
@@ -3051,6 +3115,9 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
           setCsvHeaders(headers);
           setCsvDraftRows(rows);
         }
+      } else {
+        setCsvHeaders([]);
+        setCsvDraftRows([]);
       }
 
       const loadedUsers = ensureUsers() as UserAccount[];
@@ -3079,6 +3146,8 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
         if (Array.isArray(parsed)) {
           setAuditLogs(parsed);
         }
+      } else {
+        setAuditLogs([]);
       }
 
       const revisionRaw = localStorage.getItem(REVISION_STORAGE_KEY);
@@ -3101,12 +3170,48 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
           });
           setRevisions(migrated);
         }
+      } else {
+        setRevisions([]);
       }
     } catch {
-      // keep seed data
+      // keep existing in-memory state when storage payload is broken
     }
-    setHydrated(true);
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const bootstrapSharedStorage = async () => {
+      await pullSharedStorageSnapshot();
+      if (!cancelled) {
+        setSharedStorageReady(true);
+      }
+    };
+    void bootstrapSharedStorage();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!sharedStorageReady) {
+      return;
+    }
+    loadWorkspaceStateFromStorage(false);
+    setHydrated(true);
+  }, [sharedStorageReady, loadWorkspaceStateFromStorage]);
+
+  useEffect(() => {
+    if (!hydrated) {
+      return;
+    }
+    const handleSharedStorageUpdated = () => {
+      loadWorkspaceStateFromStorage(true);
+    };
+    window.addEventListener(SHARED_STORAGE_UPDATED_EVENT, handleSharedStorageUpdated);
+    return () => {
+      window.removeEventListener(SHARED_STORAGE_UPDATED_EVENT, handleSharedStorageUpdated);
+    };
+  }, [hydrated, loadWorkspaceStateFromStorage]);
 
   useEffect(() => {
     if (!hydrated) {
@@ -3125,6 +3230,35 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
       }
     };
   }, [projects, hydrated, persistProjectsToStorage]);
+
+  useEffect(() => {
+    if (!hydrated) {
+      return;
+    }
+    if (sharedSyncTimerRef.current) {
+      window.clearTimeout(sharedSyncTimerRef.current);
+    }
+    sharedSyncTimerRef.current = window.setTimeout(() => {
+      void pushSharedStorageSnapshot();
+    }, 900);
+    return () => {
+      if (sharedSyncTimerRef.current) {
+        window.clearTimeout(sharedSyncTimerRef.current);
+      }
+    };
+  }, [
+    projects,
+    users,
+    auditLogs,
+    revisions,
+    csvHeaders,
+    csvDraftRows,
+    scheduleTemplates,
+    detailPhotoTemplates,
+    partyTemplates,
+    layoutTemplates,
+    hydrated,
+  ]);
 
   useEffect(() => {
     if (!hydrated) {
@@ -3654,6 +3788,14 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     }
     setLayoutEditorColor(selectedLayoutAnnotation.color);
     if (selectedLayoutAnnotation.type === "text") {
+      setLayoutEditorText(selectedLayoutAnnotation.text || "注記");
+      setLayoutEditorFontFamily(normalizeFontFamily(selectedLayoutAnnotation.fontFamily));
+      setLayoutEditorTextStrokeColor(
+        normalizeAnnotationColor(selectedLayoutAnnotation.textStrokeColor || DEFAULT_TEXT_STROKE_COLOR),
+      );
+      setLayoutEditorTextStrokeWidth(
+        normalizeTextStrokeWidth(selectedLayoutAnnotation.textStrokeWidth, DEFAULT_TEXT_STROKE_WIDTH),
+      );
       return;
     }
     setLayoutEditorStrokeWidth(selectedLayoutAnnotation.strokeWidth);
@@ -4113,7 +4255,10 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     console.info("[sekou][outage-trace]", entry);
   }
 
-  function login(): void {
+  async function login(): Promise<void> {
+    await pullSharedStorageSnapshot();
+    setUsers(ensureUsers() as UserAccount[]);
+    setAccessLogs(getLoginAttempts());
     const email = loginEmail.trim().toLowerCase();
     const result = loginWithCredentials(email, loginPassword, "tracking_page");
     if (!result.user) {
@@ -4123,6 +4268,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
       return;
     }
     const user = result.user;
+    await pushSharedStorageSnapshot();
     setUsers(ensureUsers() as UserAccount[]);
     setAccessLogs(getLoginAttempts());
     setCurrentUserId(user.id);
@@ -4141,10 +4287,13 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     router.replace("/");
   }
 
-  function createUser(roleOverride?: UserRole): void {
+  async function createUser(roleOverride?: UserRole): Promise<void> {
     if (!canAdmin) {
       return;
     }
+    await pullSharedStorageSnapshot();
+    const freshUsers = ensureUsers() as UserAccount[];
+    setUsers(freshUsers);
     const name = newUserName.trim();
     const email = newUserEmail.trim().toLowerCase();
     const password = newUserPassword.trim();
@@ -4157,7 +4306,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
       setUserCreateNotice({ type: "error", text: "メール形式が正しくありません。Gmail登録も可能です。" });
       return;
     }
-    if (users.some((user) => user.email.toLowerCase() === email)) {
+    if (freshUsers.some((user) => user.email.toLowerCase() === email)) {
       setUserCreateNotice({ type: "error", text: "このメールアドレスは既に登録済みです。" });
       return;
     }
@@ -5253,10 +5402,13 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     setLayoutEditorTool("select");
     setLayoutEditorArrowHeadEnabled(true);
     setLayoutEditorColor(DEFAULT_ANNOTATION_COLOR);
-    setLayoutEditorStrokeWidth(6);
+    setLayoutEditorStrokeWidth(DEFAULT_ANNOTATION_STROKE_WIDTH);
     setLayoutEditorFillColor(DEFAULT_ANNOTATION_FILL_COLOR);
     setLayoutEditorFillOpacity(DEFAULT_ANNOTATION_FILL_OPACITY);
     setLayoutEditorPolygonSides(6);
+    setLayoutEditorFontFamily(DEFAULT_TEXT_FONT_FAMILY);
+    setLayoutEditorTextStrokeColor(DEFAULT_TEXT_STROKE_COLOR);
+    setLayoutEditorTextStrokeWidth(DEFAULT_TEXT_STROKE_WIDTH);
     setLayoutEditorZoom(1);
     setLayoutEditorPan({ x: 0, y: 0 });
     setLayoutEditorPanState(null);
@@ -5738,6 +5890,12 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
           return {
             ...annotation,
             color: layoutEditorColor,
+            fontFamily: normalizeFontFamily(layoutEditorFontFamily),
+            textStrokeColor: normalizeAnnotationColor(layoutEditorTextStrokeColor),
+            textStrokeWidth: normalizeTextStrokeWidth(
+              layoutEditorTextStrokeWidth,
+              annotation.textStrokeWidth ?? DEFAULT_TEXT_STROKE_WIDTH,
+            ),
           };
         }
         if (annotation.type === "polygon") {
@@ -6319,6 +6477,9 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
         text,
         fontSize: 28,
         fontWeight: 700,
+        fontFamily: normalizeFontFamily(layoutEditorFontFamily),
+        textStrokeColor: normalizeAnnotationColor(layoutEditorTextStrokeColor),
+        textStrokeWidth: normalizeTextStrokeWidth(layoutEditorTextStrokeWidth, DEFAULT_TEXT_STROKE_WIDTH),
         textAlign: "left",
         rotation: 0,
       };
@@ -9002,8 +9163,18 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
             </div>
             <div className="annotation-toolbar-row annotation-toolbar-row-style">
               <label className="field-inline">
-                <span>線色</span>
-                <input type="color" value={layoutEditorColor} onChange={(event) => setLayoutEditorColor(event.target.value)} />
+                <span>{layoutEditorTool === "text" || selectedLayoutAnnotation?.type === "text" ? "文字色" : "線色"}</span>
+                <input
+                  type="color"
+                  value={layoutEditorColor}
+                  onChange={(event) => {
+                    const nextColor = normalizeAnnotationColor(event.target.value);
+                    setLayoutEditorColor(nextColor);
+                    if (selectedLayoutAnnotation?.type === "text") {
+                      updateLayoutEditorAnnotation(selectedLayoutAnnotation.id, { color: nextColor });
+                    }
+                  }}
+                />
               </label>
               <label className="field-inline">
                 <span>太さ {layoutEditorStrokeWidth}px</span>
@@ -9076,14 +9247,64 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
                 <>
                   <label className="field-inline field-inline-wide">
                     <span>{selectedLayoutAnnotation?.type === "text" ? "選択テキスト" : "追加テキスト"}</span>
-                    <input
+                    <textarea
                       className="control"
+                      rows={3}
+                      spellCheck={false}
                       value={selectedLayoutAnnotation?.type === "text" ? selectedLayoutAnnotation.text : layoutEditorText}
                       onChange={(event) => {
                         if (selectedLayoutAnnotation?.type === "text") {
                           updateLayoutEditorAnnotation(selectedLayoutAnnotation.id, { text: event.target.value });
                         } else {
                           setLayoutEditorText(event.target.value);
+                        }
+                      }}
+                    />
+                  </label>
+                  <label className="field-inline">
+                    <span>フォント</span>
+                    <select
+                      className="control"
+                      value={selectedLayoutAnnotation?.type === "text" ? selectedLayoutAnnotation.fontFamily : layoutEditorFontFamily}
+                      onChange={(event) => {
+                        const nextFamily = normalizeFontFamily(event.target.value);
+                        setLayoutEditorFontFamily(nextFamily);
+                        if (selectedLayoutAnnotation?.type === "text") {
+                          updateLayoutEditorAnnotation(selectedLayoutAnnotation.id, { fontFamily: nextFamily });
+                        }
+                      }}
+                    >
+                      {LAYOUT_TEXT_FONT_OPTIONS.map((option) => (
+                        <option key={`text_font_primary_${option.value}`} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field-inline">
+                    <span>縁色</span>
+                    <input
+                      type="color"
+                      value={selectedLayoutAnnotation?.type === "text" ? selectedLayoutAnnotation.textStrokeColor : layoutEditorTextStrokeColor}
+                      onChange={(event) => {
+                        const nextColor = normalizeAnnotationColor(event.target.value);
+                        setLayoutEditorTextStrokeColor(nextColor);
+                        if (selectedLayoutAnnotation?.type === "text") {
+                          updateLayoutEditorAnnotation(selectedLayoutAnnotation.id, { textStrokeColor: nextColor });
+                        }
+                      }}
+                    />
+                  </label>
+                  <label className="field-inline">
+                    <span>縁 {selectedLayoutAnnotation?.type === "text" ? selectedLayoutAnnotation.textStrokeWidth : layoutEditorTextStrokeWidth}px</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={12}
+                      value={selectedLayoutAnnotation?.type === "text" ? selectedLayoutAnnotation.textStrokeWidth : layoutEditorTextStrokeWidth}
+                      onChange={(event) => {
+                        const nextWidth = normalizeTextStrokeWidth(event.target.value, DEFAULT_TEXT_STROKE_WIDTH);
+                        setLayoutEditorTextStrokeWidth(nextWidth);
+                        if (selectedLayoutAnnotation?.type === "text") {
+                          updateLayoutEditorAnnotation(selectedLayoutAnnotation.id, { textStrokeWidth: nextWidth });
                         }
                       }}
                     />
@@ -9247,7 +9468,13 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
                       ) : null}
                       <label className="field-inline field-inline-wide">
                         <span>追加テキスト</span>
-                        <input className="control" value={layoutEditorText} onChange={(event) => setLayoutEditorText(event.target.value)} />
+                        <textarea
+                          className="control"
+                          rows={3}
+                          spellCheck={false}
+                          value={layoutEditorText}
+                          onChange={(event) => setLayoutEditorText(event.target.value)}
+                        />
                       </label>
                       <button type="button" className="btn btn-subtle" onClick={applyEditorStyleToSelectedAnnotation} disabled={!layoutEditorSelectedIds.length}>
                         選択要素にスタイル適用
@@ -9315,6 +9542,52 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
                         onChange={(event) => {
                           updateLayoutEditorAnnotation(selectedLayoutAnnotation.id, { color: event.target.value });
                           setLayoutEditorColor(event.target.value);
+                        }}
+                      />
+                    </label>
+                    <label className="field-inline">
+                      <span>フォント</span>
+                      <select
+                        className="control"
+                        value={selectedLayoutAnnotation.fontFamily}
+                        onChange={(event) => {
+                          const nextFamily = normalizeFontFamily(event.target.value);
+                          updateLayoutEditorAnnotation(selectedLayoutAnnotation.id, { fontFamily: nextFamily });
+                          setLayoutEditorFontFamily(nextFamily);
+                        }}
+                      >
+                        {LAYOUT_TEXT_FONT_OPTIONS.map((option) => (
+                          <option key={`text_font_advanced_${option.value}`} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field-inline">
+                      <span>縁色</span>
+                      <input
+                        type="color"
+                        value={selectedLayoutAnnotation.textStrokeColor}
+                        onChange={(event) => {
+                          const nextColor = normalizeAnnotationColor(event.target.value);
+                          updateLayoutEditorAnnotation(selectedLayoutAnnotation.id, { textStrokeColor: nextColor });
+                          setLayoutEditorTextStrokeColor(nextColor);
+                        }}
+                      />
+                    </label>
+                    <label className="field-inline">
+                      <span>縁太さ</span>
+                      <input
+                        className="control"
+                        type="number"
+                        min={0}
+                        max={12}
+                        value={selectedLayoutAnnotation.textStrokeWidth}
+                        onChange={(event) => {
+                          const nextWidth = normalizeTextStrokeWidth(
+                            parseNumericInput(event.target.value, selectedLayoutAnnotation.textStrokeWidth),
+                            selectedLayoutAnnotation.textStrokeWidth,
+                          );
+                          updateLayoutEditorAnnotation(selectedLayoutAnnotation.id, { textStrokeWidth: nextWidth });
+                          setLayoutEditorTextStrokeWidth(nextWidth);
                         }}
                       />
                     </label>
@@ -9560,6 +9833,10 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
                           />
                         );
                       }
+                      const textStrokeWidth = normalizeTextStrokeWidth(annotation.textStrokeWidth, DEFAULT_TEXT_STROKE_WIDTH);
+                      const textStrokeColor = textStrokeWidth > 0
+                        ? normalizeAnnotationColor(annotation.textStrokeColor || DEFAULT_TEXT_STROKE_COLOR)
+                        : "transparent";
                       return (
                         <text
                           key={annotation.id}
@@ -9568,10 +9845,11 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
                           fill={annotation.color}
                           fontSize={annotation.fontSize}
                           fontWeight={annotation.fontWeight}
+                          fontFamily={annotation.fontFamily || DEFAULT_TEXT_FONT_FAMILY}
                           textAnchor={annotation.textAlign === "center" ? "middle" : annotation.textAlign === "right" ? "end" : "start"}
                           transform={rotation ? `rotate(${rotation} ${annotation.x} ${annotation.y})` : undefined}
                           className={shapeClass}
-                          style={{ paintOrder: "stroke", stroke: "rgba(255,255,255,0.95)", strokeWidth: 3 }}
+                          style={{ paintOrder: "stroke", stroke: textStrokeColor, strokeWidth: textStrokeWidth }}
                           onPointerDown={(event) => startLayoutAnnotationMove(annotation.id, event)}
                         >
                           {String(annotation.text || "注記").split("\n").map((line, index) => (
