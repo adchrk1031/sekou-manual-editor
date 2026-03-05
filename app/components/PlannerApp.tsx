@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { CSSProperties, ChangeEvent, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode, WheelEvent as ReactWheelEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { compressToUTF16, decompressFromUTF16 } from "lz-string";
 import { clearSession, ensureUsers, getLoginAttempts, getLoginFailureMessage, getSessionUser, loginWithCredentials, type LoginAttemptLog } from "./auth";
 import { SHARED_STORAGE_UPDATED_EVENT, pullSharedStorageSnapshot, pushSharedStorageSnapshot } from "./sharedStorage";
 
@@ -560,8 +561,14 @@ const MAX_AUDIT_LOGS = 500;
 const MAX_REVISIONS = 200;
 const CSV_PAGE_SIZE_OPTIONS = [20, 50, 100, 200, 300];
 const PROJECT_SAVE_DEBOUNCE_MS = 350;
+const CSV_SAVE_DEBOUNCE_MS = 700;
 const DEFAULT_PHOTO_MAX_SIZE = 1280;
 const DEFAULT_LAYOUT_MAX_SIZE = 1600;
+const MAX_UPLOAD_FILE_BYTES = 10 * 1024 * 1024;
+const TARGET_PHOTO_DATA_URL_BYTES = 850_000;
+const TARGET_LAYOUT_DATA_URL_BYTES = 1_100_000;
+const STORAGE_COMPRESSION_PREFIX = "lz:";
+const STORAGE_COMPRESSION_THRESHOLD = 4 * 1024;
 const LAYOUT_CANVAS_SIZE = 1000;
 const MAX_ANNOTATION_HISTORY = 150;
 const DEFAULT_ANNOTATION_COLOR = "#d92d20";
@@ -2449,6 +2456,64 @@ function recordsToCsv(headers: string[], rows: CsvRecord[]): string {
   return lines.join("\n");
 }
 
+function encodeStoragePayload(rawJson: string): string {
+  if (rawJson.length < STORAGE_COMPRESSION_THRESHOLD) {
+    return rawJson;
+  }
+  try {
+    const compressed = compressToUTF16(rawJson);
+    if (!compressed) {
+      return rawJson;
+    }
+    const wrapped = `${STORAGE_COMPRESSION_PREFIX}${compressed}`;
+    return wrapped.length < rawJson.length ? wrapped : rawJson;
+  } catch {
+    return rawJson;
+  }
+}
+
+function decodeStoragePayload(raw: string | null): string | null {
+  if (!raw) {
+    return null;
+  }
+  if (!raw.startsWith(STORAGE_COMPRESSION_PREFIX)) {
+    return raw;
+  }
+  const encoded = raw.slice(STORAGE_COMPRESSION_PREFIX.length);
+  try {
+    const decoded = decompressFromUTF16(encoded);
+    return decoded ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function stringifyForStorage(value: unknown): string {
+  return encodeStoragePayload(JSON.stringify(value));
+}
+
+function parseStorageJson<T>(raw: string | null): T | null {
+  const payload = decodeStoragePayload(raw);
+  if (!payload) {
+    return null;
+  }
+  try {
+    return JSON.parse(payload) as T;
+  } catch {
+    return null;
+  }
+}
+
+function estimateDataUrlBytes(dataUrl: string): number {
+  const idx = dataUrl.indexOf(",");
+  if (idx < 0) {
+    return dataUrl.length;
+  }
+  const base64 = dataUrl.slice(idx + 1);
+  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
+}
+
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -2458,34 +2523,68 @@ function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
-async function optimizeImageFile(file: File, maxEdge: number, quality = 0.84): Promise<string> {
+type ImageOptimizeOptions = {
+  maxEdge: number;
+  quality?: number;
+  targetBytes?: number;
+};
+
+async function optimizeImageFile(
+  file: File,
+  { maxEdge, quality = 0.84, targetBytes = TARGET_PHOTO_DATA_URL_BYTES }: ImageOptimizeOptions,
+): Promise<string> {
   const fallback = await readFileAsDataUrl(file);
   if (typeof window === "undefined" || !("createImageBitmap" in window)) {
     return fallback;
   }
   try {
     const bitmap = await createImageBitmap(file);
-    const base = Math.max(bitmap.width, bitmap.height);
-    const scale = base > maxEdge ? maxEdge / base : 1;
-    const width = Math.max(1, Math.round(bitmap.width * scale));
-    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const base = Math.max(bitmap.width, bitmap.height) || 1;
+    const initialScale = base > maxEdge ? maxEdge / base : 1;
+    let width = Math.max(1, Math.round(bitmap.width * initialScale));
+    let height = Math.max(1, Math.round(bitmap.height * initialScale));
+    let best = fallback;
+    let bestBytes = estimateDataUrlBytes(fallback);
+    const qualityCandidates = [quality, Math.max(0.7, quality - 0.08), Math.max(0.58, quality - 0.18), 0.48];
     const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
     const ctx = canvas.getContext("2d");
     if (!ctx) {
       bitmap.close();
       return fallback;
     }
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(bitmap, 0, 0, width, height);
-    bitmap.close();
-    const optimized = canvas.toDataURL("image/webp", quality);
-    if (!optimized || optimized.length >= fallback.length) {
-      return fallback;
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      canvas.width = width;
+      canvas.height = height;
+      ctx.clearRect(0, 0, width, height);
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(bitmap, 0, 0, width, height);
+
+      for (const q of qualityCandidates) {
+        const optimized = canvas.toDataURL("image/webp", q);
+        if (!optimized) {
+          continue;
+        }
+        const bytes = estimateDataUrlBytes(optimized);
+        if (bytes < bestBytes) {
+          best = optimized;
+          bestBytes = bytes;
+        }
+        if (bytes <= targetBytes) {
+          bitmap.close();
+          return optimized;
+        }
+      }
+
+      if (Math.max(width, height) <= 720) {
+        break;
+      }
+      width = Math.max(1, Math.round(width * 0.86));
+      height = Math.max(1, Math.round(height * 0.86));
     }
-    return optimized;
+    bitmap.close();
+    return best;
   } catch {
     return fallback;
   }
@@ -3168,6 +3267,8 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   const projectRefCacheRef = useRef<Record<string, Project>>({});
   const projectSerializedCacheRef = useRef<Record<string, string>>({});
   const saveTimerRef = useRef<number | null>(null);
+  const csvSaveTimerRef = useRef<number | null>(null);
+  const csvSerializedCacheRef = useRef("");
   const sharedSyncTimerRef = useRef<number | null>(null);
   const outageTraceSeqRef = useRef(0);
   const layoutEditorSvgRef = useRef<SVGSVGElement | null>(null);
@@ -3177,6 +3278,8 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   const projectPickerRef = useRef<HTMLDivElement | null>(null);
   const importFileInputRef = useRef<HTMLInputElement | null>(null);
   const projectsRef = useRef<Project[]>(projects);
+  const csvHeadersRef = useRef<string[]>(csvHeaders);
+  const csvDraftRowsRef = useRef<CsvRecord[]>(csvDraftRows);
 
   const persistProjectsToStorage = useCallback((targetProjects: Project[]): void => {
     try {
@@ -3189,7 +3292,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
         nextRefCache[project.projectId] = project;
         const hasChangedRef = projectRefCacheRef.current[project.projectId] !== project;
         if (hasChangedRef || !projectSerializedCacheRef.current[project.projectId]) {
-          const serialized = JSON.stringify(project);
+          const serialized = stringifyForStorage(project);
           localStorage.setItem(`${PROJECT_DATA_STORAGE_PREFIX}${project.projectId}`, serialized);
           nextSerializedCache[project.projectId] = serialized;
         } else {
@@ -3217,6 +3320,11 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     projectsRef.current = projects;
   }, [projects]);
 
+  useEffect(() => {
+    csvHeadersRef.current = csvHeaders;
+    csvDraftRowsRef.current = csvDraftRows;
+  }, [csvHeaders, csvDraftRows]);
+
   const loadWorkspaceStateFromStorage = useCallback((preserveSelection: boolean): void => {
     try {
       let loadedProjects: Project[] = [];
@@ -3234,7 +3342,10 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
                 return null;
               }
               loadedSerialized[id] = rawProject;
-              const parsed = JSON.parse(rawProject) as Partial<Project> & { workDateMain?: string };
+              const parsed = parseStorageJson<Partial<Project> & { workDateMain?: string }>(rawProject);
+              if (!parsed) {
+                return null;
+              }
               legacyDateRisks.push(...collectLegacyDateRisks("project_index_storage", parsed));
               return normalizeProject(parsed);
             })
@@ -3245,14 +3356,14 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
       if (!loadedProjects.length) {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (raw) {
-          const parsed = JSON.parse(raw) as Array<Partial<Project> & { workDateMain?: string }>;
+          const parsed = parseStorageJson<Array<Partial<Project> & { workDateMain?: string }>>(raw) ?? [];
           if (parsed.length) {
             parsed.forEach((item) => {
               legacyDateRisks.push(...collectLegacyDateRisks("legacy_storage_v5", item));
             });
             loadedProjects = parsed.map((item) => normalizeProject(item));
             loadedProjects.forEach((project) => {
-              loadedSerialized[project.projectId] = JSON.stringify(project);
+              loadedSerialized[project.projectId] = stringifyForStorage(project);
             });
           }
         }
@@ -3283,16 +3394,22 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
 
       const csvEditorRaw = localStorage.getItem(CSV_EDITOR_STORAGE_KEY);
       if (csvEditorRaw) {
-        const parsed = JSON.parse(csvEditorRaw) as { headers?: string[]; rows?: CsvRecord[] };
-        if (Array.isArray(parsed.headers) && Array.isArray(parsed.rows)) {
+        const parsed = parseStorageJson<{ headers?: string[]; rows?: CsvRecord[] }>(csvEditorRaw);
+        if (parsed && Array.isArray(parsed.headers) && Array.isArray(parsed.rows)) {
           const headers = parsed.headers.filter((header) => typeof header === "string" && header.trim().length > 0);
           const rows = normalizeCsvRows(parsed.rows, headers);
           setCsvHeaders(headers);
           setCsvDraftRows(rows);
+          csvSerializedCacheRef.current = csvEditorRaw;
+        } else {
+          setCsvHeaders([]);
+          setCsvDraftRows([]);
+          csvSerializedCacheRef.current = "";
         }
       } else {
         setCsvHeaders([]);
         setCsvDraftRows([]);
+        csvSerializedCacheRef.current = "";
       }
 
       const rawUiPreset = localStorage.getItem(UI_PRESET_STORAGE_KEY);
@@ -3324,7 +3441,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
 
       const auditRaw = localStorage.getItem(AUDIT_STORAGE_KEY);
       if (auditRaw) {
-        const parsed = JSON.parse(auditRaw) as AuditLog[];
+        const parsed = parseStorageJson<AuditLog[]>(auditRaw);
         if (Array.isArray(parsed)) {
           setAuditLogs(parsed);
         }
@@ -3334,7 +3451,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
 
       const revisionRaw = localStorage.getItem(REVISION_STORAGE_KEY);
       if (revisionRaw) {
-        const parsed = JSON.parse(revisionRaw) as ProjectRevision[];
+        const parsed = parseStorageJson<ProjectRevision[]>(revisionRaw);
         if (Array.isArray(parsed)) {
           const migrated = parsed.map((revision) => {
             const legacy = normalizeLayoutAnnotations(revision.snapshot?.layoutAnnotations || []);
@@ -3452,6 +3569,14 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
         window.clearTimeout(saveTimerRef.current);
       }
       persistProjectsToStorage(projectsRef.current);
+      if (csvSaveTimerRef.current) {
+        window.clearTimeout(csvSaveTimerRef.current);
+      }
+      const serialized = stringifyForStorage({ headers: csvHeadersRef.current, rows: csvDraftRowsRef.current });
+      if (serialized !== csvSerializedCacheRef.current) {
+        localStorage.setItem(CSV_EDITOR_STORAGE_KEY, serialized);
+        csvSerializedCacheRef.current = serialized;
+      }
     };
     const handleVisibilityChange = () => {
       if (document.visibilityState === "hidden") {
@@ -3481,21 +3606,35 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     if (!hydrated) {
       return;
     }
-    localStorage.setItem(AUDIT_STORAGE_KEY, JSON.stringify(auditLogs));
+    localStorage.setItem(AUDIT_STORAGE_KEY, stringifyForStorage(auditLogs));
   }, [auditLogs, hydrated]);
 
   useEffect(() => {
     if (!hydrated) {
       return;
     }
-    localStorage.setItem(REVISION_STORAGE_KEY, JSON.stringify(revisions));
+    localStorage.setItem(REVISION_STORAGE_KEY, stringifyForStorage(revisions));
   }, [revisions, hydrated]);
 
   useEffect(() => {
     if (!hydrated) {
       return;
     }
-    localStorage.setItem(CSV_EDITOR_STORAGE_KEY, JSON.stringify({ headers: csvHeaders, rows: csvDraftRows }));
+    if (csvSaveTimerRef.current) {
+      window.clearTimeout(csvSaveTimerRef.current);
+    }
+    csvSaveTimerRef.current = window.setTimeout(() => {
+      const serialized = stringifyForStorage({ headers: csvHeaders, rows: csvDraftRows });
+      if (serialized !== csvSerializedCacheRef.current) {
+        localStorage.setItem(CSV_EDITOR_STORAGE_KEY, serialized);
+        csvSerializedCacheRef.current = serialized;
+      }
+    }, CSV_SAVE_DEBOUNCE_MS);
+    return () => {
+      if (csvSaveTimerRef.current) {
+        window.clearTimeout(csvSaveTimerRef.current);
+      }
+    };
   }, [csvHeaders, csvDraftRows, hydrated]);
 
   useEffect(() => {
@@ -3512,15 +3651,14 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
       const partyRaw = localStorage.getItem(PARTY_TEMPLATE_STORAGE_KEY);
       const partyCompanyRaw = localStorage.getItem(PARTY_COMPANY_TEMPLATE_STORAGE_KEY);
       const layoutRaw = localStorage.getItem(LAYOUT_TEMPLATE_STORAGE_KEY);
-      const scheduleParsed = scheduleRaw ? (JSON.parse(scheduleRaw) as Array<SimpleTemplate<ScheduleRow[]>>) : [];
-      const detailParsed = detailRaw ? (JSON.parse(detailRaw) as Array<SimpleTemplate<PhotoSlots>>) : [];
-      const partyParsed = partyRaw ? (JSON.parse(partyRaw) as Array<SimpleTemplate<Project["relatedParties"]>>) : [];
-      const partyCompanyParsed = partyCompanyRaw ? normalizePartyCompanyTemplateMap(JSON.parse(partyCompanyRaw)) : createEmptyPartyCompanyTemplates();
-      const layoutParsed = layoutRaw
-        ? (JSON.parse(layoutRaw) as Array<
-            SimpleTemplate<LayoutTemplatePayload>
-          >)
-        : [];
+      const scheduleParsed = parseStorageJson<Array<SimpleTemplate<ScheduleRow[]>>>(scheduleRaw) ?? [];
+      const detailParsed = parseStorageJson<Array<SimpleTemplate<PhotoSlots>>>(detailRaw) ?? [];
+      const partyParsed = parseStorageJson<Array<SimpleTemplate<Project["relatedParties"]>>>(partyRaw) ?? [];
+      const partyCompanyParsedRaw = parseStorageJson<Record<RelatedPartyKey, PartyCompanyTemplatePreset[]>>(partyCompanyRaw);
+      const partyCompanyParsed = partyCompanyParsedRaw
+        ? normalizePartyCompanyTemplateMap(partyCompanyParsedRaw)
+        : createEmptyPartyCompanyTemplates();
+      const layoutParsed = parseStorageJson<Array<SimpleTemplate<LayoutTemplatePayload>>>(layoutRaw) ?? [];
 
       if (Array.isArray(scheduleParsed)) {
         setScheduleTemplates(scheduleParsed);
@@ -3571,35 +3709,35 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     if (!hydrated) {
       return;
     }
-    localStorage.setItem(SCHEDULE_TEMPLATE_STORAGE_KEY, JSON.stringify(scheduleTemplates));
+    localStorage.setItem(SCHEDULE_TEMPLATE_STORAGE_KEY, stringifyForStorage(scheduleTemplates));
   }, [scheduleTemplates, hydrated]);
 
   useEffect(() => {
     if (!hydrated) {
       return;
     }
-    localStorage.setItem(DETAIL_PHOTO_TEMPLATE_STORAGE_KEY, JSON.stringify(detailPhotoTemplates));
+    localStorage.setItem(DETAIL_PHOTO_TEMPLATE_STORAGE_KEY, stringifyForStorage(detailPhotoTemplates));
   }, [detailPhotoTemplates, hydrated]);
 
   useEffect(() => {
     if (!hydrated) {
       return;
     }
-    localStorage.setItem(PARTY_TEMPLATE_STORAGE_KEY, JSON.stringify(partyTemplates));
+    localStorage.setItem(PARTY_TEMPLATE_STORAGE_KEY, stringifyForStorage(partyTemplates));
   }, [partyTemplates, hydrated]);
 
   useEffect(() => {
     if (!hydrated) {
       return;
     }
-    localStorage.setItem(PARTY_COMPANY_TEMPLATE_STORAGE_KEY, JSON.stringify(partyCompanyTemplates));
+    localStorage.setItem(PARTY_COMPANY_TEMPLATE_STORAGE_KEY, stringifyForStorage(partyCompanyTemplates));
   }, [partyCompanyTemplates, hydrated]);
 
   useEffect(() => {
     if (!hydrated) {
       return;
     }
-    localStorage.setItem(LAYOUT_TEMPLATE_STORAGE_KEY, JSON.stringify(layoutTemplates));
+    localStorage.setItem(LAYOUT_TEMPLATE_STORAGE_KEY, stringifyForStorage(layoutTemplates));
   }, [layoutTemplates, hydrated]);
 
   useEffect(() => {
@@ -5499,9 +5637,14 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   }
 
   function applyPhotoFile(section: "detailPhotos" | "layoutPhotos", photoId: string, file: File): void {
+    if (file.size > MAX_UPLOAD_FILE_BYTES) {
+      alert("画像サイズが大きすぎます。10MB以下のPNG/JPGを選択してください。");
+      return;
+    }
     const maxSize = section === "layoutPhotos" ? DEFAULT_LAYOUT_MAX_SIZE : DEFAULT_PHOTO_MAX_SIZE;
-    const quality = section === "layoutPhotos" ? 0.8 : 0.78;
-    optimizeImageFile(file, maxSize, quality)
+    const quality = section === "layoutPhotos" ? 0.8 : 0.76;
+    const targetBytes = section === "layoutPhotos" ? TARGET_LAYOUT_DATA_URL_BYTES : TARGET_PHOTO_DATA_URL_BYTES;
+    optimizeImageFile(file, { maxEdge: maxSize, quality, targetBytes })
       .then((optimized) => {
         updatePhotoItem(section, photoId, { dataUrl: optimized, layoutAnnotations: [], layoutAnnotationsV2: [] });
       })
@@ -5608,7 +5751,15 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   }
 
   function applyLayoutImageFile(file: File): void {
-    optimizeImageFile(file, DEFAULT_LAYOUT_MAX_SIZE, 0.8)
+    if (file.size > MAX_UPLOAD_FILE_BYTES) {
+      alert("画像サイズが大きすぎます。10MB以下のPNG/JPGを選択してください。");
+      return;
+    }
+    optimizeImageFile(file, {
+      maxEdge: DEFAULT_LAYOUT_MAX_SIZE,
+      quality: 0.8,
+      targetBytes: TARGET_LAYOUT_DATA_URL_BYTES,
+    })
       .then((optimized) => {
         updateSelectedProject(
           (project) => ({
