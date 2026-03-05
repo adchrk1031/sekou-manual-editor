@@ -5742,10 +5742,17 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
       office: party.office.trim(),
       tel: party.tel.trim(),
     };
-    setPartyCompanyTemplates((prev) => ({
-      ...prev,
-      [key]: [item, ...(prev[key] || [])],
-    }));
+    setPartyCompanyTemplates((prev) => {
+      const next = {
+        ...prev,
+        [key]: [item, ...(prev[key] || [])],
+      };
+      // 登録直後の再ログインでも参照できるよう即時永続化
+      if (hydrated) {
+        localStorage.setItem(PARTY_COMPANY_TEMPLATE_STORAGE_KEY, stringifyForStorage(next));
+      }
+      return next;
+    });
     setPartyTemplateSelections((prev) => ({ ...prev, [key]: item.id }));
     appendAudit("template_apply", `${party.title} の会社テンプレートを登録`);
   }
