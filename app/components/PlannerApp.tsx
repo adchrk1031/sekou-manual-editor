@@ -463,6 +463,8 @@ type LayoutGuideLine = {
 type UiIconName =
   | "upload"
   | "plus"
+  | "menu"
+  | "settings"
   | "cursor"
   | "shapeLine"
   | "shapeArrow"
@@ -497,6 +499,8 @@ type UserCreateNotice = {
   type: "ok" | "error";
   text: string;
 };
+
+type UiPreset = "standard" | "field" | "compact";
 
 type LocalStorageExportItem = {
   key: string;
@@ -542,6 +546,7 @@ const SCHEDULE_TEMPLATE_STORAGE_KEY = "sekou-tool-template-schedule-v1";
 const DETAIL_PHOTO_TEMPLATE_STORAGE_KEY = "sekou-tool-template-detail-photos-v1";
 const PARTY_TEMPLATE_STORAGE_KEY = "sekou-tool-template-parties-v1";
 const LAYOUT_TEMPLATE_STORAGE_KEY = "sekou-tool-template-layout-v1";
+const UI_PRESET_STORAGE_KEY = "sekou-ui-preset-v1";
 const OUTAGE_TRACE_DEBUG_KEY = "sekou-debug-outage-trace";
 const LEGACY_DATE_TRACE_DEBUG_KEY = "sekou-debug-legacy-date";
 const DAY_TOTAL_MINUTES = 24 * 60;
@@ -567,6 +572,11 @@ const DEFAULT_TEXT_STROKE_COLOR = "#ffffff";
 const DEFAULT_TEXT_STROKE_WIDTH = 3;
 const LAYOUT_SNAP_THRESHOLD = 10;
 const USER_LIST_VISIBLE_COUNT = 5;
+const UI_PRESET_OPTIONS: Array<{ value: UiPreset; label: string }> = [
+  { value: "standard", label: "標準" },
+  { value: "field", label: "現場向け（大きめ）" },
+  { value: "compact", label: "コンパクト" },
+];
 const LAYOUT_TEXT_FONT_OPTIONS: Array<{ value: string; label: string }> = [
   { value: DEFAULT_TEXT_FONT_FAMILY, label: "ゴシック（標準）" },
   { value: "\"Yu Mincho\", \"Hiragino Mincho ProN\", serif", label: "明朝" },
@@ -845,6 +855,10 @@ function UiIcon({ name }: { name: UiIconName }) {
     case "plus":
     case "addRow":
       return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="M10 4v12M4 10h12" /></svg>;
+    case "menu":
+      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="M3 5h14M3 10h14M3 15h14" /></svg>;
+    case "settings":
+      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="M10 3v2m0 10v2m7-7h-2M5 10H3m11.95-4.95-1.4 1.4M6.45 13.55l-1.4 1.4m0-9.9 1.4 1.4m8.1 8.1 1.4 1.4M13 10a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" /></svg>;
     case "cursor":
       return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="M4 3v13l3-3 2 4 2-1-2-4h4z" /></svg>;
     case "shapeLine":
@@ -3001,6 +3015,8 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   const [selectedId, setSelectedId] = useState<string>("");
   const [projectSearchText, setProjectSearchText] = useState<string>("");
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [uiPreset, setUiPreset] = useState<UiPreset>("standard");
   const [hydrated, setHydrated] = useState(false);
   const [sharedStorageReady, setSharedStorageReady] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState("-");
@@ -3224,6 +3240,13 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
         setCsvDraftRows([]);
       }
 
+      const rawUiPreset = localStorage.getItem(UI_PRESET_STORAGE_KEY);
+      if (rawUiPreset === "standard" || rawUiPreset === "field" || rawUiPreset === "compact") {
+        setUiPreset(rawUiPreset);
+      } else {
+        setUiPreset("standard");
+      }
+
       const loadedUsers = ensureUsers() as UserAccount[];
       if (Array.isArray(loadedUsers) && loadedUsers.length > 0) {
         let nextUsers = loadedUsers;
@@ -3418,6 +3441,13 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     }
     localStorage.setItem(CSV_EDITOR_STORAGE_KEY, JSON.stringify({ headers: csvHeaders, rows: csvDraftRows }));
   }, [csvHeaders, csvDraftRows, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated) {
+      return;
+    }
+    localStorage.setItem(UI_PRESET_STORAGE_KEY, uiPreset);
+  }, [hydrated, uiPreset]);
 
   useEffect(() => {
     try {
@@ -7633,9 +7663,32 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     return () => window.removeEventListener("pointerdown", onPointerDown);
   }, [projectPickerOpen]);
 
+  useEffect(() => {
+    if (!mobileMenuOpen) {
+      return;
+    }
+    setProjectPickerOpen(false);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMobileMenuOpen(false);
+      }
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [mobileMenuOpen]);
+
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [mode, selectedId]);
+
   return (
     <>
-      <main className={`planner-app ${isCsvMode ? "planner-app-csv" : ""}`}>
+      <main className={`planner-app ${isCsvMode ? "planner-app-csv" : ""} ui-preset-${uiPreset}`}>
         <header className={`top-bar ${isTrackingMode ? "top-bar-tracking" : "top-bar-work"} ${isCsvMode ? "top-bar-csv" : ""}`} aria-label="Top">
           <div className="top-logo-slot">
             <img
@@ -7695,7 +7748,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
             </div>
           ) : null}
           {!isTrackingMode && !isCsvMode ? (
-            <button type="button" className="btn top-btn top-btn-create top-btn-inline" onClick={createProject} disabled={!canEdit}>
+            <button type="button" className="btn top-btn top-btn-create top-btn-inline top-action-btn" onClick={createProject} disabled={!canEdit}>
               <span className="btn-icon"><UiIcon name="plus" /></span>
               新規案件
             </button>
@@ -7703,7 +7756,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
           {!isTrackingMode && !isCsvMode ? (
               <button
                 type="button"
-                className="btn top-btn top-btn-delete top-btn-inline"
+                className="btn top-btn top-btn-delete top-btn-inline top-action-btn"
                 onClick={deleteSelectedProject}
                 disabled={!canEdit || !hasSelectedProject || projects.length <= 1}
               >
@@ -7711,9 +7764,19 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
               案件削除
             </button>
           ) : null}
-          <button type="button" className="btn top-logout-btn" onClick={logout}>
+          <button type="button" className="btn top-logout-btn top-action-btn" onClick={logout}>
             <span className="btn-icon"><UiIcon name="logout" /></span>
             ログアウト
+          </button>
+          <button
+            type="button"
+            className="btn top-menu-toggle"
+            aria-expanded={mobileMenuOpen}
+            aria-controls="mobile-global-menu"
+            onClick={() => setMobileMenuOpen((prev) => !prev)}
+          >
+            <span className="btn-icon"><UiIcon name="menu" /></span>
+            メニュー
           </button>
         </header>
 
@@ -7723,6 +7786,99 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
           <Link href="/tracking" className={`workspace-link ${isTrackingMode ? "active" : ""}`}>ログイン管理</Link>
           <Link href="/menu" className="workspace-link subtle">メニューへ戻る</Link>
         </nav>
+
+        <div className="ui-custom-bar" role="region" aria-label="表示カスタム">
+          <span className="ui-custom-label"><span className="btn-icon"><UiIcon name="settings" /></span>表示カスタム</span>
+          <div className="ui-preset-segment" role="group" aria-label="表示モード">
+            {UI_PRESET_OPTIONS.map((option) => (
+              <button
+                key={`ui_preset_${option.value}`}
+                type="button"
+                className={`ui-preset-btn ${uiPreset === option.value ? "is-active" : ""}`}
+                onClick={() => setUiPreset(option.value)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div
+          className={`mobile-drawer-backdrop ${mobileMenuOpen ? "is-open" : ""}`}
+          onClick={() => setMobileMenuOpen(false)}
+          aria-hidden={!mobileMenuOpen}
+        />
+        <aside id="mobile-global-menu" className={`mobile-drawer ${mobileMenuOpen ? "is-open" : ""}`} aria-hidden={!mobileMenuOpen}>
+          <div className="mobile-drawer-head">
+            <h3>操作メニュー</h3>
+            <button type="button" className="btn btn-subtle mobile-drawer-close" onClick={() => setMobileMenuOpen(false)}>
+              <span className="btn-icon"><UiIcon name="clear" /></span>
+              閉じる
+            </button>
+          </div>
+          <div className="mobile-drawer-section">
+            {!isTrackingMode && !isCsvMode ? (
+              <>
+                <button
+                  type="button"
+                  className="btn top-btn top-btn-create"
+                  onClick={() => {
+                    createProject();
+                    setMobileMenuOpen(false);
+                  }}
+                  disabled={!canEdit}
+                >
+                  <span className="btn-icon"><UiIcon name="plus" /></span>
+                  新規案件
+                </button>
+                <button
+                  type="button"
+                  className="btn top-btn top-btn-delete"
+                  onClick={() => {
+                    deleteSelectedProject();
+                    setMobileMenuOpen(false);
+                  }}
+                  disabled={!canEdit || !hasSelectedProject || projects.length <= 1}
+                >
+                  <span className="btn-icon"><UiIcon name="delete" /></span>
+                  案件削除
+                </button>
+              </>
+            ) : null}
+            <button
+              type="button"
+              className="btn top-logout-btn"
+              onClick={() => {
+                setMobileMenuOpen(false);
+                logout();
+              }}
+            >
+              <span className="btn-icon"><UiIcon name="logout" /></span>
+              ログアウト
+            </button>
+          </div>
+          <div className="mobile-drawer-section mobile-drawer-nav">
+            <Link href="/editor" className={`workspace-link ${isEditorMode ? "active" : ""}`} onClick={() => setMobileMenuOpen(false)}>施工計画書編集</Link>
+            <Link href="/csv" className={`workspace-link ${isCsvMode ? "active" : ""}`} onClick={() => setMobileMenuOpen(false)}>CSV編集スペース</Link>
+            <Link href="/tracking" className={`workspace-link ${isTrackingMode ? "active" : ""}`} onClick={() => setMobileMenuOpen(false)}>ログイン管理</Link>
+            <Link href="/menu" className="workspace-link subtle mobile-menu-back-link" onClick={() => setMobileMenuOpen(false)}>メニューへ戻る</Link>
+          </div>
+          <div className="mobile-drawer-section">
+            <p className="mobile-drawer-section-title"><span className="btn-icon"><UiIcon name="settings" /></span>表示カスタム</p>
+            <div className="ui-preset-segment mobile">
+              {UI_PRESET_OPTIONS.map((option) => (
+                <button
+                  key={`ui_preset_mobile_${option.value}`}
+                  type="button"
+                  className={`ui-preset-btn ${uiPreset === option.value ? "is-active" : ""}`}
+                  onClick={() => setUiPreset(option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </aside>
 
         {isCsvMode ? <p className="import-status">{importStatus}</p> : null}
 

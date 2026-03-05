@@ -14,6 +14,28 @@ import { pullSharedStorageSnapshot, pushSharedStorageSnapshot } from "./componen
 
 type AuthTab = "register" | "login";
 
+async function notifyAdminPendingApproval(user: { name: string; email: string }): Promise<boolean> {
+  try {
+    const response = await fetch("/api/manual-editor/notify/slack", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        event: "user_signup_pending_approval",
+        userName: user.name,
+        userEmail: user.email,
+        requestedAt: new Date().toISOString(),
+      }),
+    });
+    if (!response.ok) {
+      return false;
+    }
+    const result = (await response.json()) as { ok?: unknown };
+    return result.ok === true;
+  } catch {
+    return false;
+  }
+}
+
 function EyeIcon({ open }: { open: boolean }) {
   if (!open) {
     return (
@@ -38,6 +60,7 @@ export default function Page() {
   const [hydrated, setHydrated] = useState(false);
   const [authTab, setAuthTab] = useState<AuthTab>("login");
   const [hasUsers, setHasUsers] = useState(false);
+  const [sharedSyncReady, setSharedSyncReady] = useState(false);
 
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
@@ -50,21 +73,28 @@ export default function Page() {
   const [showRegisterPassword, setShowRegisterPassword] = useState(false);
 
   const [message, setMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
-  const isInitialSetup = useMemo(() => !hasUsers, [hasUsers]);
+  const isInitialSetup = useMemo(() => sharedSyncReady && !hasUsers, [hasUsers, sharedSyncReady]);
 
   useEffect(() => {
     let cancelled = false;
     const bootstrap = async () => {
-      await pullSharedStorageSnapshot();
+      const synced = await pullSharedStorageSnapshot();
       if (cancelled) {
         return;
       }
+      setSharedSyncReady(synced);
       const users = ensureUsers();
       setHasUsers(users.length > 0);
-      setAuthTab(users.length > 0 ? "login" : "register");
+      setAuthTab(synced && users.length === 0 ? "register" : "login");
       if (getSessionUser()) {
         router.replace("/menu");
         return;
+      }
+      if (!synced) {
+        setMessage({
+          type: "error",
+          text: "共有データへ接続できません。安全のためログイン/登録を停止しています。管理者に連絡してください。",
+        });
       }
       setHydrated(true);
     };
@@ -79,9 +109,24 @@ export default function Page() {
     setHasUsers(users.length > 0);
   }
 
+  async function ensureSharedReadyOrFail(): Promise<boolean> {
+    const synced = await pullSharedStorageSnapshot();
+    setSharedSyncReady(synced);
+    if (!synced) {
+      setMessage({
+        type: "error",
+        text: "共有データへ接続できません。安全のためログイン/登録を停止しています。管理者に連絡してください。",
+      });
+      return false;
+    }
+    return true;
+  }
+
   async function onLogin(): Promise<void> {
     setMessage(null);
-    await pullSharedStorageSnapshot();
+    if (!(await ensureSharedReadyOrFail())) {
+      return;
+    }
     refreshUsersState();
     const result = loginWithCredentials(loginEmail, loginPassword, "login_page");
     if (result.user) {
@@ -94,7 +139,9 @@ export default function Page() {
 
   async function onRegister(): Promise<void> {
     setMessage(null);
-    await pullSharedStorageSnapshot();
+    if (!(await ensureSharedReadyOrFail())) {
+      return;
+    }
     refreshUsersState();
     const name = registerName.trim();
     const email = registerEmail.trim().toLowerCase();
@@ -143,7 +190,16 @@ export default function Page() {
       setMessage({ type: "error", text: "登録に失敗しました。入力内容を確認して再試行してください。" });
       return;
     }
-    setMessage({ type: "ok", text: "ユーザー登録を受け付けました。管理者承認後にログインできます。" });
+    const slackNotified = await notifyAdminPendingApproval({
+      name: created.user.name,
+      email: created.user.email,
+    });
+    setMessage({
+      type: "ok",
+      text: slackNotified
+        ? "ユーザー登録を受け付けました。管理者承認後にログインできます。"
+        : "ユーザー登録を受け付けました。管理者承認後にログインできます（Slack通知は未設定または送信失敗）。",
+    });
     setAuthTab("login");
     setLoginEmail(created.user.email);
     setLoginPassword("");
@@ -181,6 +237,7 @@ export default function Page() {
             role="tab"
             aria-selected={authTab === "register"}
             className={`auth-switch-btn ${authTab === "register" ? "is-active" : ""}`}
+            disabled={!sharedSyncReady}
             onClick={() => setAuthTab("register")}
           >
             初めて利用する方
@@ -190,6 +247,7 @@ export default function Page() {
             role="tab"
             aria-selected={authTab === "login"}
             className={`auth-switch-btn ${authTab === "login" ? "is-active" : ""}`}
+            disabled={!sharedSyncReady}
             onClick={() => setAuthTab("login")}
           >
             登録済みの方はこちら（ログイン）
@@ -237,7 +295,7 @@ export default function Page() {
                 onChange={(event) => setRegisterPasswordConfirm(event.target.value)}
               />
             </label>
-            <button type="button" className="btn btn-accent auth-login-btn" onClick={onRegister}>
+            <button type="button" className="btn btn-accent auth-login-btn" onClick={onRegister} disabled={!sharedSyncReady}>
               {isInitialSetup ? "初期管理者を登録する" : "登録する"}
             </button>
             {!isInitialSetup ? (
@@ -273,7 +331,7 @@ export default function Page() {
                 </button>
               </div>
             </label>
-            <button type="button" className="btn btn-accent auth-login-btn" onClick={onLogin}>
+            <button type="button" className="btn btn-accent auth-login-btn" onClick={onLogin} disabled={!sharedSyncReady}>
               ログインして続行
             </button>
           </section>
