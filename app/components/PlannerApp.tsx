@@ -176,7 +176,7 @@ type RelatedParty = {
   tel: string;
 };
 
-type UserRole = "admin" | "editor" | "viewer";
+type UserRole = "system_admin" | "admin" | "editor" | "viewer";
 type UserApprovalStatus = "approved" | "pending" | "rejected";
 type RelatedPartyKey = "owner" | "utility" | "contractor" | "management" | "residents";
 
@@ -234,6 +234,7 @@ type Project = {
   noteSpecial: string;
   noteApprovalExtra: string;
   coverRecipientSuffix: string;
+  pdfTemplateId: PdfTemplateId;
   pdfCompanyName: string;
   pdfTeam: string;
   pdfContactPerson: string;
@@ -276,6 +277,7 @@ type ProjectSnapshot = Pick<
   | "noteSpecial"
   | "noteApprovalExtra"
   | "coverRecipientSuffix"
+  | "pdfTemplateId"
   | "pdfCompanyName"
   | "pdfTeam"
   | "pdfContactPerson"
@@ -309,6 +311,22 @@ type WorkMaster = {
 };
 
 type TemplateScope = "schedule" | "detailPhotos" | "relatedParties" | "layout";
+type PdfTemplateId = "standard" | "kansai" | "night";
+
+type PdfTemplatePreset = {
+  id: PdfTemplateId;
+  label: string;
+  description: string;
+  coverKicker: string;
+  coverTeamLabel: string;
+  coverOfficeLabel: string;
+  tocItems: [string, string, string, string, string];
+  sectionOverview: string;
+  sectionDetail: string;
+  sectionApproval: string;
+  sectionOrganization: string;
+  sectionEmergency: string;
+};
 
 type LayoutTemplatePayload = {
   layoutImageDataUrl: string;
@@ -567,10 +585,15 @@ const TEST_EDITOR_USER_PRESETS: Array<{ id: string; name: string; email: string;
 ];
 
 const ROLE_LABELS: Record<UserRole, string> = {
+  system_admin: "システム管理者",
   admin: "管理者",
   editor: "編集者",
   viewer: "閲覧者",
 };
+
+function isAdminLikeRole(role: UserRole): boolean {
+  return role === "system_admin" || role === "admin";
+}
 
 const USER_APPROVAL_LABELS: Record<UserApprovalStatus, string> = {
   approved: "承認済み",
@@ -646,6 +669,7 @@ const CSV_PROJECT_FIELD_ALIASES = {
   noteSpecial: ["note_special", "特記事項", "備考", "メモ"],
   noteApprovalExtra: ["note_approval_extra", "承認事項追記", "注意事項", "ご承認いただきたい事項追記"],
   coverRecipientSuffix: ["cover_recipient_suffix", "表紙宛名", "宛名", "宛先末尾"],
+  pdfTemplateId: ["pdf_template_id", "pdf_template", "pdf_format", "PDFフォーマット", "様式テンプレート"],
   pdfCompanyName: ["pdf_company_name", "会社名", "発注者会社名"],
   pdfTeam: ["pdf_team", "技術チーム", "部署", "事業所"],
   pdfContactPerson: ["pdf_contact_person", "担当者", "担当者名"],
@@ -678,6 +702,7 @@ const CSV_HEADER_JA_LABELS: Record<string, string> = {
   outage_enabled: "停電あり",
   note_special: "特記事項",
   note_approval_extra: "承認事項追記",
+  pdf_template_id: "PDFフォーマット",
   pdf_company_name: "会社名",
   pdf_team: "技術チーム",
   pdf_contact_person: "担当者",
@@ -728,6 +753,57 @@ const TEMPLATE_SCOPE_META: Record<
     shortHelp: "配置図画像と写真セットをテンプレート化できます",
     copyLabel: "この案件へ引用",
   },
+};
+
+const PDF_TEMPLATE_PRESETS: PdfTemplatePreset[] = [
+  {
+    id: "standard",
+    label: "標準（現行）",
+    description: "現在の施工計画書フォーマットです。",
+    coverKicker: "施工計画書自動発行ツール",
+    coverTeamLabel: "技術チーム",
+    coverOfficeLabel: "技術設計グループ",
+    tocItems: ["工事概要", "工事詳細説明", "ご承認いただきたい事項", "施工体制表", "緊急連絡体制表"],
+    sectionOverview: "工事概要",
+    sectionDetail: "工事詳細説明",
+    sectionApproval: "ご承認いただきたい事項",
+    sectionOrganization: "施工体制表",
+    sectionEmergency: "緊急連絡体制表",
+  },
+  {
+    id: "kansai",
+    label: "関西向け",
+    description: "関西案件向けの表記に合わせたフォーマットです。",
+    coverKicker: "施工計画書（関西向け）",
+    coverTeamLabel: "部署・事業所",
+    coverOfficeLabel: "部署・事業所",
+    tocItems: ["工事概要", "工事詳細説明", "承認事項", "施工体制表", "緊急連絡体制"],
+    sectionOverview: "工事概要",
+    sectionDetail: "工事詳細説明",
+    sectionApproval: "承認事項",
+    sectionOrganization: "施工体制表",
+    sectionEmergency: "緊急連絡体制",
+  },
+  {
+    id: "night",
+    label: "深夜停電向け",
+    description: "深夜作業・停電帯を強調するフォーマットです。",
+    coverKicker: "施工計画書（深夜停電対応）",
+    coverTeamLabel: "技術チーム",
+    coverOfficeLabel: "技術設計グループ",
+    tocItems: ["工事概要（深夜作業）", "工事詳細説明", "承認事項", "施工体制表", "緊急連絡体制表"],
+    sectionOverview: "工事概要（深夜作業）",
+    sectionDetail: "工事詳細説明",
+    sectionApproval: "承認事項",
+    sectionOrganization: "施工体制表",
+    sectionEmergency: "緊急連絡体制表",
+  },
+];
+
+const PDF_TEMPLATE_PRESET_MAP: Record<PdfTemplateId, PdfTemplatePreset> = {
+  standard: PDF_TEMPLATE_PRESETS[0],
+  kansai: PDF_TEMPLATE_PRESETS[1],
+  night: PDF_TEMPLATE_PRESETS[2],
 };
 
 const PARTY_COMPANY_TEMPLATE_PRESETS: Record<RelatedPartyKey, PartyCompanyTemplatePreset[]> = {
@@ -1038,6 +1114,27 @@ function UploadDropZone({
 }
 
 const JP_WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
+
+function isPdfTemplateId(value: unknown): value is PdfTemplateId {
+  return value === "standard" || value === "kansai" || value === "night";
+}
+
+function normalizePdfTemplateId(value: unknown): PdfTemplateId {
+  if (typeof value !== "string") {
+    return "standard";
+  }
+  const token = value.trim().toLowerCase();
+  if (isPdfTemplateId(token)) {
+    return token;
+  }
+  if (token.includes("kansai") || token.includes("関西")) {
+    return "kansai";
+  }
+  if (token.includes("night") || token.includes("深夜")) {
+    return "night";
+  }
+  return "standard";
+}
 
 function createPhotoSlots(labels?: string[]): PhotoSlots {
   const defaults = labels?.length
@@ -2560,6 +2657,7 @@ function createBlankProject(seed?: Partial<Project>): Project {
     noteSpecial: seed?.noteSpecial ?? "",
     noteApprovalExtra: seed?.noteApprovalExtra ?? "",
     coverRecipientSuffix: seed?.coverRecipientSuffix ?? "",
+    pdfTemplateId: normalizePdfTemplateId(seed?.pdfTemplateId),
     pdfCompanyName: seed?.pdfCompanyName ?? "",
     pdfTeam: seed?.pdfTeam ?? "",
     pdfContactPerson: seed?.pdfContactPerson ?? "",
@@ -2666,6 +2764,7 @@ function normalizeProject(
   const layoutAnnotations = normalizedV2Annotations.length
     ? layoutAnnotationsV2ToLegacy(layoutAnnotationsV2)
     : normalizedLegacyAnnotations;
+  const pdfTemplateId = normalizePdfTemplateId(project.pdfTemplateId);
   const relatedParties = createDefaultRelatedParties(project.relatedParties);
   relatedParties.owner.company = project.pdfCompanyName || relatedParties.owner.company;
   relatedParties.owner.office = project.pdfTeam || relatedParties.owner.office;
@@ -2689,6 +2788,7 @@ function normalizeProject(
       noteSpecial: project.noteSpecial,
       noteApprovalExtra: project.noteApprovalExtra,
       coverRecipientSuffix: project.coverRecipientSuffix,
+      pdfTemplateId,
       pdfCompanyName: project.pdfCompanyName,
       pdfTeam: project.pdfTeam,
       pdfContactPerson: project.pdfContactPerson,
@@ -2785,6 +2885,7 @@ function projectFromCsv(record: CsvRecord): Project | null {
     noteSpecial: getField(...CSV_PROJECT_FIELD_ALIASES.noteSpecial),
     noteApprovalExtra: getField(...CSV_PROJECT_FIELD_ALIASES.noteApprovalExtra),
     coverRecipientSuffix: getField(...CSV_PROJECT_FIELD_ALIASES.coverRecipientSuffix) || "管理組合御中",
+    pdfTemplateId: normalizePdfTemplateId(getField(...CSV_PROJECT_FIELD_ALIASES.pdfTemplateId)),
     pdfCompanyName: getField(...CSV_PROJECT_FIELD_ALIASES.pdfCompanyName) || "レジル株式会社",
     pdfTeam: getField(...CSV_PROJECT_FIELD_ALIASES.pdfTeam),
     pdfContactPerson: getField(...CSV_PROJECT_FIELD_ALIASES.pdfContactPerson),
@@ -2880,6 +2981,9 @@ function formatUserApprovedByLabel(user: UserAccount): string {
     return "未承認";
   }
   if (user.approvalStatus === "approved") {
+    if (user.role === "system_admin") {
+      return "システム管理者";
+    }
     if (user.role === "admin") {
       return "管理者";
     }
@@ -3450,7 +3554,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     return auditLogs.filter((log) => log.userId === currentUser.id).slice(0, 30);
   }, [auditLogs, currentUser]);
   const adminFilteredAuditLogs = useMemo(() => {
-    if (!currentUser || currentUser.role !== "admin") {
+    if (!currentUser || !isAdminLikeRole(currentUser.role)) {
       return [] as AuditLog[];
     }
     if (operationLogUserFilter === "all") {
@@ -3463,7 +3567,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     [adminFilteredAuditLogs, operationLogExpanded],
   );
   const adminAuditUserOptions = useMemo(() => {
-    if (!currentUser || currentUser.role !== "admin") {
+    if (!currentUser || !isAdminLikeRole(currentUser.role)) {
       return [] as Array<{ id: string; label: string }>;
     }
     const labels = new Map<string, string>();
@@ -3480,12 +3584,12 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
       .sort((a, b) => a.label.localeCompare(b.label, "ja-JP"));
   }, [auditLogs, currentUser, users]);
   const canEdit = !!currentUser && currentUser.role !== "viewer";
-  const canAdmin = !!currentUser && currentUser.role === "admin";
-  const canApprove = !!currentUser && (currentUser.role === "admin" || currentUser.role === "editor");
+  const canAdmin = !!currentUser && isAdminLikeRole(currentUser.role);
+  const canApprove = !!currentUser && (isAdminLikeRole(currentUser.role) || currentUser.role === "editor");
   const userStats = useMemo(() => {
     const total = users.length;
-    const admins = users.filter((user) => user.role === "admin").length;
-    const activeAdmins = users.filter((user) => user.role === "admin" && user.active && user.approvalStatus === "approved").length;
+    const admins = users.filter((user) => isAdminLikeRole(user.role)).length;
+    const activeAdmins = users.filter((user) => isAdminLikeRole(user.role) && user.active && user.approvalStatus === "approved").length;
     const activeUsers = users.filter((user) => user.active).length;
     const approvedUsers = users.filter((user) => user.active && user.approvalStatus === "approved").length;
     const pendingUsers = users.filter((user) => user.approvalStatus === "pending").length;
@@ -3612,6 +3716,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
       noteSpecial: project.noteSpecial,
       noteApprovalExtra: project.noteApprovalExtra,
       coverRecipientSuffix: project.coverRecipientSuffix,
+      pdfTemplateId: project.pdfTemplateId,
       pdfCompanyName: project.pdfCompanyName,
       pdfTeam: project.pdfTeam,
       pdfContactPerson: project.pdfContactPerson,
@@ -3667,6 +3772,10 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     [selectedProject.selectedWorkCodes],
   );
   const activeLogoSrc = PDF_LOGO_SRC;
+  const activePdfTemplate = useMemo(
+    () => PDF_TEMPLATE_PRESET_MAP[normalizePdfTemplateId(selectedProject.pdfTemplateId)],
+    [selectedProject.pdfTemplateId],
+  );
   const activeParties = selectedProject.relatedParties;
   const partyEntries = useMemo(
     () => (Object.keys(selectedProject.relatedParties) as Array<RelatedPartyKey>),
@@ -4332,7 +4441,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     setNewUserPassword("");
     setNewUserRole("editor");
     setUserManageNotice(null);
-    setUserCreateNotice({ type: "ok", text: `${roleToCreate === "admin" ? "管理者" : "ユーザー"}「${name}」を追加しました。` });
+    setUserCreateNotice({ type: "ok", text: `${ROLE_LABELS[roleToCreate]}「${name}」を追加しました。` });
     appendAudit("user_create", `ユーザー作成: ${name} (${ROLE_LABELS[roleToCreate]})`, selectedProject.projectId);
   }
 
@@ -4344,12 +4453,20 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     if (!target || target.role === nextRole) {
       return;
     }
-    if (target.role === "admin" && target.active && target.approvalStatus === "approved" && nextRole !== "admin") {
+    if (target.role === "system_admin" && nextRole !== "system_admin") {
+      setUserManageNotice({ type: "error", text: "システム管理者の権限は変更できません。" });
+      return;
+    }
+    if (nextRole === "system_admin" && currentUser?.role !== "system_admin") {
+      setUserManageNotice({ type: "error", text: "システム管理者のみ、システム管理者を指定できます。" });
+      return;
+    }
+    if (isAdminLikeRole(target.role) && target.active && target.approvalStatus === "approved" && !isAdminLikeRole(nextRole)) {
       const activeAdmins = users.filter(
-        (user) => user.active && user.approvalStatus === "approved" && user.role === "admin",
+        (user) => user.active && user.approvalStatus === "approved" && isAdminLikeRole(user.role),
       ).length;
       if (activeAdmins <= 1) {
-        setUserManageNotice({ type: "error", text: "有効な管理者を0名にはできません。先に別ユーザーを管理者にしてください。" });
+        setUserManageNotice({ type: "error", text: "有効な管理者/システム管理者を0名にはできません。先に別ユーザーを管理者にしてください。" });
         return;
       }
     }
@@ -4366,16 +4483,20 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     if (!target || target.approvalStatus === nextStatus) {
       return;
     }
+    if (target.role === "system_admin") {
+      setUserManageNotice({ type: "error", text: "システム管理者の承認区分は変更できません。" });
+      return;
+    }
     if (target.id === currentUser?.id && nextStatus !== "approved") {
       setUserManageNotice({ type: "error", text: "ログイン中の自分自身は未承認/利用不可に変更できません。" });
       return;
     }
-    if (target.role === "admin" && target.active && target.approvalStatus === "approved" && nextStatus !== "approved") {
+    if (isAdminLikeRole(target.role) && target.active && target.approvalStatus === "approved" && nextStatus !== "approved") {
       const activeAdmins = users.filter(
-        (user) => user.active && user.approvalStatus === "approved" && user.role === "admin",
+        (user) => user.active && user.approvalStatus === "approved" && isAdminLikeRole(user.role),
       ).length;
       if (activeAdmins <= 1) {
-        setUserManageNotice({ type: "error", text: "有効かつ承認済みの管理者を0名にはできません。先に別ユーザーを管理者承認してください。" });
+        setUserManageNotice({ type: "error", text: "有効かつ承認済みの管理者/システム管理者を0名にはできません。先に別ユーザーを管理者承認してください。" });
         return;
       }
     }
@@ -4405,16 +4526,20 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     if (!target) {
       return;
     }
+    if (target.role === "system_admin") {
+      setUserManageNotice({ type: "error", text: "システム管理者は無効化できません。" });
+      return;
+    }
     if (target.id === currentUser?.id && target.active) {
       setUserManageNotice({ type: "error", text: "ログイン中の自分自身は無効化できません。" });
       return;
     }
-    if (target.active && target.role === "admin" && target.approvalStatus === "approved") {
+    if (target.active && isAdminLikeRole(target.role) && target.approvalStatus === "approved") {
       const activeAdmins = users.filter(
-        (user) => user.active && user.approvalStatus === "approved" && user.role === "admin",
+        (user) => user.active && user.approvalStatus === "approved" && isAdminLikeRole(user.role),
       ).length;
       if (activeAdmins <= 1) {
-        setUserManageNotice({ type: "error", text: "有効な管理者を0名にはできません。先に別ユーザーを管理者にしてください。" });
+        setUserManageNotice({ type: "error", text: "有効な管理者/システム管理者を0名にはできません。先に別ユーザーを管理者にしてください。" });
         return;
       }
     }
@@ -4432,16 +4557,20 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     if (!target) {
       return;
     }
+    if (target.role === "system_admin") {
+      setUserManageNotice({ type: "error", text: "システム管理者は削除できません。" });
+      return;
+    }
     if (target.id === currentUser?.id) {
       setUserManageNotice({ type: "error", text: "ログイン中の自分自身は削除できません。" });
       return;
     }
-    if (target.role === "admin" && target.active && target.approvalStatus === "approved") {
+    if (isAdminLikeRole(target.role) && target.active && target.approvalStatus === "approved") {
       const activeAdmins = users.filter(
-        (user) => user.active && user.approvalStatus === "approved" && user.role === "admin",
+        (user) => user.active && user.approvalStatus === "approved" && isAdminLikeRole(user.role),
       ).length;
       if (activeAdmins <= 1) {
-        setUserManageNotice({ type: "error", text: "有効かつ承認済みの管理者を0名にはできません。先に別ユーザーを管理者承認してください。" });
+        setUserManageNotice({ type: "error", text: "有効かつ承認済みの管理者/システム管理者を0名にはできません。先に別ユーザーを管理者承認してください。" });
         return;
       }
     }
@@ -7859,13 +7988,13 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
               {!canEdit ? <p className="mini">閲覧専用ユーザーです（編集不可）</p> : null}
             </div>
           )}
-          {canAdmin ? <p className="mini">管理者はこの画面で、ユーザー管理・バックアップ保存・復元・操作履歴確認ができます。</p> : null}
+          {canAdmin ? <p className="mini">管理者/システム管理者はこの画面で、ユーザー管理・バックアップ保存・復元・操作履歴確認ができます。</p> : null}
 
           {canAdmin ? (
             <section className="sub-panel user-admin-panel">
               <h4 className="user-admin-title"><span className="section-icon"><UiIcon name="userPlus" /></span>管理者向け: ユーザー追加</h4>
               <h4>利用ユーザー登録一覧</h4>
-              <p className="mini">登録ユーザーを一覧管理できます（承認・権限変更・有効/無効の切替）。管理者は「権限」で選択してください。</p>
+              <p className="mini">登録ユーザーを一覧管理できます（承認・権限変更・有効/無効の切替）。承認操作は管理者/システム管理者のみ可能です。</p>
               <div className="user-stats-grid" aria-label="ユーザー集計">
                 <article className="user-stat-card">
                   <p className="user-stat-label">総ユーザー</p>
@@ -7896,6 +8025,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
                 <label className="field">
                   <span>権限</span>
                   <select className="control" value={newUserRole} onChange={(event) => setNewUserRole(event.target.value as UserRole)}>
+                    {currentUser?.role === "system_admin" ? <option value="system_admin">システム管理者</option> : null}
                     <option value="admin">管理者</option>
                     <option value="editor">編集者</option>
                     <option value="viewer">閲覧者</option>
@@ -7924,6 +8054,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
                             className="control"
                             value={user.approvalStatus}
                             onChange={(event) => updateUserApprovalStatusByAdmin(user.id, event.target.value as UserApprovalStatus)}
+                            disabled={user.role === "system_admin"}
                           >
                             <option value="pending">承認待ち</option>
                             <option value="approved">承認済み</option>
@@ -7931,7 +8062,15 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
                           </select>
                         </td>
                         <td>
-                          <select className="control" value={user.role} onChange={(event) => updateUserRoleByAdmin(user.id, event.target.value as UserRole)}>
+                          <select
+                            className="control"
+                            value={user.role}
+                            onChange={(event) => updateUserRoleByAdmin(user.id, event.target.value as UserRole)}
+                            disabled={user.role === "system_admin"}
+                          >
+                            {(currentUser?.role === "system_admin" || user.role === "system_admin")
+                              ? <option value="system_admin">システム管理者</option>
+                              : null}
                             <option value="admin">管理者</option>
                             <option value="editor">編集者</option>
                             <option value="viewer">閲覧者</option>
@@ -7943,9 +8082,13 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
                         <td>{user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString("ja-JP") : "未ログイン"}</td>
                         <td className="user-op-cell">
                           <div className="user-actions">
-                            <button type="button" className="btn btn-danger" onClick={() => deleteUserByAdmin(user.id)}>
-                              <span className="btn-icon"><UiIcon name="delete" /></span>削除
-                            </button>
+                            {user.role === "system_admin" ? (
+                              <span className="mini">固定</span>
+                            ) : (
+                              <button type="button" className="btn btn-danger" onClick={() => deleteUserByAdmin(user.id)}>
+                                <span className="btn-icon"><UiIcon name="delete" /></span>削除
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -8355,7 +8498,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
             <article className="preview-page">
               <div className="preview-cover-top">
                 <p>{formatDateWithWeekday(selectedProject.workDateStart)}</p>
-                <p>施工計画書自動発行ツール</p>
+                <p>{activePdfTemplate.coverKicker}</p>
               </div>
               <h3 className="preview-cover-building">{selectedProject.propertyName}　{selectedProject.coverRecipientSuffix || "管理組合御中"}</h3>
               <p className="preview-cover-subject">{selectedProject.titleSubject}</p>
@@ -8373,7 +8516,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
               <section className="preview-company">
                 <h4>{activeParties.owner.company || selectedProject.pdfCompanyName || "-"}</h4>
                 <dl>
-                  <dt>技術チーム</dt>
+                  <dt>{activePdfTemplate.coverTeamLabel}</dt>
                   <dd>{activeParties.owner.office || selectedProject.pdfTeam || "-"}</dd>
                   <dt>担当者</dt>
                   <dd>{activeParties.owner.person || selectedProject.pdfContactPerson || "-"}</dd>
@@ -8393,6 +8536,21 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
             <h3>表紙テキスト</h3>
             <p className="field-help">上から順に入力すると迷いません。物件名 → 宛名 → 件名 の順で入力してください。</p>
             <div className="field-grid">
+              <label className="field span-2">
+                <span>PDFフォーマット</span>
+                <select
+                  className="control"
+                  value={selectedProject.pdfTemplateId}
+                  onChange={(event) => handleProjectField("pdfTemplateId", normalizePdfTemplateId(event.target.value))}
+                >
+                  {PDF_TEMPLATE_PRESETS.map((template) => (
+                    <option key={`pdf_template_${template.id}`} value={template.id}>
+                      {template.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="mini">{activePdfTemplate.description}</p>
+              </label>
               <label className="field"><span>物件名</span><input data-required-key="propertyName" className={`control ${requiredMissingMap.propertyName ? "control-missing" : ""}`} value={selectedProject.propertyName} onChange={(event) => handleProjectField("propertyName", event.target.value)} /></label>
               <label className="field"><span>表紙宛名（末尾）</span><input data-required-key="coverRecipientSuffix" className={`control ${requiredMissingMap.coverRecipientSuffix ? "control-missing" : ""}`} value={selectedProject.coverRecipientSuffix} onChange={(event) => handleProjectField("coverRecipientSuffix", event.target.value)} /></label>
               <label className="field span-2"><span>件名</span><input data-required-key="titleSubject" className={`control ${requiredMissingMap.titleSubject ? "control-missing" : ""}`} value={selectedProject.titleSubject} onChange={(event) => handleProjectField("titleSubject", event.target.value)} /></label>
@@ -8405,18 +8563,19 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
             <p className="page-card-index">PDF 2</p>
             <div>
               <h2>目次</h2>
-              <p className="mini">目次は固定テンプレートです（1:工事概要 / 2:工事詳細説明 / 3:承認事項 / 4:施工体制表 / 5:緊急連絡体制表）</p>
+              <p className="mini">
+                目次は選択したPDFフォーマットに連動します
+                （1:{activePdfTemplate.tocItems[0]} / 2:{activePdfTemplate.tocItems[1]} / 3:{activePdfTemplate.tocItems[2]} / 4:{activePdfTemplate.tocItems[3]} / 5:{activePdfTemplate.tocItems[4]}）
+              </p>
             </div>
           </div>
           <CardPreview title="PDF2 目次">
             <article className="preview-page">
               <h3>目次</h3>
               <ol className="preview-toc-list">
-                <li>工事概要</li>
-                <li>工事詳細説明</li>
-                <li>ご承認いただきたい事項</li>
-                <li>施工体制表</li>
-                <li>緊急連絡体制表</li>
+                {activePdfTemplate.tocItems.map((item) => (
+                  <li key={`preview_toc_${item}`}>{item}</li>
+                ))}
               </ol>
             </article>
           </CardPreview>
@@ -8887,13 +9046,13 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
           <div className="page-card-head">
             <p className="page-card-index">PDF 6</p>
             <div>
-              <h2>施工体制表・緊急連絡体制表</h2>
+              <h2>{activePdfTemplate.sectionOrganization}・{activePdfTemplate.sectionEmergency}</h2>
               <p className="mini">関係各社カードの「反映する」をONにしたものだけPDF6ページへ反映されます</p>
             </div>
           </div>
-          <CardPreview title="PDF6 施工体制表・緊急連絡体制表">
+          <CardPreview title={`PDF6 ${activePdfTemplate.sectionOrganization}・${activePdfTemplate.sectionEmergency}`}>
             <article className="preview-page">
-              <h3>4．施工体制表</h3>
+              <h3>4．{activePdfTemplate.sectionOrganization}</h3>
               <div className="preview-org-grid">
                 {activeParties.owner.enabled ? (
                   <div className="preview-org-box">
@@ -8919,7 +9078,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
                   </div>
                 ) : null}
               </div>
-              <h3>5．緊急連絡体制表</h3>
+              <h3>5．{activePdfTemplate.sectionEmergency}</h3>
               <div className="preview-org-grid compact">
                 {activeParties.management.enabled ? <div className="preview-org-box">{activeParties.management.company || "-"}</div> : null}
                 {activeParties.owner.enabled ? <div className="preview-org-box">{activeParties.owner.company || "-"}<br />電話番号（TEL）：{activeParties.owner.tel || "-"}</div> : null}
@@ -10226,7 +10385,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
             <section className="cover-company">
               <h3>{activeParties.owner.company || selectedProject.pdfCompanyName}</h3>
               <dl>
-                <dt>技術設計グループ</dt>
+                <dt>{activePdfTemplate.coverOfficeLabel}</dt>
                 <dd>{activeParties.owner.office || selectedProject.pdfTeam || "-"}</dd>
                 <dt>担当者</dt>
                 <dd>{activeParties.owner.person || selectedProject.pdfContactPerson || "-"}</dd>
@@ -10245,16 +10404,14 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
           <article className="print-page toc-page">
             <h2>目次</h2>
             <ol>
-              <li>工事概要</li>
-              <li>工事詳細説明</li>
-              <li>ご承認いただきたい事項</li>
-              <li>施工体制表</li>
-              <li>緊急連絡体制表</li>
+              {activePdfTemplate.tocItems.map((item) => (
+                <li key={`print_toc_${item}`}>{item}</li>
+              ))}
             </ol>
           </article>
 
           <article className="print-page">
-            <h2>1．工事概要</h2>
+            <h2>1．{activePdfTemplate.sectionOverview}</h2>
             <div className="summary-lines">
               <p><strong>■ 工事件名</strong> {selectedProject.titleSubject}</p>
               <p><strong>■ 工事場所</strong> {selectedProject.propertyAddress}</p>
@@ -10353,7 +10510,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
           </article>
 
           <article className="print-page">
-            <h2>2．工事詳細説明</h2>
+            <h2>2．{activePdfTemplate.sectionDetail}</h2>
             {selectedProject.scheduleRows.length === 0 && (
               <p>工程表の作業行が未設定です。工程表を編集すると本セクションにも反映されます。</p>
             )}
@@ -10376,7 +10533,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
 
           {detailPhotoChunks.map((chunk, index) => (
             <article className="print-page" key={`detail_photo_page_${index}`}>
-              <h2>2．工事詳細説明（参考写真）</h2>
+              <h2>2．{activePdfTemplate.sectionDetail}（参考写真）</h2>
               <div className="detail-photo-grid">
                 {chunk.map((slot) => (
                   <figure key={`detail_photo_${slot.id}`}>
@@ -10389,7 +10546,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
           ))}
 
           <article className="print-page">
-            <h2>3．ご承認いただきたい事項</h2>
+            <h2>3．{activePdfTemplate.sectionApproval}</h2>
             <table className="schedule-table approval-table">
               <thead>
                 <tr><th style={{ width: "48px" }}>No</th><th style={{ width: "180px" }}>項目</th><th>内容</th></tr>
@@ -10421,7 +10578,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
           </article>
 
           <article className="print-page">
-            <h2>4．施工体制表</h2>
+            <h2>4．{activePdfTemplate.sectionOrganization}</h2>
             <div className="organization-grid">
               {activeParties.owner.enabled ? (
                 <div className="org-box">
@@ -10450,7 +10607,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
               ) : null}
             </div>
 
-            <h2>5．緊急連絡体制表</h2>
+            <h2>5．{activePdfTemplate.sectionEmergency}</h2>
             <div className="emergency-grid">
               {activeParties.management.enabled ? <div className="org-box emergency-a">{activeParties.management.company || "-"}</div> : null}
               {activeParties.management.enabled && activeParties.owner.enabled ? <div className="org-arrow horizontal emergency-ab">↔</div> : null}
