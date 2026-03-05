@@ -4345,6 +4345,30 @@ p {
 }
 
 @media (max-width: 1023px) {
+  html,
+  body {
+    width: 100%;
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+
+  body {
+    overscroll-behavior-x: none;
+    touch-action: pan-y pinch-zoom;
+  }
+
+  .planner-app {
+    width: 100%;
+    max-width: 100%;
+    padding-inline: 12px;
+    overflow-x: hidden;
+  }
+
+  .planner-app > * {
+    min-width: 0;
+    max-width: 100%;
+  }
+
   .grid-2,
   .onboarding-grid,
   .card-nav-grid,
@@ -4407,6 +4431,9 @@ p {
     grid-template-columns: 1fr;
     align-items: stretch;
     padding: 12px;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
   }
 
   .top-bar.top-bar-tracking {
@@ -4522,6 +4549,44 @@ p {
     justify-content: space-between;
   }
 
+  .panel,
+  .sub-panel,
+  .page-card,
+  .card-preview,
+  .tracking-history-controls,
+  .tracking-backup-panel,
+  .timeline-wrap,
+  .preview-timeline,
+  .photo-card,
+  .auth-card,
+  .menu-card {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+  }
+
+  .inline-row {
+    display: flex;
+    flex-wrap: wrap;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .inline-row > * {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .photo-slider-nav {
+    flex-wrap: wrap;
+    align-items: stretch;
+  }
+
+  .photo-slider-nav > * {
+    min-width: 0;
+  }
+
   .preview-timeline {
     overflow-x: hidden;
   }
@@ -4549,6 +4614,9 @@ p {
 
   .annotation-editor-panel {
     max-height: calc(100vh - 16px);
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
   }
 
   .annotation-editor-head {
@@ -4607,6 +4675,35 @@ p {
 
   .annotation-editor-stage {
     min-height: 300px;
+  }
+
+  .annotation-tool-group,
+  .annotation-align-group,
+  .annotation-layer-order-group,
+  .annotation-zoom-group,
+  .field-inline {
+    width: 100%;
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+
+  .field-inline-wide {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .field-inline input[type="number"],
+  .field-inline input[type="range"],
+  .field-inline select.control,
+  .field-inline .control {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .annotation-zoom-group input[type="range"] {
+    width: 100%;
+    min-width: 0;
   }
 }
 
