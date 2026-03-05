@@ -9088,6 +9088,52 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
               </div>
             </article>
           </CardPreview>
+          <div className="party-template-row">
+            <label className="field party-template-field">
+              <span>体制表テンプレート</span>
+              <select
+                className="control"
+                value={selectedPartyTemplateId}
+                onChange={(event) => setSelectedPartyTemplateId(event.target.value)}
+              >
+                <option value="">テンプレートを選択</option>
+                {partyTemplates.map((template) => (
+                  <option key={`party_template_local_${template.id}`} value={template.id}>
+                    {template.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="inline-row wrap">
+              <button
+                type="button"
+                className="btn btn-subtle"
+                onClick={applyPartyTemplate}
+                disabled={!selectedPartyTemplate}
+              >
+                <span className="btn-icon"><UiIcon name="apply" /></span>
+                テンプレート適用
+              </button>
+              <button
+                type="button"
+                className="btn btn-subtle"
+                onClick={savePartyTemplate}
+                disabled={!canEdit}
+              >
+                <span className="btn-icon"><UiIcon name="save" /></span>
+                現在内容をテンプレート登録
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={deletePartyTemplate}
+                disabled={!canEdit || !selectedPartyTemplateId}
+              >
+                <span className="btn-icon"><UiIcon name="delete" /></span>
+                テンプレート削除
+              </button>
+            </div>
+          </div>
           <div className={`party-grid ${requiredMissingMap.relatedPartiesEnabled ? "required-missing-block" : ""}`} data-required-key="relatedPartiesEnabled">
             <div className="party-slider-nav">
               <button type="button" className="btn btn-subtle" onClick={() => setPartySlide((prev) => Math.max(0, prev - 1))} disabled={partySlide <= 0}>

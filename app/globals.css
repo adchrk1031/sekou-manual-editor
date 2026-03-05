@@ -2122,6 +2122,16 @@ p {
   gap: 12px;
 }
 
+.party-template-row {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.party-template-field {
+  max-width: 560px;
+}
+
 .party-slider-nav {
   display: flex;
   align-items: center;
@@ -4094,9 +4104,9 @@ p {
 .print-row-track {
   position: relative;
   height: 18px;
-  border: 1px solid #e2e7ee;
+  border: 1px solid #c5d0dd;
   border-radius: 999px;
-  background: #f4f7fb;
+  background: #fff;
 }
 
 .print-row-bar {
@@ -4104,27 +4114,35 @@ p {
   top: 1px;
   bottom: 1px;
   border-radius: 999px;
-  background: #1f75c6;
-  color: #fff;
+  border: 1px solid currentColor;
+  background: rgba(31, 117, 198, 0.18);
+  color: #14508b;
   font-size: 7.5pt;
+  font-weight: 700;
   display: flex;
   align-items: center;
   justify-content: center;
   white-space: nowrap;
   overflow: hidden;
   padding: 0 6px;
+  box-sizing: border-box;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
 }
 
 .print-row-bar.is-main {
-  background: #e88a45;
+  color: #9a551f;
+  background: rgba(232, 138, 69, 0.2);
 }
 
 .print-row-bar.is-additional {
-  background: #1e6fc1;
+  color: #14508b;
+  background: rgba(30, 111, 193, 0.2);
 }
 
 .print-row-bar.is-outage {
-  background: #d93025;
+  color: #a8261f;
+  background: rgba(217, 48, 37, 0.2);
 }
 
 .print-outage-on {
@@ -4452,6 +4470,12 @@ p {
   @page {
     size: A4 portrait;
     margin: 0;
+  }
+
+  .print-only,
+  .print-only * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 
   .planner-app,
