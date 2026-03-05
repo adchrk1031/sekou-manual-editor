@@ -545,6 +545,7 @@ const REVISION_STORAGE_KEY = "sekou-tool-revision-v1";
 const SCHEDULE_TEMPLATE_STORAGE_KEY = "sekou-tool-template-schedule-v1";
 const DETAIL_PHOTO_TEMPLATE_STORAGE_KEY = "sekou-tool-template-detail-photos-v1";
 const PARTY_TEMPLATE_STORAGE_KEY = "sekou-tool-template-parties-v1";
+const PARTY_COMPANY_TEMPLATE_STORAGE_KEY = "sekou-tool-template-party-companies-v1";
 const LAYOUT_TEMPLATE_STORAGE_KEY = "sekou-tool-template-layout-v1";
 const UI_PRESET_STORAGE_KEY = "sekou-ui-preset-v1";
 const OUTAGE_TRACE_DEBUG_KEY = "sekou-debug-outage-trace";
@@ -846,6 +847,57 @@ const EMPTY_PARTY_TEMPLATE_SELECTIONS: Record<RelatedPartyKey, string> = {
   management: "",
   residents: "",
 };
+
+function createEmptyPartyCompanyTemplates(): Record<RelatedPartyKey, PartyCompanyTemplatePreset[]> {
+  return {
+    owner: [],
+    utility: [],
+    contractor: [],
+    management: [],
+    residents: [],
+  };
+}
+
+function normalizePartyCompanyTemplate(value: unknown): PartyCompanyTemplatePreset | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const source = value as Partial<PartyCompanyTemplatePreset>;
+  const id = typeof source.id === "string" ? source.id.trim() : "";
+  const label = typeof source.label === "string" ? source.label.trim() : "";
+  const title = typeof source.title === "string" ? source.title.trim() : "";
+  const company = typeof source.company === "string" ? source.company.trim() : "";
+  const person = typeof source.person === "string" ? source.person.trim() : "";
+  const office = typeof source.office === "string" ? source.office.trim() : "";
+  const tel = typeof source.tel === "string" ? source.tel.trim() : "";
+  if (!id || !label) {
+    return null;
+  }
+  return {
+    id,
+    label,
+    title,
+    company,
+    person,
+    office,
+    tel,
+  };
+}
+
+function normalizePartyCompanyTemplateMap(value: unknown): Record<RelatedPartyKey, PartyCompanyTemplatePreset[]> {
+  const next = createEmptyPartyCompanyTemplates();
+  if (!value || typeof value !== "object") {
+    return next;
+  }
+  const source = value as Partial<Record<RelatedPartyKey, unknown>>;
+  (Object.keys(next) as RelatedPartyKey[]).forEach((key) => {
+    const list = Array.isArray(source[key]) ? source[key] : [];
+    next[key] = list
+      .map((item) => normalizePartyCompanyTemplate(item))
+      .filter((item): item is PartyCompanyTemplatePreset => item !== null);
+  });
+  return next;
+}
 
 function UiIcon({ name }: { name: UiIconName }) {
   const common = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
@@ -3041,6 +3093,9 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   const [scheduleTemplates, setScheduleTemplates] = useState<Array<SimpleTemplate<ScheduleRow[]>>>([]);
   const [detailPhotoTemplates, setDetailPhotoTemplates] = useState<Array<SimpleTemplate<PhotoSlots>>>([]);
   const [partyTemplates, setPartyTemplates] = useState<Array<SimpleTemplate<Project["relatedParties"]>>>([]);
+  const [partyCompanyTemplates, setPartyCompanyTemplates] = useState<Record<RelatedPartyKey, PartyCompanyTemplatePreset[]>>(
+    createEmptyPartyCompanyTemplates(),
+  );
   const [layoutTemplates, setLayoutTemplates] = useState<
     Array<SimpleTemplate<LayoutTemplatePayload>>
   >([]);
@@ -3383,6 +3438,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     scheduleTemplates,
     detailPhotoTemplates,
     partyTemplates,
+    partyCompanyTemplates,
     layoutTemplates,
     hydrated,
   ]);
@@ -3454,10 +3510,12 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
       const scheduleRaw = localStorage.getItem(SCHEDULE_TEMPLATE_STORAGE_KEY);
       const detailRaw = localStorage.getItem(DETAIL_PHOTO_TEMPLATE_STORAGE_KEY);
       const partyRaw = localStorage.getItem(PARTY_TEMPLATE_STORAGE_KEY);
+      const partyCompanyRaw = localStorage.getItem(PARTY_COMPANY_TEMPLATE_STORAGE_KEY);
       const layoutRaw = localStorage.getItem(LAYOUT_TEMPLATE_STORAGE_KEY);
       const scheduleParsed = scheduleRaw ? (JSON.parse(scheduleRaw) as Array<SimpleTemplate<ScheduleRow[]>>) : [];
       const detailParsed = detailRaw ? (JSON.parse(detailRaw) as Array<SimpleTemplate<PhotoSlots>>) : [];
       const partyParsed = partyRaw ? (JSON.parse(partyRaw) as Array<SimpleTemplate<Project["relatedParties"]>>) : [];
+      const partyCompanyParsed = partyCompanyRaw ? normalizePartyCompanyTemplateMap(JSON.parse(partyCompanyRaw)) : createEmptyPartyCompanyTemplates();
       const layoutParsed = layoutRaw
         ? (JSON.parse(layoutRaw) as Array<
             SimpleTemplate<LayoutTemplatePayload>
@@ -3482,6 +3540,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
           setSelectedPartyTemplateId(partyParsed[0].id);
         }
       }
+      setPartyCompanyTemplates(partyCompanyParsed);
       if (Array.isArray(layoutParsed)) {
         const normalized = layoutParsed.map((template) => ({
           ...template,
@@ -3528,6 +3587,13 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     }
     localStorage.setItem(PARTY_TEMPLATE_STORAGE_KEY, JSON.stringify(partyTemplates));
   }, [partyTemplates, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated) {
+      return;
+    }
+    localStorage.setItem(PARTY_COMPANY_TEMPLATE_STORAGE_KEY, JSON.stringify(partyCompanyTemplates));
+  }, [partyCompanyTemplates, hydrated]);
 
   useEffect(() => {
     if (!hydrated) {
@@ -5499,7 +5565,9 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     if (!templateId) {
       return;
     }
-    const template = PARTY_COMPANY_TEMPLATE_PRESETS[key].find((item) => item.id === templateId);
+    const template = [...(partyCompanyTemplates[key] || []), ...PARTY_COMPANY_TEMPLATE_PRESETS[key]].find(
+      (item) => item.id === templateId,
+    );
     if (!template) {
       return;
     }
@@ -5510,6 +5578,33 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
       office: template.office,
       tel: template.tel,
     });
+  }
+
+  function saveRelatedPartyCompanyTemplate(key: RelatedPartyKey): void {
+    if (!canEdit) {
+      return;
+    }
+    const party = selectedProject.relatedParties[key];
+    const company = party.company.trim();
+    if (!company) {
+      alert("会社名 / 表示名を入力してからテンプレート登録してください。");
+      return;
+    }
+    const item: PartyCompanyTemplatePreset = {
+      id: uid(`tpl_party_company_${key}`),
+      label: `${company}_${autoTemplateName("会社tpl")}`,
+      title: party.title.trim() || party.title,
+      company,
+      person: party.person.trim(),
+      office: party.office.trim(),
+      tel: party.tel.trim(),
+    };
+    setPartyCompanyTemplates((prev) => ({
+      ...prev,
+      [key]: [item, ...(prev[key] || [])],
+    }));
+    setPartyTemplateSelections((prev) => ({ ...prev, [key]: item.id }));
+    appendAudit("template_apply", `${party.title} の会社テンプレートを登録`);
   }
 
   function applyLayoutImageFile(file: File): void {
@@ -9319,6 +9414,10 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
                     <div key={`party_slide_${slideIndex}`} className="party-slide">
                       {keys.map((key) => {
                         const party = selectedProject.relatedParties[key];
+                        const companyTemplateOptions = [
+                          ...(partyCompanyTemplates[key] || []),
+                          ...PARTY_COMPANY_TEMPLATE_PRESETS[key],
+                        ];
                         return (
                           <article key={`party_${key}`} className="sub-panel party-card">
                             <div className="party-head">
@@ -9341,13 +9440,24 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
                                   onChange={(event) => applyRelatedPartyCompanyTemplate(key, event.target.value)}
                                 >
                                   <option value="">テンプレートを選択（任意）</option>
-                                  {PARTY_COMPANY_TEMPLATE_PRESETS[key].map((template) => (
+                                  {companyTemplateOptions.map((template) => (
                                     <option key={`party_company_template_${key}_${template.id}`} value={template.id}>
                                       {template.label}
                                     </option>
                                   ))}
                                 </select>
                               </label>
+                              <div className="inline-row wrap span-2 party-company-template-actions">
+                                <button
+                                  type="button"
+                                  className="btn btn-subtle"
+                                  onClick={() => saveRelatedPartyCompanyTemplate(key)}
+                                  disabled={!canEdit}
+                                >
+                                  <span className="btn-icon"><UiIcon name="save" /></span>
+                                  この内容をテンプレート登録
+                                </button>
+                              </div>
                               <label className="field"><span>見出し</span><input className="control" value={party.title} onChange={(event) => updateRelatedParty(key, { title: event.target.value })} /></label>
                               <label className="field"><span>会社名 / 表示名</span><input data-required-key={`relatedPartyCompany:${key}`} className={`control ${party.enabled && !party.company.trim() ? "control-missing" : ""}`} value={party.company} onChange={(event) => updateRelatedParty(key, { company: event.target.value })} /></label>
                               <label className="field"><span>担当者</span><input className="control" value={party.person} onChange={(event) => updateRelatedParty(key, { person: event.target.value })} /></label>

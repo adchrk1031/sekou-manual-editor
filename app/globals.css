@@ -2300,6 +2300,15 @@ p {
   max-width: 560px;
 }
 
+.party-company-template-actions {
+  margin-top: -2px;
+  margin-bottom: 2px;
+}
+
+.party-company-template-actions .btn {
+  min-height: 42px;
+}
+
 .party-slider-nav {
   display: flex;
   align-items: center;
