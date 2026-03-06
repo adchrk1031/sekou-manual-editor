@@ -311,6 +311,22 @@ type WorkMaster = {
   defaultText: string;
 };
 
+type ScheduleProcedureTemplateStep = {
+  id: string;
+  label: string;
+  durationMinutes: number;
+  outage: boolean;
+  note: string;
+};
+
+type ScheduleProcedureTemplate = {
+  id: string;
+  name: string;
+  createdAt: string;
+  workCodes: WorkCode[];
+  steps: ScheduleProcedureTemplateStep[];
+};
+
 type TemplateScope = "schedule" | "detailPhotos" | "relatedParties" | "layout";
 type PdfTemplateId = "standard" | "kansai" | "night";
 
@@ -544,6 +560,7 @@ const TEST_EDITOR_SEED_STORAGE_KEY = "sekou-tool-test-editors-seeded-v2";
 const AUDIT_STORAGE_KEY = "sekou-tool-audit-v1";
 const REVISION_STORAGE_KEY = "sekou-tool-revision-v1";
 const SCHEDULE_TEMPLATE_STORAGE_KEY = "sekou-tool-template-schedule-v1";
+const SCHEDULE_PROCEDURE_TEMPLATE_STORAGE_KEY = "sekou-tool-template-schedule-procedures-v1";
 const DETAIL_PHOTO_TEMPLATE_STORAGE_KEY = "sekou-tool-template-detail-photos-v1";
 const PARTY_TEMPLATE_STORAGE_KEY = "sekou-tool-template-parties-v1";
 const PARTY_COMPANY_TEMPLATE_STORAGE_KEY = "sekou-tool-template-party-companies-v1";
@@ -661,6 +678,47 @@ const WORK_MASTER: WorkMaster[] = [
   { code: "GROUND_A", name: "A種接地是正", detailText: "A種接地抵抗値測定と是正工事を実施", defaultText: "A種接地是正" },
   { code: "GROUND_B", name: "B種接地是正", detailText: "B種接地抵抗値測定と是正工事を実施", defaultText: "B種接地是正" },
   { code: "GROUND_C", name: "C種接地是正", detailText: "C種接地抵抗値測定と是正工事を実施", defaultText: "C種接地是正" },
+];
+
+const DEFAULT_SCHEDULE_PROCEDURE_TEMPLATES: ScheduleProcedureTemplate[] = [
+  {
+    id: "proc_kouatsu_standard",
+    name: "高圧ケーブル交換（標準段取り）",
+    createdAt: "system",
+    workCodes: ["KOUATSU_CABLE"],
+    steps: [
+      { id: "step_prepare", label: "事前準備", durationMinutes: 90, outage: false, note: "資材搬入・KY・停電前チェック" },
+      { id: "step_shutdown", label: "停電切替", durationMinutes: 60, outage: true, note: "停電開始・安全確認" },
+      { id: "step_replace", label: "高圧ケーブル交換", durationMinutes: 240, outage: true, note: "既設撤去・新設・端末処理" },
+      { id: "step_test", label: "絶縁・耐圧試験", durationMinutes: 90, outage: true, note: "試験・記録採取" },
+      { id: "step_recover", label: "復電・最終確認", durationMinutes: 60, outage: false, note: "復電・巡回確認・引継ぎ" },
+    ],
+  },
+  {
+    id: "proc_pas_ugs_standard",
+    name: "PAS/UGS更新（標準段取り）",
+    createdAt: "system",
+    workCodes: ["PAS", "UGS"],
+    steps: [
+      { id: "step_prepare", label: "事前準備", durationMinutes: 60, outage: false, note: "作業動線確保・保安体制確認" },
+      { id: "step_shutdown", label: "停電切替", durationMinutes: 45, outage: true, note: "停電開始・絶縁確認" },
+      { id: "step_ugs", label: "UGS交換", durationMinutes: 120, outage: true, note: "UGS更新・端末処理" },
+      { id: "step_pas", label: "PAS交換", durationMinutes: 120, outage: true, note: "PAS更新・動作確認" },
+      { id: "step_recover", label: "復電・最終確認", durationMinutes: 45, outage: false, note: "復電・確認・報告" },
+    ],
+  },
+  {
+    id: "proc_ground_standard",
+    name: "接地是正（標準段取り）",
+    createdAt: "system",
+    workCodes: ["GROUND_A", "GROUND_B", "GROUND_C"],
+    steps: [
+      { id: "step_prepare", label: "事前準備", durationMinutes: 60, outage: false, note: "測定計画・安全確認" },
+      { id: "step_measure", label: "接地測定", durationMinutes: 90, outage: true, note: "接地抵抗測定" },
+      { id: "step_improve", label: "是正作業", durationMinutes: 180, outage: true, note: "接地改修・再測定" },
+      { id: "step_finalize", label: "復旧・報告", durationMinutes: 45, outage: false, note: "復旧・記録提出" },
+    ],
+  },
 ];
 
 const CSV_WORK_COLUMN_ALIASES: Record<WorkCode, string[]> = {
@@ -1224,6 +1282,77 @@ function createPhotoSlots(labels?: string[]): PhotoSlots {
 
 function cloneScheduleRows(rows: ScheduleRow[]): ScheduleRow[] {
   return rows.map((row) => ({ ...row, id: uid("row") }));
+}
+
+function cloneProcedureTemplateSteps(steps: ScheduleProcedureTemplateStep[]): ScheduleProcedureTemplateStep[] {
+  return steps.map((step) => ({ ...step, id: uid("proc_step") }));
+}
+
+function cloneScheduleProcedureTemplates(templates: ScheduleProcedureTemplate[]): ScheduleProcedureTemplate[] {
+  return templates.map((template) => ({
+    ...template,
+    workCodes: [...template.workCodes],
+    steps: template.steps.map((step) => ({ ...step })),
+  }));
+}
+
+function normalizeScheduleProcedureTemplates(value: unknown): ScheduleProcedureTemplate[] {
+  if (!Array.isArray(value)) {
+    return cloneScheduleProcedureTemplates(DEFAULT_SCHEDULE_PROCEDURE_TEMPLATES);
+  }
+  const normalized = value
+    .map((item) => {
+      if (!item || typeof item !== "object") {
+        return null;
+      }
+      const source = item as Partial<ScheduleProcedureTemplate>;
+      const id = typeof source.id === "string" ? source.id.trim() : "";
+      const name = typeof source.name === "string" ? source.name.trim() : "";
+      const createdAt = typeof source.createdAt === "string" ? source.createdAt : new Date().toISOString();
+      const workCodes = Array.isArray(source.workCodes)
+        ? source.workCodes.filter((code): code is WorkCode => typeof code === "string" && WORK_MASTER.some((work) => work.code === code))
+        : [];
+      const steps = Array.isArray(source.steps)
+        ? source.steps
+          .map((step, index) => {
+            if (!step || typeof step !== "object") {
+              return null;
+            }
+            const stepSource = step as Partial<ScheduleProcedureTemplateStep>;
+            const label = typeof stepSource.label === "string" ? stepSource.label.trim() : "";
+            if (!label) {
+              return null;
+            }
+            const durationRaw = Number(stepSource.durationMinutes);
+            const durationMinutes = Number.isFinite(durationRaw)
+              ? clamp(Math.round(durationRaw), 30, DAY_TOTAL_MINUTES * 30)
+              : 60;
+            return {
+              id: typeof stepSource.id === "string" && stepSource.id.trim() ? stepSource.id.trim() : uid(`proc_step_${index + 1}`),
+              label,
+              durationMinutes,
+              outage: Boolean(stepSource.outage),
+              note: typeof stepSource.note === "string" ? stepSource.note.trim() : "",
+            } as ScheduleProcedureTemplateStep;
+          })
+          .filter((step): step is ScheduleProcedureTemplateStep => step !== null)
+        : [];
+      if (!id || !name || !steps.length) {
+        return null;
+      }
+      return {
+        id,
+        name,
+        createdAt,
+        workCodes,
+        steps,
+      } as ScheduleProcedureTemplate;
+    })
+    .filter((template): template is ScheduleProcedureTemplate => template !== null);
+  if (!normalized.length) {
+    return cloneScheduleProcedureTemplates(DEFAULT_SCHEDULE_PROCEDURE_TEMPLATES);
+  }
+  return normalized;
 }
 
 function clonePhotoSlots(slots: PhotoSlots): PhotoSlots {
@@ -2112,7 +2241,12 @@ function tickLabel(minutes: number): string {
 }
 
 function startOfDay(date: string): Date {
-  return new Date(`${date}T00:00:00`);
+  const normalized = normalizeDate(date);
+  if (!normalized) {
+    return new Date(Number.NaN);
+  }
+  const [year, month, day] = normalized.split("-").map((part) => Number(part));
+  return new Date(Date.UTC(year, month - 1, day));
 }
 
 function diffDays(start: string, end: string): number {
@@ -2126,10 +2260,10 @@ function diffDays(start: string, end: string): number {
 
 function addDays(date: string, days: number): string {
   const d = startOfDay(date);
-  d.setDate(d.getDate() + days);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
+  d.setUTCDate(d.getUTCDate() + days);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 }
 
@@ -2161,7 +2295,7 @@ function formatShortDate(value: string): string {
   if (Number.isNaN(d.getTime())) {
     return value;
   }
-  return `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`;
+  return `${String(d.getUTCMonth() + 1).padStart(2, "0")}/${String(d.getUTCDate()).padStart(2, "0")}`;
 }
 
 function isLeapYear(year: number): boolean {
@@ -2271,16 +2405,17 @@ function createCsvValueGetter(record: CsvRecord): (...keys: string[]) => string 
 }
 
 function formatDateWithWeekday(value: string): string {
-  if (!value) {
+  const normalized = normalizeDate(value);
+  if (!normalized) {
     return "-";
   }
-  const d = new Date(`${value}T00:00:00`);
+  const d = startOfDay(normalized);
   if (Number.isNaN(d.getTime())) {
-    return value;
+    return normalized;
   }
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${mm}月${dd}日(${JP_WEEKDAYS[d.getDay()]})`;
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  return `${mm}月${dd}日(${JP_WEEKDAYS[d.getUTCDay()]})`;
 }
 
 function formatDateRange(start: string, end: string): string {
@@ -2717,38 +2852,7 @@ function buildTimelineTicks(viewStart: number, viewEnd: number): { lineTicks: nu
   }
   labelTickSet.add(viewStart);
   labelTickSet.add(viewEnd);
-
-  const sortedLabelTicks = Array.from(labelTickSet).sort((a, b) => a - b);
-  const minLabelGap = Math.max(30, Math.floor(labelStep * 0.6));
-  const longLabelMinGap = Math.max(90, Math.floor(labelStep * 0.85));
-  const isLongLabelTick = (tick: number): boolean => tick === viewStart || tick === viewEnd || tick % DAY_TOTAL_MINUTES === 0;
-  const tickPriority = (tick: number): number => {
-    if (tick === viewStart || tick === viewEnd) {
-      return 3;
-    }
-    if (tick % DAY_TOTAL_MINUTES === 0) {
-      return 2;
-    }
-    return 1;
-  };
-
-  const labelTicks: number[] = [];
-  for (const tick of sortedLabelTicks) {
-    if (!labelTicks.length) {
-      labelTicks.push(tick);
-      continue;
-    }
-    const lastIndex = labelTicks.length - 1;
-    const prevTick = labelTicks[lastIndex];
-    const requiredGap = isLongLabelTick(prevTick) || isLongLabelTick(tick) ? longLabelMinGap : minLabelGap;
-    if (tick - prevTick < requiredGap) {
-      if (tickPriority(tick) > tickPriority(prevTick)) {
-        labelTicks[lastIndex] = tick;
-      }
-      continue;
-    }
-    labelTicks.push(tick);
-  }
+  const labelTicks = Array.from(labelTickSet).sort((a, b) => a - b);
   return { lineTicks, labelTicks };
 }
 
@@ -2784,6 +2888,102 @@ function createScheduleFromWorks(project: Project): ScheduleRow[] {
       outage: index === 0,
       text: work.defaultText,
       note: "",
+    };
+  });
+}
+
+function mergeUniqueWorkCodes(baseCodes: WorkCode[], additionalCodes: WorkCode[]): WorkCode[] {
+  const unique = new Set<WorkCode>([...baseCodes, ...additionalCodes]);
+  return WORK_MASTER.map((work) => work.code).filter((code) => unique.has(code));
+}
+
+function resolveScheduleBuildRange(project: Project): {
+  rangeStart: string;
+  rangeEnd: string;
+  baseDate: string;
+  startOffset: number;
+  endOffset: number;
+  spanMinutes: number;
+} {
+  const rangeStart = normalizeDate(project.workDateStart) || normalizeDate(project.outageDateStart) || todayLocalISO();
+  const rangeEndRaw = normalizeDate(project.workDateEnd) || normalizeDate(project.outageDateEnd) || rangeStart;
+  const rangeEnd = rangeEndRaw < rangeStart ? rangeStart : rangeEndRaw;
+  const startDate = normalizeDate(project.outageDateStart) || rangeStart;
+  const startTime = normalizeTime(project.outageTimeStart, "09:00");
+  const endDateRaw = normalizeDate(project.outageDateEnd) || rangeEnd;
+  const endDate = endDateRaw < startDate ? startDate : endDateRaw;
+  const endTime = normalizeTime(project.outageTimeEnd, "17:00");
+  const baseDate = rangeStart;
+  const startOffset = Math.max(0, toTimelineOffset(startDate, startTime, baseDate));
+  const rawEndOffset = toTimelineOffset(endDate, endTime, baseDate);
+  const endOffset = rawEndOffset > startOffset ? rawEndOffset : startOffset + MIN_BLOCK_MINUTES;
+  return {
+    rangeStart,
+    rangeEnd,
+    baseDate,
+    startOffset,
+    endOffset,
+    spanMinutes: Math.max(MIN_BLOCK_MINUTES, endOffset - startOffset),
+  };
+}
+
+function toScheduleTemplateStepDuration(row: ScheduleRow): number {
+  const baseDate = normalizeDate(row.startDate) || todayLocalISO();
+  const startOffset = toTimelineOffset(row.startDate, normalizeTime(row.start, "09:00"), baseDate);
+  const endOffset = toTimelineOffset(row.endDate, normalizeTime(row.end, "17:00"), baseDate);
+  return clamp(endOffset - startOffset, MIN_BLOCK_MINUTES, DAY_TOTAL_MINUTES * 30);
+}
+
+function rowToProcedureStep(row: ScheduleRow): ScheduleProcedureTemplateStep {
+  const label = row.label.trim() || "工程";
+  return {
+    id: uid("proc_step"),
+    label,
+    durationMinutes: toScheduleTemplateStepDuration(row),
+    outage: Boolean(row.outage),
+    note: row.note.trim(),
+  };
+}
+
+function stepSignature(step: Pick<ScheduleProcedureTemplateStep, "label" | "durationMinutes" | "outage" | "note">): string {
+  return `${step.label.trim()}|${Math.round(step.durationMinutes)}|${step.outage ? "1" : "0"}|${step.note.trim()}`;
+}
+
+function buildRowsFromProcedureTemplate(project: Project, template: ScheduleProcedureTemplate): ScheduleRow[] {
+  const steps = template.steps.filter((step) => step.label.trim());
+  if (!steps.length) {
+    return [];
+  }
+  const range = resolveScheduleBuildRange(project);
+  const rawDurations = steps.map((step) => clamp(Math.round(step.durationMinutes || MIN_BLOCK_MINUTES), MIN_BLOCK_MINUTES, DAY_TOTAL_MINUTES * 30));
+  const total = rawDurations.reduce((sum, value) => sum + value, 0) || rawDurations.length * MIN_BLOCK_MINUTES;
+  let elapsed = 0;
+
+  return steps.map((step, index) => {
+    const startRatio = elapsed / total;
+    elapsed += rawDurations[index];
+    const endRatio = index === steps.length - 1 ? 1 : elapsed / total;
+    const rawStart = range.startOffset + Math.round((range.spanMinutes * startRatio) / DRAG_SNAP_MINUTES) * DRAG_SNAP_MINUTES;
+    const rawEnd = index === steps.length - 1
+      ? range.endOffset
+      : range.startOffset + Math.round((range.spanMinutes * endRatio) / DRAG_SNAP_MINUTES) * DRAG_SNAP_MINUTES;
+    const normalized = normalizeRowRange(
+      rawStart,
+      rawEnd,
+      Math.max((diffDays(range.rangeStart, range.rangeEnd) + 1) * DAY_TOTAL_MINUTES, range.endOffset + MIN_BLOCK_MINUTES),
+    );
+    const startPoint = fromTimelineOffset(normalized.start, range.baseDate);
+    const endPoint = fromTimelineOffset(normalized.end, range.baseDate);
+    return {
+      id: uid("row"),
+      label: step.label.trim(),
+      startDate: startPoint.date,
+      start: startPoint.time,
+      endDate: endPoint.date,
+      end: endPoint.time,
+      outage: Boolean(step.outage),
+      text: step.label.trim(),
+      note: step.note.trim(),
     };
   });
 }
@@ -3190,6 +3390,9 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   const [layoutPhotoSlide, setLayoutPhotoSlide] = useState(0);
   const [printMode, setPrintMode] = useState(false);
   const [scheduleTemplates, setScheduleTemplates] = useState<Array<SimpleTemplate<ScheduleRow[]>>>([]);
+  const [scheduleProcedureTemplates, setScheduleProcedureTemplates] = useState<ScheduleProcedureTemplate[]>(
+    cloneScheduleProcedureTemplates(DEFAULT_SCHEDULE_PROCEDURE_TEMPLATES),
+  );
   const [detailPhotoTemplates, setDetailPhotoTemplates] = useState<Array<SimpleTemplate<PhotoSlots>>>([]);
   const [partyTemplates, setPartyTemplates] = useState<Array<SimpleTemplate<Project["relatedParties"]>>>([]);
   const [partyCompanyTemplates, setPartyCompanyTemplates] = useState<Record<RelatedPartyKey, PartyCompanyTemplatePreset[]>>(
@@ -3199,11 +3402,13 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     Array<SimpleTemplate<LayoutTemplatePayload>>
   >([]);
   const [selectedScheduleTemplateId, setSelectedScheduleTemplateId] = useState("");
+  const [selectedScheduleProcedureTemplateId, setSelectedScheduleProcedureTemplateId] = useState("");
   const [selectedDetailPhotoTemplateId, setSelectedDetailPhotoTemplateId] = useState("");
   const [selectedPartyTemplateId, setSelectedPartyTemplateId] = useState("");
   const [selectedLayoutTemplateId, setSelectedLayoutTemplateId] = useState("");
   const [templateScope, setTemplateScope] = useState<TemplateScope>("schedule");
   const [copySourceProjectId, setCopySourceProjectId] = useState("");
+  const [newScheduleProcedureTemplateName, setNewScheduleProcedureTemplateName] = useState("");
   const [users, setUsers] = useState<UserAccount[]>([]);
   const [currentUserId, setCurrentUserId] = useState("");
   const [loginEmail, setLoginEmail] = useState("");
@@ -3647,11 +3852,13 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   useEffect(() => {
     try {
       const scheduleRaw = localStorage.getItem(SCHEDULE_TEMPLATE_STORAGE_KEY);
+      const scheduleProcedureRaw = localStorage.getItem(SCHEDULE_PROCEDURE_TEMPLATE_STORAGE_KEY);
       const detailRaw = localStorage.getItem(DETAIL_PHOTO_TEMPLATE_STORAGE_KEY);
       const partyRaw = localStorage.getItem(PARTY_TEMPLATE_STORAGE_KEY);
       const partyCompanyRaw = localStorage.getItem(PARTY_COMPANY_TEMPLATE_STORAGE_KEY);
       const layoutRaw = localStorage.getItem(LAYOUT_TEMPLATE_STORAGE_KEY);
       const scheduleParsed = parseStorageJson<Array<SimpleTemplate<ScheduleRow[]>>>(scheduleRaw) ?? [];
+      const scheduleProcedureParsed = parseStorageJson<ScheduleProcedureTemplate[]>(scheduleProcedureRaw);
       const detailParsed = parseStorageJson<Array<SimpleTemplate<PhotoSlots>>>(detailRaw) ?? [];
       const partyParsed = parseStorageJson<Array<SimpleTemplate<Project["relatedParties"]>>>(partyRaw) ?? [];
       const partyCompanyParsedRaw = parseStorageJson<Record<RelatedPartyKey, PartyCompanyTemplatePreset[]>>(partyCompanyRaw);
@@ -3666,6 +3873,9 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
           setSelectedScheduleTemplateId(scheduleParsed[0].id);
         }
       }
+      const normalizedProcedures = normalizeScheduleProcedureTemplates(scheduleProcedureParsed);
+      setScheduleProcedureTemplates(normalizedProcedures);
+      setSelectedScheduleProcedureTemplateId(normalizedProcedures[0]?.id ?? "");
       if (Array.isArray(detailParsed)) {
         setDetailPhotoTemplates(detailParsed);
         if (detailParsed[0]) {
@@ -3711,6 +3921,13 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     }
     localStorage.setItem(SCHEDULE_TEMPLATE_STORAGE_KEY, stringifyForStorage(scheduleTemplates));
   }, [scheduleTemplates, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated) {
+      return;
+    }
+    localStorage.setItem(SCHEDULE_PROCEDURE_TEMPLATE_STORAGE_KEY, stringifyForStorage(scheduleProcedureTemplates));
+  }, [scheduleProcedureTemplates, hydrated]);
 
   useEffect(() => {
     if (!hydrated) {
@@ -3841,6 +4058,10 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   const selectedScheduleTemplate = useMemo(
     () => scheduleTemplates.find((template) => template.id === selectedScheduleTemplateId),
     [scheduleTemplates, selectedScheduleTemplateId],
+  );
+  const selectedScheduleProcedureTemplate = useMemo(
+    () => scheduleProcedureTemplates.find((template) => template.id === selectedScheduleProcedureTemplateId),
+    [scheduleProcedureTemplates, selectedScheduleProcedureTemplateId],
   );
   const selectedDetailPhotoTemplate = useMemo(
     () => detailPhotoTemplates.find((template) => template.id === selectedDetailPhotoTemplateId),
@@ -4499,6 +4720,28 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
       setUserListExpanded(false);
     }
   }, [users.length, userListExpanded]);
+
+  useEffect(() => {
+    if (!scheduleProcedureTemplates.length) {
+      setSelectedScheduleProcedureTemplateId("");
+      return;
+    }
+    if (!selectedScheduleProcedureTemplateId || !scheduleProcedureTemplates.some((template) => template.id === selectedScheduleProcedureTemplateId)) {
+      setSelectedScheduleProcedureTemplateId(scheduleProcedureTemplates[0].id);
+    }
+  }, [scheduleProcedureTemplates, selectedScheduleProcedureTemplateId]);
+
+  useEffect(() => {
+    if (!hasSelectedProject || selectedScheduleProcedureTemplateId) {
+      return;
+    }
+    const matched = scheduleProcedureTemplates.find((template) =>
+      template.workCodes.some((code) => selectedProject.selectedWorkCodes.includes(code)),
+    );
+    if (matched) {
+      setSelectedScheduleProcedureTemplateId(matched.id);
+    }
+  }, [hasSelectedProject, selectedProject.selectedWorkCodes, scheduleProcedureTemplates, selectedScheduleProcedureTemplateId]);
 
   function updateSelectedProject(
     updater: (project: Project) => Project,
@@ -5419,6 +5662,125 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
       (project) => ({ ...project, scheduleRows: createScheduleFromWorks(project) }),
       { action: "schedule_regenerate", detail: "工事項目から工程表を再生成", snapshotLabel: "工程表再生成" },
     );
+  }
+
+  function regenerateScheduleFromProcedureTemplate(): void {
+    if (!selectedScheduleProcedureTemplate) {
+      alert("段取りテンプレートを選択してください。");
+      return;
+    }
+    updateSelectedProject(
+      (project) => {
+        const nextRows = buildRowsFromProcedureTemplate(project, selectedScheduleProcedureTemplate);
+        return {
+          ...project,
+          selectedWorkCodes: mergeUniqueWorkCodes(project.selectedWorkCodes, selectedScheduleProcedureTemplate.workCodes),
+          scheduleRows: nextRows,
+        };
+      },
+      {
+        action: "schedule_regenerate",
+        detail: `段取りテンプレートで再生成: ${selectedScheduleProcedureTemplate.name}`,
+        snapshotLabel: "段取りテンプレート再生成",
+      },
+    );
+  }
+
+  function appendProcedureTemplateRows(): void {
+    if (!selectedScheduleProcedureTemplate) {
+      alert("段取りテンプレートを選択してください。");
+      return;
+    }
+    updateSelectedProject(
+      (project) => {
+        const nextRows = buildRowsFromProcedureTemplate(project, selectedScheduleProcedureTemplate);
+        return {
+          ...project,
+          selectedWorkCodes: mergeUniqueWorkCodes(project.selectedWorkCodes, selectedScheduleProcedureTemplate.workCodes),
+          scheduleRows: [...project.scheduleRows, ...nextRows],
+        };
+      },
+      {
+        action: "schedule_add_row",
+        detail: `段取りテンプレートで工程を追加: ${selectedScheduleProcedureTemplate.name}`,
+        snapshotLabel: "段取りテンプレート追加",
+      },
+    );
+  }
+
+  function saveCurrentScheduleAsProcedureTemplate(): void {
+    if (!canEdit) {
+      return;
+    }
+    const steps = selectedProject.scheduleRows
+      .filter((row) => row.label.trim())
+      .map((row) => rowToProcedureStep(row));
+    if (!steps.length) {
+      alert("工程表に1行以上入力してからテンプレート登録してください。");
+      return;
+    }
+    const normalizedName = newScheduleProcedureTemplateName.trim();
+    const fallbackHead = selectedProject.propertyName.trim() || selectedProject.titleSubject.trim() || "工程";
+    const item: ScheduleProcedureTemplate = {
+      id: uid("proc_tpl"),
+      name: normalizedName || `${fallbackHead}_段取り_${autoTemplateName("tpl")}`,
+      createdAt: new Date().toISOString(),
+      workCodes: [...selectedProject.selectedWorkCodes],
+      steps,
+    };
+    setScheduleProcedureTemplates((prev) => [item, ...prev]);
+    setSelectedScheduleProcedureTemplateId(item.id);
+    setNewScheduleProcedureTemplateName("");
+    appendAudit("template_apply", `段取りテンプレート登録: ${item.name}`);
+  }
+
+  function appendCurrentRowsToSelectedProcedureTemplate(): void {
+    if (!canEdit) {
+      return;
+    }
+    if (!selectedScheduleProcedureTemplate) {
+      alert("追記先の段取りテンプレートを選択してください。");
+      return;
+    }
+    const additionalSteps = selectedProject.scheduleRows
+      .filter((row) => row.label.trim())
+      .map((row) => rowToProcedureStep(row));
+    if (!additionalSteps.length) {
+      alert("追記できる工程行がありません。");
+      return;
+    }
+    setScheduleProcedureTemplates((prev) => prev.map((template) => {
+      if (template.id !== selectedScheduleProcedureTemplate.id) {
+        return template;
+      }
+      const exists = new Set(template.steps.map((step) => stepSignature(step)));
+      const mergedSteps = [...template.steps];
+      additionalSteps.forEach((step) => {
+        const signature = stepSignature(step);
+        if (exists.has(signature)) {
+          return;
+        }
+        mergedSteps.push(step);
+        exists.add(signature);
+      });
+      return {
+        ...template,
+        workCodes: mergeUniqueWorkCodes(template.workCodes, selectedProject.selectedWorkCodes),
+        steps: mergedSteps,
+      };
+    }));
+    appendAudit("template_apply", `段取りテンプレート追記: ${selectedScheduleProcedureTemplate.name}`);
+  }
+
+  function deleteScheduleProcedureTemplate(): void {
+    if (!canEdit || !selectedScheduleProcedureTemplateId) {
+      return;
+    }
+    setScheduleProcedureTemplates((prev) => {
+      const next = prev.filter((template) => template.id !== selectedScheduleProcedureTemplateId);
+      setSelectedScheduleProcedureTemplateId(next[0]?.id ?? "");
+      return next.length ? next : cloneScheduleProcedureTemplates(DEFAULT_SCHEDULE_PROCEDURE_TEMPLATES);
+    });
   }
 
   function addScheduleRow(): void {
@@ -9136,6 +9498,78 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
               <button type="button" className="btn btn-action-add" onClick={addScheduleRow}><span className="btn-icon"><UiIcon name="addRow" /></span>行追加</button>
               <button type="button" className="btn btn-action-regenerate" onClick={regenerateSchedule}><span className="btn-icon"><UiIcon name="refresh" /></span>工事項目から再生成</button>
             </div>
+          </div>
+          <div className="schedule-template-tools">
+            <div className="schedule-template-head">
+              <label className="field schedule-template-picker">
+                <span>工程テンプレート（段取り）</span>
+                <select
+                  className="control"
+                  value={selectedScheduleProcedureTemplateId}
+                  onChange={(event) => setSelectedScheduleProcedureTemplateId(event.target.value)}
+                >
+                  <option value="">テンプレートを選択</option>
+                  {scheduleProcedureTemplates.map((template) => (
+                    <option key={`schedule_proc_tpl_${template.id}`} value={template.id}>
+                      {template.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="inline-row wrap schedule-template-actions">
+                <button
+                  type="button"
+                  className="btn btn-action-regenerate"
+                  onClick={regenerateScheduleFromProcedureTemplate}
+                  disabled={!selectedScheduleProcedureTemplate}
+                >
+                  <span className="btn-icon"><UiIcon name="refresh" /></span>テンプレートで再生成
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-subtle"
+                  onClick={appendProcedureTemplateRows}
+                  disabled={!selectedScheduleProcedureTemplate}
+                >
+                  <span className="btn-icon"><UiIcon name="addRow" /></span>工程を自動追加
+                </button>
+              </div>
+            </div>
+            <div className="schedule-template-save-row">
+              <label className="field schedule-template-name-field">
+                <span>テンプレート名（新規保存）</span>
+                <input
+                  className="control"
+                  value={newScheduleProcedureTemplateName}
+                  onChange={(event) => setNewScheduleProcedureTemplateName(event.target.value)}
+                  placeholder="例: 高圧ケーブル交換_標準段取り"
+                />
+              </label>
+              <div className="inline-row wrap schedule-template-actions">
+                <button type="button" className="btn btn-subtle" onClick={saveCurrentScheduleAsProcedureTemplate} disabled={!canEdit}>
+                  <span className="btn-icon"><UiIcon name="save" /></span>現在工程をテンプレ登録
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-subtle"
+                  onClick={appendCurrentRowsToSelectedProcedureTemplate}
+                  disabled={!canEdit || !selectedScheduleProcedureTemplate}
+                >
+                  <span className="btn-icon"><UiIcon name="plus" /></span>選択テンプレに追記
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  onClick={deleteScheduleProcedureTemplate}
+                  disabled={!canEdit || !selectedScheduleProcedureTemplate}
+                >
+                  <span className="btn-icon"><UiIcon name="delete" /></span>テンプレート削除
+                </button>
+              </div>
+            </div>
+            <p className="mini">
+              工事項目や停電時間をもとに工程バーを自動生成します。日時はUTC基準で正規化し、日付+1日のズレを防止しています。
+            </p>
           </div>
           <p className="timeline-date-line">
             工事期間: {dateRangeLabel} / 停電期間: {selectedProject.outageEnabled ? outageDateTimeLabel : "停電なし"}

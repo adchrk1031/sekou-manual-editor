@@ -2365,6 +2365,42 @@ p {
   color: var(--muted);
 }
 
+.schedule-template-tools {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #f8fbff;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.schedule-template-head {
+  display: grid;
+  grid-template-columns: minmax(240px, 360px) 1fr;
+  gap: 12px;
+  align-items: end;
+}
+
+.schedule-template-picker {
+  min-width: 0;
+}
+
+.schedule-template-actions {
+  align-items: end;
+}
+
+.schedule-template-save-row {
+  display: grid;
+  grid-template-columns: minmax(260px, 360px) 1fr;
+  gap: 12px;
+  align-items: end;
+}
+
+.schedule-template-name-field {
+  min-width: 0;
+}
+
 .mini {
   font-size: 0.84rem;
   color: var(--muted);
@@ -4400,6 +4436,11 @@ p {
   }
 
   .timeline-row {
+    grid-template-columns: 1fr;
+  }
+
+  .schedule-template-head,
+  .schedule-template-save-row {
     grid-template-columns: 1fr;
   }
 
