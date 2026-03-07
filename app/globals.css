@@ -811,7 +811,8 @@ p {
 }
 
 .auth-switch-btn {
-  min-height: 56px;
+  min-height: 64px;
+  height: 64px;
   border: 1px solid var(--btn-soft-border);
   border-radius: 10px;
   background: var(--btn-soft-bg);
@@ -842,7 +843,8 @@ p {
 
 .auth-login-btn {
   width: 100%;
-  min-height: 56px;
+  min-height: 64px;
+  height: 64px;
   justify-self: stretch;
   font-size: 1rem;
   padding: 0 16px;
