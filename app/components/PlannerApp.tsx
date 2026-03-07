@@ -389,6 +389,7 @@ type LayoutAdvancedTab = "transform" | "style" | "arrange";
 type LayoutEditorTarget =
   | { kind: "layoutImage"; label: string }
   | { kind: "photo"; section: "detailPhotos" | "layoutPhotos"; photoId: string; label: string };
+type CropAspectPreset = "free" | "square" | "landscape" | "portrait";
 
 type LayoutDrawingDraft = {
   type: "arrow" | "rect";
@@ -510,7 +511,8 @@ type UiIconName =
   | "photo"
   | "clear"
   | "lock"
-  | "template";
+  | "template"
+  | "crop";
 
 type UserCreateNotice = {
   type: "ok" | "error";
@@ -609,6 +611,12 @@ const LAYOUT_TEXT_FONT_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "\"Arial\", sans-serif", label: "Arial" },
   { value: "\"Courier New\", monospace", label: "等幅（Monospace）" },
 ];
+const CROP_ASPECT_OPTIONS: Array<{ value: CropAspectPreset; label: string }> = [
+  { value: "free", label: "自由（元画像比率）" },
+  { value: "square", label: "1:1（正方形）" },
+  { value: "landscape", label: "4:3（横長）" },
+  { value: "portrait", label: "3:4（縦長）" },
+];
 
 const TEST_EDITOR_USER_PRESETS: Array<{ id: string; name: string; email: string; password: string }> = [
   { id: "user_test_editor_01", name: "テスト編集者1", email: "test.editor01@example.com", password: "testpass01" },
@@ -658,7 +666,9 @@ const AUDIT_ACTION_LABELS: Record<string, string> = {
   photo_add: "写真枠追加",
   photo_remove: "写真枠削除",
   layout_image_replace: "配置図アップロード",
+  layout_image_crop: "配置図トリミング",
   layout_annotation_save: "配置図注釈保存",
+  photo_crop: "写真トリミング",
   pdf_export: "PDF出力",
   project_create: "案件作成",
   project_delete: "案件削除",
@@ -1031,6 +1041,8 @@ function UiIcon({ name }: { name: UiIconName }) {
       return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="M5 9h10v8H5zM7 9V7a3 3 0 0 1 6 0v2" /></svg>;
     case "template":
       return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="M4 4h12v12H4zM4 8h12M8 8v8" /></svg>;
+    case "crop":
+      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="M6 3v11a2 2 0 0 0 2 2h9M3 6h11a2 2 0 0 1 2 2v9M6 6h8v8H6z" /></svg>;
     default:
       return <svg viewBox="0 0 20 20" aria-hidden="true"><circle {...common} cx="10" cy="10" r="6" /></svg>;
   }
@@ -2664,6 +2676,16 @@ type ImageOptimizeOptions = {
   targetBytes?: number;
 };
 
+type CropImageOptions = {
+  zoom: number;
+  offsetX: number;
+  offsetY: number;
+  aspectRatio: number;
+  maxEdge: number;
+  quality?: number;
+  targetBytes?: number;
+};
+
 async function optimizeImageFile(
   file: File,
   { maxEdge, quality = 0.84, targetBytes = TARGET_PHOTO_DATA_URL_BYTES }: ImageOptimizeOptions,
@@ -2719,6 +2741,117 @@ async function optimizeImageFile(
       height = Math.max(1, Math.round(height * 0.86));
     }
     bitmap.close();
+    return best;
+  } catch {
+    return fallback;
+  }
+}
+
+function resolveCropAspectRatio(
+  preset: CropAspectPreset,
+  imageSize: { width: number; height: number } | null,
+): number {
+  if (preset === "square") {
+    return 1;
+  }
+  if (preset === "landscape") {
+    return 4 / 3;
+  }
+  if (preset === "portrait") {
+    return 3 / 4;
+  }
+  if (!imageSize || !imageSize.width || !imageSize.height) {
+    return 4 / 3;
+  }
+  return imageSize.width / imageSize.height;
+}
+
+function loadImageElement(dataUrl: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("image load failed"));
+    img.src = dataUrl;
+  });
+}
+
+async function cropImageDataUrl(
+  sourceDataUrl: string,
+  {
+    zoom,
+    offsetX,
+    offsetY,
+    aspectRatio,
+    maxEdge,
+    quality = 0.84,
+    targetBytes = TARGET_PHOTO_DATA_URL_BYTES,
+  }: CropImageOptions,
+): Promise<string> {
+  const fallback = sourceDataUrl;
+  if (typeof window === "undefined") {
+    return fallback;
+  }
+  try {
+    const img = await loadImageElement(sourceDataUrl);
+    const sourceWidth = Math.max(1, img.naturalWidth || img.width);
+    const sourceHeight = Math.max(1, img.naturalHeight || img.height);
+    const safeAspect = Number.isFinite(aspectRatio) && aspectRatio > 0 ? aspectRatio : sourceWidth / sourceHeight;
+    const safeZoom = clamp(zoom, 1, 3);
+    const safeOffsetX = clamp(offsetX, -1, 1);
+    const safeOffsetY = clamp(offsetY, -1, 1);
+
+    let baseCropWidth = sourceWidth;
+    let baseCropHeight = baseCropWidth / safeAspect;
+    if (baseCropHeight > sourceHeight) {
+      baseCropHeight = sourceHeight;
+      baseCropWidth = baseCropHeight * safeAspect;
+    }
+
+    const cropWidth = clamp(baseCropWidth / safeZoom, 1, sourceWidth);
+    const cropHeight = clamp(baseCropHeight / safeZoom, 1, sourceHeight);
+    const halfShiftX = (sourceWidth - cropWidth) / 2;
+    const halfShiftY = (sourceHeight - cropHeight) / 2;
+    const sourceX = clamp((sourceWidth - cropWidth) / 2 + safeOffsetX * halfShiftX, 0, Math.max(0, sourceWidth - cropWidth));
+    const sourceY = clamp((sourceHeight - cropHeight) / 2 + safeOffsetY * halfShiftY, 0, Math.max(0, sourceHeight - cropHeight));
+
+    let outputWidth = Math.max(1, Math.round(cropWidth));
+    let outputHeight = Math.max(1, Math.round(cropHeight));
+    if (maxEdge > 0 && Math.max(outputWidth, outputHeight) > maxEdge) {
+      const scale = maxEdge / Math.max(outputWidth, outputHeight);
+      outputWidth = Math.max(1, Math.round(outputWidth * scale));
+      outputHeight = Math.max(1, Math.round(outputHeight * scale));
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = outputWidth;
+    canvas.height = outputHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      return fallback;
+    }
+    ctx.clearRect(0, 0, outputWidth, outputHeight);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(img, sourceX, sourceY, cropWidth, cropHeight, 0, 0, outputWidth, outputHeight);
+
+    const qualityCandidates = [quality, Math.max(0.72, quality - 0.08), Math.max(0.6, quality - 0.18), 0.5];
+    let best = canvas.toDataURL("image/webp", qualityCandidates[0]) || fallback;
+    let bestBytes = estimateDataUrlBytes(best);
+
+    for (const q of qualityCandidates) {
+      const candidate = canvas.toDataURL("image/webp", q);
+      if (!candidate) {
+        continue;
+      }
+      const bytes = estimateDataUrlBytes(candidate);
+      if (bytes < bestBytes) {
+        best = candidate;
+        bestBytes = bytes;
+      }
+      if (bytes <= targetBytes) {
+        return candidate;
+      }
+    }
     return best;
   } catch {
     return fallback;
@@ -3299,7 +3432,7 @@ function formatAuditScreen(action: string): string {
   if (["login", "logout", "login_failed", "user_create", "user_update_email", "user_approval_update", "user_delete", "user_role_update"].includes(action)) {
     return "ログイン管理";
   }
-  if (["backup_save", "backup_restore", "pdf_export", "approval_update", "schedule_regenerate", "schedule_add_row", "schedule_remove_row", "schedule_reorder", "timeline_drag", "photo_add", "photo_remove", "layout_image_replace", "layout_annotation_save", "project_create", "project_delete", "copy_from_project", "template_apply"].includes(action)) {
+  if (["backup_save", "backup_restore", "pdf_export", "approval_update", "schedule_regenerate", "schedule_add_row", "schedule_remove_row", "schedule_reorder", "timeline_drag", "photo_add", "photo_remove", "photo_crop", "layout_image_replace", "layout_image_crop", "layout_annotation_save", "project_create", "project_delete", "copy_from_project", "template_apply"].includes(action)) {
     return "施工計画書編集";
   }
   return "その他";
@@ -3466,6 +3599,16 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   const [layoutEditorHistoryIndex, setLayoutEditorHistoryIndex] = useState(-1);
   const [layoutEditorAdvancedOpen, setLayoutEditorAdvancedOpen] = useState(false);
   const [layoutEditorAdvancedTab, setLayoutEditorAdvancedTab] = useState<LayoutAdvancedTab>("transform");
+  const [cropEditorOpen, setCropEditorOpen] = useState(false);
+  const [cropEditorTarget, setCropEditorTarget] = useState<LayoutEditorTarget | null>(null);
+  const [cropEditorSourceDataUrl, setCropEditorSourceDataUrl] = useState("");
+  const [cropEditorImageSize, setCropEditorImageSize] = useState<{ width: number; height: number } | null>(null);
+  const [cropEditorAspect, setCropEditorAspect] = useState<CropAspectPreset>("free");
+  const [cropEditorZoom, setCropEditorZoom] = useState(1);
+  const [cropEditorOffsetX, setCropEditorOffsetX] = useState(0);
+  const [cropEditorOffsetY, setCropEditorOffsetY] = useState(0);
+  const [cropEditorSaving, setCropEditorSaving] = useState(false);
+  const [cropEditorError, setCropEditorError] = useState("");
   const [partyTemplateSelections, setPartyTemplateSelections] = useState<Record<RelatedPartyKey, string>>(
     EMPTY_PARTY_TEMPLATE_SELECTIONS,
   );
@@ -4037,6 +4180,15 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   const canEdit = !!currentUser && currentUser.role !== "viewer";
   const canAdmin = !!currentUser && isAdminLikeRole(currentUser.role);
   const canApprove = !!currentUser && (isAdminLikeRole(currentUser.role) || currentUser.role === "editor");
+  const cropEditorAspectRatio = useMemo(
+    () => resolveCropAspectRatio(cropEditorAspect, cropEditorImageSize),
+    [cropEditorAspect, cropEditorImageSize],
+  );
+  const cropEditorPreviewTransform = useMemo(() => {
+    const xPercent = Math.round(cropEditorOffsetX * 20);
+    const yPercent = Math.round(cropEditorOffsetY * 20);
+    return `translate(${xPercent}%, ${yPercent}%) scale(${cropEditorZoom})`;
+  }, [cropEditorOffsetX, cropEditorOffsetY, cropEditorZoom]);
   const userStats = useMemo(() => {
     const total = users.length;
     const admins = users.filter((user) => isAdminLikeRole(user.role)).length;
@@ -6022,6 +6174,106 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     }
     applyPhotoFile(section, photoId, file);
     event.target.value = "";
+  }
+
+  function openImageCropEditor(target: LayoutEditorTarget, sourceDataUrl: string): void {
+    if (!sourceDataUrl) {
+      return;
+    }
+    setCropEditorTarget(target);
+    setCropEditorSourceDataUrl(sourceDataUrl);
+    setCropEditorImageSize(null);
+    setCropEditorAspect("free");
+    setCropEditorZoom(1);
+    setCropEditorOffsetX(0);
+    setCropEditorOffsetY(0);
+    setCropEditorError("");
+    setCropEditorSaving(false);
+    setCropEditorOpen(true);
+    void loadImageElement(sourceDataUrl)
+      .then((img) => {
+        setCropEditorImageSize({
+          width: Math.max(1, img.naturalWidth || img.width),
+          height: Math.max(1, img.naturalHeight || img.height),
+        });
+      })
+      .catch(() => {
+        setCropEditorError("画像の読み込みに失敗しました。別の画像で再試行してください。");
+      });
+  }
+
+  function closeImageCropEditor(): void {
+    if (cropEditorSaving) {
+      return;
+    }
+    setCropEditorOpen(false);
+    setCropEditorTarget(null);
+    setCropEditorSourceDataUrl("");
+    setCropEditorImageSize(null);
+    setCropEditorError("");
+    setCropEditorZoom(1);
+    setCropEditorOffsetX(0);
+    setCropEditorOffsetY(0);
+    setCropEditorAspect("free");
+  }
+
+  async function saveImageCropEditor(): Promise<void> {
+    if (!cropEditorTarget || !cropEditorSourceDataUrl) {
+      return;
+    }
+    setCropEditorSaving(true);
+    setCropEditorError("");
+    try {
+      const maxEdge = cropEditorTarget.kind === "layoutImage" || cropEditorTarget.section === "layoutPhotos"
+        ? DEFAULT_LAYOUT_MAX_SIZE
+        : DEFAULT_PHOTO_MAX_SIZE;
+      const quality = cropEditorTarget.kind === "layoutImage" || cropEditorTarget.section === "layoutPhotos"
+        ? 0.8
+        : 0.76;
+      const targetBytes = cropEditorTarget.kind === "layoutImage" || cropEditorTarget.section === "layoutPhotos"
+        ? TARGET_LAYOUT_DATA_URL_BYTES
+        : TARGET_PHOTO_DATA_URL_BYTES;
+      const croppedDataUrl = await cropImageDataUrl(cropEditorSourceDataUrl, {
+        zoom: cropEditorZoom,
+        offsetX: cropEditorOffsetX,
+        offsetY: cropEditorOffsetY,
+        aspectRatio: cropEditorAspectRatio,
+        maxEdge,
+        quality,
+        targetBytes,
+      });
+      if (cropEditorTarget.kind === "layoutImage") {
+        updateSelectedProject(
+          (project) => ({
+            ...project,
+            layoutImageDataUrl: croppedDataUrl,
+            layoutAnnotations: [],
+            layoutAnnotationsV2: [],
+          }),
+          { action: "layout_image_crop", detail: "配置図画像をトリミング（注釈を初期化）" },
+        );
+      } else {
+        updateSelectedProject(
+          (project) => ({
+            ...project,
+            [cropEditorTarget.section]: project[cropEditorTarget.section].map((item) =>
+              item.id === cropEditorTarget.photoId
+                ? { ...item, dataUrl: croppedDataUrl, layoutAnnotations: [], layoutAnnotationsV2: [] }
+                : item,
+            ),
+          }),
+          {
+            action: "photo_crop",
+            detail: `${cropEditorTarget.label}をトリミング（注釈を初期化）`,
+          },
+        );
+      }
+      closeImageCropEditor();
+    } catch {
+      setCropEditorError("トリミングの保存に失敗しました。");
+    } finally {
+      setCropEditorSaving(false);
+    }
   }
 
   function exportPdf(): void {
@@ -9831,6 +10083,24 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
                   />
                   <div className="inline-row photo-card-actions">
                     <button type="button" className="btn btn-subtle" onClick={() => openPhotoAnnotationEditor("detailPhotos", slot.id)} disabled={!canEdit || !slot.dataUrl}>画像編集</button>
+                    <button
+                      type="button"
+                      className="btn btn-subtle"
+                      onClick={() =>
+                        openImageCropEditor(
+                          {
+                            kind: "photo",
+                            section: "detailPhotos",
+                            photoId: slot.id,
+                            label: `参考写真:${slot.label}`,
+                          },
+                          slot.dataUrl,
+                        )
+                      }
+                      disabled={!canEdit || !slot.dataUrl}
+                    >
+                      <span className="btn-icon"><UiIcon name="crop" /></span>画像トリミング
+                    </button>
                     <button type="button" className="btn btn-subtle" onClick={() => clearPhotoAnnotations("detailPhotos", slot.id)} disabled={!canEdit || (slot.layoutAnnotations?.length || 0) === 0}><span className="btn-icon"><UiIcon name="clear" /></span>画像編集クリア</button>
                     <button type="button" className="btn btn-danger" onClick={() => removePhotoItem("detailPhotos", slot.id)}><span className="btn-icon"><UiIcon name="delete" /></span>削除</button>
                   </div>
@@ -10130,6 +10400,19 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
                 type="button"
                 className="btn btn-subtle"
                 onClick={() =>
+                  openImageCropEditor(
+                    { kind: "layoutImage", label: "配置図画像" },
+                    selectedProject.layoutImageDataUrl,
+                  )
+                }
+                disabled={!canEdit || !selectedProject.layoutImageDataUrl}
+              >
+                <span className="btn-icon"><UiIcon name="crop" /></span>画像トリミング
+              </button>
+              <button
+                type="button"
+                className="btn btn-subtle"
+                onClick={() =>
                   updateSelectedProject(
                     (project) => ({ ...project, layoutAnnotations: [], layoutAnnotationsV2: [] }),
                     { action: "layout_annotation_save", detail: "配置図注釈をクリア" },
@@ -10176,6 +10459,24 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
                   />
                   <div className="inline-row photo-card-actions">
                     <button type="button" className="btn btn-subtle" onClick={() => openPhotoAnnotationEditor("layoutPhotos", slot.id)} disabled={!canEdit || !slot.dataUrl}>画像編集</button>
+                    <button
+                      type="button"
+                      className="btn btn-subtle"
+                      onClick={() =>
+                        openImageCropEditor(
+                          {
+                            kind: "photo",
+                            section: "layoutPhotos",
+                            photoId: slot.id,
+                            label: `配置写真:${slot.label}`,
+                          },
+                          slot.dataUrl,
+                        )
+                      }
+                      disabled={!canEdit || !slot.dataUrl}
+                    >
+                      <span className="btn-icon"><UiIcon name="crop" /></span>画像トリミング
+                    </button>
                     <button type="button" className="btn btn-subtle" onClick={() => clearPhotoAnnotations("layoutPhotos", slot.id)} disabled={!canEdit || (slot.layoutAnnotations?.length || 0) === 0}><span className="btn-icon"><UiIcon name="clear" /></span>画像編集クリア</button>
                     <button type="button" className="btn btn-danger" onClick={() => removePhotoItem("layoutPhotos", slot.id)}><span className="btn-icon"><UiIcon name="delete" /></span>削除</button>
                   </div>
@@ -11237,6 +11538,123 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
                 <p className="mini">細かい数値調整は「詳細編集」を開いてください。</p>
               </div>
             </aside>
+          </div>
+        </article>
+      </section>
+      ) : null}
+
+      {isEditorMode && cropEditorOpen ? (
+      <section className="crop-editor-backdrop" role="dialog" aria-modal="true" aria-label="画像トリミング">
+        <article className="crop-editor-panel">
+          <div className="crop-editor-head">
+            <div>
+              <h3>{cropEditorTarget ? `${cropEditorTarget.label} 画像トリミング` : "画像トリミング"}</h3>
+              <p className="mini">比率・拡大・位置を調整して保存すると、画像が切り抜かれて反映されます。</p>
+            </div>
+            <div className="inline-row">
+              <button type="button" className="btn btn-subtle" onClick={closeImageCropEditor} disabled={cropEditorSaving}>
+                閉じる
+              </button>
+              <button
+                type="button"
+                className="btn btn-accent"
+                onClick={() => {
+                  void saveImageCropEditor();
+                }}
+                disabled={cropEditorSaving || !cropEditorSourceDataUrl}
+              >
+                {cropEditorSaving ? "保存中..." : "トリミングを保存"}
+              </button>
+            </div>
+          </div>
+          <div className="crop-editor-body">
+            <div className="crop-editor-preview-wrap">
+              <div
+                className="crop-editor-frame"
+                style={cropEditorAspectRatio ? { aspectRatio: `${cropEditorAspectRatio}` } : undefined}
+              >
+                {cropEditorSourceDataUrl ? (
+                  <img
+                    src={cropEditorSourceDataUrl}
+                    alt={cropEditorTarget ? `${cropEditorTarget.label} トリミングプレビュー` : "トリミングプレビュー"}
+                    className="crop-editor-image"
+                    style={{ transform: cropEditorPreviewTransform }}
+                  />
+                ) : (
+                  <p className="mini">画像を読み込み中です...</p>
+                )}
+              </div>
+              {cropEditorImageSize ? (
+                <p className="mini crop-editor-meta">元画像サイズ: {cropEditorImageSize.width} x {cropEditorImageSize.height}px</p>
+              ) : null}
+            </div>
+            <div className="crop-editor-controls">
+              <label className="field">
+                <span>比率</span>
+                <select
+                  className="control"
+                  value={cropEditorAspect}
+                  onChange={(event) => setCropEditorAspect(event.target.value as CropAspectPreset)}
+                  disabled={cropEditorSaving}
+                >
+                  {CROP_ASPECT_OPTIONS.map((option) => (
+                    <option key={`crop_aspect_${option.value}`} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field crop-editor-slider-row">
+                <span>拡大</span>
+                <input
+                  type="range"
+                  min={1}
+                  max={3}
+                  step={0.01}
+                  value={cropEditorZoom}
+                  onChange={(event) => setCropEditorZoom(clamp(parseNumericInput(event.target.value, cropEditorZoom), 1, 3))}
+                  disabled={cropEditorSaving}
+                />
+                <span className="crop-editor-slider-meta">{cropEditorZoom.toFixed(2)}x</span>
+              </label>
+              <label className="field crop-editor-slider-row">
+                <span>左右位置</span>
+                <input
+                  type="range"
+                  min={-1}
+                  max={1}
+                  step={0.01}
+                  value={cropEditorOffsetX}
+                  onChange={(event) => setCropEditorOffsetX(clamp(parseNumericInput(event.target.value, cropEditorOffsetX), -1, 1))}
+                  disabled={cropEditorSaving}
+                />
+              </label>
+              <label className="field crop-editor-slider-row">
+                <span>上下位置</span>
+                <input
+                  type="range"
+                  min={-1}
+                  max={1}
+                  step={0.01}
+                  value={cropEditorOffsetY}
+                  onChange={(event) => setCropEditorOffsetY(clamp(parseNumericInput(event.target.value, cropEditorOffsetY), -1, 1))}
+                  disabled={cropEditorSaving}
+                />
+              </label>
+              <button
+                type="button"
+                className="btn btn-subtle"
+                onClick={() => {
+                  setCropEditorZoom(1);
+                  setCropEditorOffsetX(0);
+                  setCropEditorOffsetY(0);
+                }}
+                disabled={cropEditorSaving}
+              >
+                位置と拡大をリセット
+              </button>
+              {cropEditorError ? <p className="crop-editor-error">{cropEditorError}</p> : null}
+            </div>
           </div>
         </article>
       </section>
