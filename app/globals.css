@@ -811,13 +811,14 @@ p {
 }
 
 .auth-switch-btn {
-  min-height: 44px;
+  min-height: 56px;
   border: 1px solid var(--btn-soft-border);
   border-radius: 10px;
   background: var(--btn-soft-bg);
   color: var(--btn-soft-text);
-  font-size: 0.88rem;
+  font-size: 1rem;
   font-weight: 700;
+  padding: 0 16px;
   cursor: pointer;
 }
 
@@ -840,8 +841,11 @@ p {
 }
 
 .auth-login-btn {
-  width: 100%;
-  min-height: 44px;
+  width: min(calc((760px - 8px) / 2), 100%);
+  min-height: 56px;
+  justify-self: center;
+  font-size: 1rem;
+  padding: 0 16px;
 }
 
 .auth-pending-box {
