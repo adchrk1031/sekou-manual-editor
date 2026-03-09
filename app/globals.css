@@ -968,6 +968,14 @@ p {
   word-break: keep-all;
 }
 
+.csv-editor-table tbody tr.csv-row-exported td {
+  background: #eef5ff;
+}
+
+.csv-editor-table tbody tr.csv-row-exported td:first-child {
+  box-shadow: inset 3px 0 0 #2f81f7;
+}
+
 .planner-app-csv .csv-editor-wrap {
   max-height: 68vh;
 }
@@ -3283,6 +3291,12 @@ p {
 .pdf-hint {
   margin-left: 10px;
   font-size: 0.76rem;
+}
+
+.pdf-export-meta {
+  margin-left: 10px;
+  font-size: 0.76rem;
+  color: #2f4f79;
 }
 
 .pdf-hint.ok {

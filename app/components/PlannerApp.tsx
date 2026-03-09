@@ -260,6 +260,8 @@ type Project = {
   approvalComment: string;
   approvedBy: string;
   approvedAt: string;
+  pdfExportCount: number;
+  pdfLastExportedAt: string;
 };
 
 type ProjectSnapshot = Pick<
@@ -286,6 +288,8 @@ type ProjectSnapshot = Pick<
   | "pdfEmail"
   | "pdfTel"
   | "pdfFax"
+  | "pdfExportCount"
+  | "pdfLastExportedAt"
   | "layoutAnnotations"
   | "layoutAnnotationsV2"
   | "scheduleRows"
@@ -532,6 +536,8 @@ type UserCreateNotice = {
   text: string;
 };
 
+type CsvExportFilter = "all" | "exported" | "unexported";
+
 type LocalStorageExportItem = {
   key: string;
   value: string;
@@ -762,6 +768,8 @@ const CSV_PROJECT_FIELD_ALIASES = {
   pdfEmail: ["pdf_email", "連絡先メール", "email", "メール"],
   pdfTel: ["pdf_tel", "連絡先TEL", "tel", "電話番号"],
   pdfFax: ["pdf_fax", "連絡先FAX", "fax"],
+  pdfExportCount: ["pdf_export_count", "pdf_count", "PDF出力回数", "出力回数"],
+  pdfLastExportedAt: ["pdf_last_exported_at", "last_pdf_exported_at", "PDF最終出力日時", "最終出力日時"],
   workList: ["工事項目", "作業項目", "selected_work_codes", "selected_works"],
   photoSlotALabel: ["photo_slot_a_label", "写真Aラベル"],
   photoSlotBLabel: ["photo_slot_b_label", "写真Bラベル"],
@@ -795,6 +803,8 @@ const CSV_HEADER_JA_LABELS: Record<string, string> = {
   pdf_email: "連絡先メール",
   pdf_tel: "連絡先TEL",
   pdf_fax: "連絡先FAX",
+  pdf_export_count: "PDF出力回数",
+  pdf_last_exported_at: "PDF最終出力日時",
   photo_slot_a_label: "写真Aラベル",
   photo_slot_b_label: "写真Bラベル",
   photo_slot_c_label: "写真Cラベル",
@@ -3188,6 +3198,8 @@ function createBlankProject(seed?: Partial<Project>): Project {
     approvalComment: seed?.approvalComment ?? "",
     approvedBy: seed?.approvedBy ?? "",
     approvedAt: seed?.approvedAt ?? "",
+    pdfExportCount: seed?.pdfExportCount ?? 0,
+    pdfLastExportedAt: seed?.pdfLastExportedAt ?? "",
   };
 }
 
@@ -3319,6 +3331,8 @@ function normalizeProject(
       approvalComment: project.approvalComment,
       approvedBy: project.approvedBy,
       approvedAt: project.approvedAt,
+      pdfExportCount: Number.isFinite(project.pdfExportCount) ? Number(project.pdfExportCount) : 0,
+      pdfLastExportedAt: project.pdfLastExportedAt,
     }),
     flags,
   };
@@ -3366,6 +3380,9 @@ function projectFromCsv(record: CsvRecord): Project | null {
   const outageDateStart = normalizeDate(getField(...CSV_PROJECT_FIELD_ALIASES.outageDateStart)) || startDate;
   const outageDateEnd = normalizeDate(getField(...CSV_PROJECT_FIELD_ALIASES.outageDateEnd)) || outageDateStart;
   const selectedWorkCodes = parseSelectedWorkCodes(getField);
+  const parsedExportCount = Number(getField(...CSV_PROJECT_FIELD_ALIASES.pdfExportCount));
+  const normalizedExportCount = Number.isFinite(parsedExportCount) ? Math.max(0, Math.floor(parsedExportCount)) : 0;
+  const parsedLastExportedAt = getField(...CSV_PROJECT_FIELD_ALIASES.pdfLastExportedAt).trim();
 
   const flags: Record<WorkCode, boolean> = {
     KOUATSU_CABLE: selectedWorkCodes.includes("KOUATSU_CABLE"),
@@ -3405,6 +3422,8 @@ function projectFromCsv(record: CsvRecord): Project | null {
     pdfEmail: getField(...CSV_PROJECT_FIELD_ALIASES.pdfEmail),
     pdfTel: getField(...CSV_PROJECT_FIELD_ALIASES.pdfTel),
     pdfFax: getField(...CSV_PROJECT_FIELD_ALIASES.pdfFax),
+    pdfExportCount: normalizedExportCount,
+    pdfLastExportedAt: parsedLastExportedAt,
     layoutImageDataUrl: "",
     detailPhotos: createPhotoSlots([
       getField(...CSV_PROJECT_FIELD_ALIASES.photoSlotALabel) || "写真A（着工前）",
@@ -3523,6 +3542,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   const [csvSearch, setCsvSearch] = useState("");
   const [csvPage, setCsvPage] = useState(0);
   const [csvPageSize, setCsvPageSize] = useState<number>(50);
+  const [csvExportFilter, setCsvExportFilter] = useState<CsvExportFilter>("all");
   const [newCsvColumn, setNewCsvColumn] = useState("");
   const [csvSelectedRows, setCsvSelectedRows] = useState<number[]>([]);
   const [csvBulkHeader, setCsvBulkHeader] = useState("");
@@ -4253,16 +4273,34 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
           ? selectedPartyTemplateId
           : selectedLayoutTemplateId;
   const hasActiveTemplateSelection = activeTemplateList.some((template) => template.id === activeTemplateId);
+  const projectExportMetaById = useMemo(() => {
+    const map = new Map<string, { exported: boolean }>();
+    projects.forEach((project) => {
+      map.set(
+        project.projectId,
+        { exported: Boolean((project.pdfExportCount || 0) > 0 || project.pdfLastExportedAt) },
+      );
+    });
+    return map;
+  }, [projects]);
   const csvFilteredRows = useMemo(() => {
     const keyword = deferredCsvSearch.trim().toLowerCase();
     const rows = csvDraftRows.map((row, index) => ({ row, index }));
-    if (!keyword) {
-      return rows;
-    }
-    return rows.filter(({ row }) =>
-      csvHeaders.some((header) => String(row[header] ?? "").toLowerCase().includes(keyword)),
-    );
-  }, [csvDraftRows, csvHeaders, deferredCsvSearch]);
+    return rows.filter(({ row }) => {
+      const keywordMatched = !keyword
+        || csvHeaders.some((header) => String(row[header] ?? "").toLowerCase().includes(keyword));
+      if (!keywordMatched) {
+        return false;
+      }
+      if (csvExportFilter === "all") {
+        return true;
+      }
+      const getField = createCsvValueGetter(row);
+      const projectId = getField(...CSV_PROJECT_FIELD_ALIASES.projectId).trim();
+      const exported = projectExportMetaById.get(projectId)?.exported ?? false;
+      return csvExportFilter === "exported" ? exported : !exported;
+    });
+  }, [csvDraftRows, csvHeaders, deferredCsvSearch, csvExportFilter, projectExportMetaById]);
   const csvTotalPages = Math.max(1, Math.ceil(csvFilteredRows.length / csvPageSize));
   const csvVisibleRows = useMemo(() => {
     const start = csvPage * csvPageSize;
@@ -4335,6 +4373,8 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
       pdfEmail: project.pdfEmail,
       pdfTel: project.pdfTel,
       pdfFax: project.pdfFax,
+      pdfExportCount: project.pdfExportCount,
+      pdfLastExportedAt: project.pdfLastExportedAt,
       layoutAnnotations: cloneLayoutAnnotations(project.layoutAnnotations),
       layoutAnnotationsV2: cloneLayoutAnnotationsV2(project.layoutAnnotationsV2),
       scheduleRows: project.scheduleRows.map((row) => ({ ...row })),
@@ -4383,6 +4423,14 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     [selectedProject.selectedWorkCodes],
   );
   const activeLogoSrc = PDF_LOGO_SRC;
+  const selectedProjectExportCount = Math.max(0, selectedProject.pdfExportCount || 0);
+  const selectedProjectLastExportLabel = (() => {
+    if (!selectedProject.pdfLastExportedAt) {
+      return "未出力";
+    }
+    const parsed = new Date(selectedProject.pdfLastExportedAt);
+    return Number.isNaN(parsed.getTime()) ? "未出力" : parsed.toLocaleString("ja-JP");
+  })();
   const activePdfTemplate = useMemo(
     () => PDF_TEMPLATE_PRESET_MAP[normalizePdfTemplateId(selectedProject.pdfTemplateId)],
     [selectedProject.pdfTemplateId],
@@ -6353,7 +6401,14 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
       return;
     }
     setRequiredHint("");
-    appendAudit("pdf_export", "PDF出力を実行", selectedProject.projectId);
+    updateSelectedProject(
+      (project) => ({
+        ...project,
+        pdfExportCount: Math.max(0, project.pdfExportCount || 0) + 1,
+        pdfLastExportedAt: new Date().toISOString(),
+      }),
+      { action: "pdf_export", detail: "PDF出力を実行", snapshotLabel: "PDF出力実行前バックアップ" },
+    );
     const originalTitle = document.title;
     setPrintMode(true);
     document.title = "";
@@ -8853,6 +8908,14 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
                 <input className="control" value={csvSearch} onChange={(event) => setCsvSearch(event.target.value)} placeholder="案件ID・物件名など" />
               </label>
               <label className="field csv-small-field">
+                <span>出力状態</span>
+                <select className="control" value={csvExportFilter} onChange={(event) => setCsvExportFilter(event.target.value as CsvExportFilter)}>
+                  <option value="all">全件</option>
+                  <option value="exported">PDF出力済み</option>
+                  <option value="unexported">未出力</option>
+                </select>
+              </label>
+              <label className="field csv-small-field">
                 <span>表示件数</span>
                 <select className="control" value={csvPageSize} onChange={(event) => setCsvPageSize(Number(event.target.value))}>
                   {CSV_PAGE_SIZE_OPTIONS.map((size) => (
@@ -8974,8 +9037,12 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
                   </thead>
                   <tbody>
                     {csvVisibleRows.length ? (
-                      csvVisibleRows.map(({ row, index }) => (
-                        <tr key={`csv_row_${index}`}>
+                      csvVisibleRows.map(({ row, index }) => {
+                        const getField = createCsvValueGetter(row);
+                        const rowProjectId = getField(...CSV_PROJECT_FIELD_ALIASES.projectId).trim();
+                        const exported = projectExportMetaById.get(rowProjectId)?.exported ?? false;
+                        return (
+                        <tr key={`csv_row_${index}`} className={exported ? "csv-row-exported" : undefined}>
                           <td>
                             <input
                               type="checkbox"
@@ -9001,7 +9068,8 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
                             </button>
                           </td>
                         </tr>
-                      ))
+                        );
+                      })
                     ) : (
                       <tr><td colSpan={csvHeaders.length + 2}>該当データがありません</td></tr>
                     )}
@@ -11659,6 +11727,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
       <footer className="bottom-bar" aria-label="Bottom">
         <p>
           保存: {lastSavedAt} / {selectedProject.projectId}
+          <span className="pdf-export-meta">PDF出力: {selectedProjectExportCount}回 / 最終: {selectedProjectLastExportLabel}</span>
           <span className={`pdf-hint ${incompleteCards.length ? "warn" : "ok"}`}>
             {incompleteCards.length ? `未完了 ${incompleteCards.length}カード` : "PDF出力OK"}
           </span>
