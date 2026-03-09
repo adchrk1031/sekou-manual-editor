@@ -25,12 +25,19 @@
   },
   "include": [
     "next-env.d.ts",
-    "**/*.ts",
-    "**/*.tsx",
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "lib/**/*.ts",
+    "lib/**/*.tsx",
+    "prisma/**/*.ts",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "rezil-ai-unified-demo/**",
+    "rezil-ai-division-brief/**",
+    "meter-ocr-ledger-tool/**",
+    "slack-mention-todo-tool/**"
   ]
 }
