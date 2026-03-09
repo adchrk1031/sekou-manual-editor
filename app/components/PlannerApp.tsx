@@ -389,7 +389,20 @@ type LayoutAdvancedTab = "transform" | "style" | "arrange";
 type LayoutEditorTarget =
   | { kind: "layoutImage"; label: string }
   | { kind: "photo"; section: "detailPhotos" | "layoutPhotos"; photoId: string; label: string };
-type CropAspectPreset = "free" | "square" | "landscape" | "portrait";
+type CropSelectionRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+type CropSelectionDragState = {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  moved: boolean;
+  previousSelection: CropSelectionRect;
+};
 
 type LayoutDrawingDraft = {
   type: "arrow" | "rect";
@@ -519,8 +532,6 @@ type UserCreateNotice = {
   text: string;
 };
 
-type UiPreset = "standard" | "field" | "compact";
-
 type LocalStorageExportItem = {
   key: string;
   value: string;
@@ -567,7 +578,6 @@ const DETAIL_PHOTO_TEMPLATE_STORAGE_KEY = "sekou-tool-template-detail-photos-v1"
 const PARTY_TEMPLATE_STORAGE_KEY = "sekou-tool-template-parties-v1";
 const PARTY_COMPANY_TEMPLATE_STORAGE_KEY = "sekou-tool-template-party-companies-v1";
 const LAYOUT_TEMPLATE_STORAGE_KEY = "sekou-tool-template-layout-v1";
-const UI_PRESET_STORAGE_KEY = "sekou-ui-preset-v1";
 const OUTAGE_TRACE_DEBUG_KEY = "sekou-debug-outage-trace";
 const LEGACY_DATE_TRACE_DEBUG_KEY = "sekou-debug-legacy-date";
 const DAY_TOTAL_MINUTES = 24 * 60;
@@ -599,23 +609,12 @@ const DEFAULT_TEXT_STROKE_COLOR = "#ffffff";
 const DEFAULT_TEXT_STROKE_WIDTH = 3;
 const LAYOUT_SNAP_THRESHOLD = 10;
 const USER_LIST_VISIBLE_COUNT = 5;
-const UI_PRESET_OPTIONS: Array<{ value: UiPreset; label: string }> = [
-  { value: "standard", label: "標準" },
-  { value: "field", label: "現場向け（大きめ）" },
-  { value: "compact", label: "コンパクト" },
-];
 const LAYOUT_TEXT_FONT_OPTIONS: Array<{ value: string; label: string }> = [
   { value: DEFAULT_TEXT_FONT_FAMILY, label: "ゴシック（標準）" },
   { value: "\"Yu Mincho\", \"Hiragino Mincho ProN\", serif", label: "明朝" },
   { value: "\"Meiryo\", \"Yu Gothic\", sans-serif", label: "メイリオ" },
   { value: "\"Arial\", sans-serif", label: "Arial" },
   { value: "\"Courier New\", monospace", label: "等幅（Monospace）" },
-];
-const CROP_ASPECT_OPTIONS: Array<{ value: CropAspectPreset; label: string }> = [
-  { value: "free", label: "自由（元画像比率）" },
-  { value: "square", label: "1:1（正方形）" },
-  { value: "landscape", label: "4:3（横長）" },
-  { value: "portrait", label: "3:4（縦長）" },
 ];
 
 const TEST_EDITOR_USER_PRESETS: Array<{ id: string; name: string; email: string; password: string }> = [
@@ -2677,10 +2676,7 @@ type ImageOptimizeOptions = {
 };
 
 type CropImageOptions = {
-  zoom: number;
-  offsetX: number;
-  offsetY: number;
-  aspectRatio: number;
+  selection: CropSelectionRect;
   maxEdge: number;
   quality?: number;
   targetBytes?: number;
@@ -2747,25 +2743,6 @@ async function optimizeImageFile(
   }
 }
 
-function resolveCropAspectRatio(
-  preset: CropAspectPreset,
-  imageSize: { width: number; height: number } | null,
-): number {
-  if (preset === "square") {
-    return 1;
-  }
-  if (preset === "landscape") {
-    return 4 / 3;
-  }
-  if (preset === "portrait") {
-    return 3 / 4;
-  }
-  if (!imageSize || !imageSize.width || !imageSize.height) {
-    return 4 / 3;
-  }
-  return imageSize.width / imageSize.height;
-}
-
 function loadImageElement(dataUrl: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -2775,13 +2752,60 @@ function loadImageElement(dataUrl: string): Promise<HTMLImageElement> {
   });
 }
 
+function normalizeCropSelectionRect(selection: CropSelectionRect | null): CropSelectionRect {
+  const MIN_RATIO = 0.02;
+  if (!selection) {
+    return { x: 0, y: 0, width: 1, height: 1 };
+  }
+  let x = clamp(Number.isFinite(selection.x) ? selection.x : 0, 0, 1);
+  let y = clamp(Number.isFinite(selection.y) ? selection.y : 0, 0, 1);
+  let width = clamp(Number.isFinite(selection.width) ? selection.width : 1, 0, 1 - x);
+  let height = clamp(Number.isFinite(selection.height) ? selection.height : 1, 0, 1 - y);
+
+  if (width < MIN_RATIO) {
+    width = Math.min(1 - x, MIN_RATIO);
+    if (width < MIN_RATIO) {
+      x = Math.max(0, 1 - MIN_RATIO);
+      width = Math.min(1 - x, MIN_RATIO);
+    }
+  }
+  if (height < MIN_RATIO) {
+    height = Math.min(1 - y, MIN_RATIO);
+    if (height < MIN_RATIO) {
+      y = Math.max(0, 1 - MIN_RATIO);
+      height = Math.min(1 - y, MIN_RATIO);
+    }
+  }
+  return {
+    x: clamp(x, 0, 1),
+    y: clamp(y, 0, 1),
+    width: clamp(width, MIN_RATIO, 1),
+    height: clamp(height, MIN_RATIO, 1),
+  };
+}
+
+function createCropSelectionRect(
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number,
+): CropSelectionRect {
+  const x1 = clamp(startX, 0, 1);
+  const y1 = clamp(startY, 0, 1);
+  const x2 = clamp(endX, 0, 1);
+  const y2 = clamp(endY, 0, 1);
+  return normalizeCropSelectionRect({
+    x: Math.min(x1, x2),
+    y: Math.min(y1, y2),
+    width: Math.abs(x2 - x1),
+    height: Math.abs(y2 - y1),
+  });
+}
+
 async function cropImageDataUrl(
   sourceDataUrl: string,
   {
-    zoom,
-    offsetX,
-    offsetY,
-    aspectRatio,
+    selection,
     maxEdge,
     quality = 0.84,
     targetBytes = TARGET_PHOTO_DATA_URL_BYTES,
@@ -2795,24 +2819,14 @@ async function cropImageDataUrl(
     const img = await loadImageElement(sourceDataUrl);
     const sourceWidth = Math.max(1, img.naturalWidth || img.width);
     const sourceHeight = Math.max(1, img.naturalHeight || img.height);
-    const safeAspect = Number.isFinite(aspectRatio) && aspectRatio > 0 ? aspectRatio : sourceWidth / sourceHeight;
-    const safeZoom = clamp(zoom, 1, 3);
-    const safeOffsetX = clamp(offsetX, -1, 1);
-    const safeOffsetY = clamp(offsetY, -1, 1);
+    const safeSelection = normalizeCropSelectionRect(selection);
 
-    let baseCropWidth = sourceWidth;
-    let baseCropHeight = baseCropWidth / safeAspect;
-    if (baseCropHeight > sourceHeight) {
-      baseCropHeight = sourceHeight;
-      baseCropWidth = baseCropHeight * safeAspect;
-    }
-
-    const cropWidth = clamp(baseCropWidth / safeZoom, 1, sourceWidth);
-    const cropHeight = clamp(baseCropHeight / safeZoom, 1, sourceHeight);
-    const halfShiftX = (sourceWidth - cropWidth) / 2;
-    const halfShiftY = (sourceHeight - cropHeight) / 2;
-    const sourceX = clamp((sourceWidth - cropWidth) / 2 + safeOffsetX * halfShiftX, 0, Math.max(0, sourceWidth - cropWidth));
-    const sourceY = clamp((sourceHeight - cropHeight) / 2 + safeOffsetY * halfShiftY, 0, Math.max(0, sourceHeight - cropHeight));
+    const sourceX = clamp(Math.round(safeSelection.x * sourceWidth), 0, Math.max(0, sourceWidth - 1));
+    const sourceY = clamp(Math.round(safeSelection.y * sourceHeight), 0, Math.max(0, sourceHeight - 1));
+    const maxCropWidth = Math.max(1, sourceWidth - sourceX);
+    const maxCropHeight = Math.max(1, sourceHeight - sourceY);
+    const cropWidth = clamp(Math.round(safeSelection.width * sourceWidth), 1, maxCropWidth);
+    const cropHeight = clamp(Math.round(safeSelection.height * sourceHeight), 1, maxCropHeight);
 
     let outputWidth = Math.max(1, Math.round(cropWidth));
     let outputHeight = Math.max(1, Math.round(cropHeight));
@@ -3500,7 +3514,6 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   const [projectSearchText, setProjectSearchText] = useState<string>("");
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [uiPreset, setUiPreset] = useState<UiPreset>("standard");
   const [hydrated, setHydrated] = useState(false);
   const [sharedStorageReady, setSharedStorageReady] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState("-");
@@ -3603,10 +3616,8 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   const [cropEditorTarget, setCropEditorTarget] = useState<LayoutEditorTarget | null>(null);
   const [cropEditorSourceDataUrl, setCropEditorSourceDataUrl] = useState("");
   const [cropEditorImageSize, setCropEditorImageSize] = useState<{ width: number; height: number } | null>(null);
-  const [cropEditorAspect, setCropEditorAspect] = useState<CropAspectPreset>("free");
-  const [cropEditorZoom, setCropEditorZoom] = useState(1);
-  const [cropEditorOffsetX, setCropEditorOffsetX] = useState(0);
-  const [cropEditorOffsetY, setCropEditorOffsetY] = useState(0);
+  const [cropEditorSelection, setCropEditorSelection] = useState<CropSelectionRect>({ x: 0, y: 0, width: 1, height: 1 });
+  const [cropEditorDrag, setCropEditorDrag] = useState<CropSelectionDragState | null>(null);
   const [cropEditorSaving, setCropEditorSaving] = useState(false);
   const [cropEditorError, setCropEditorError] = useState("");
   const [partyTemplateSelections, setPartyTemplateSelections] = useState<Record<RelatedPartyKey, string>>(
@@ -3621,6 +3632,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   const outageTraceSeqRef = useRef(0);
   const layoutEditorSvgRef = useRef<SVGSVGElement | null>(null);
   const layoutEditorStageRef = useRef<HTMLDivElement | null>(null);
+  const cropEditorPreviewRef = useRef<HTMLDivElement | null>(null);
   const layoutEditorHistorySerializedRef = useRef("");
   const layoutEditorHistorySuppressRef = useRef(false);
   const projectPickerRef = useRef<HTMLDivElement | null>(null);
@@ -3758,13 +3770,6 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
         setCsvHeaders([]);
         setCsvDraftRows([]);
         csvSerializedCacheRef.current = "";
-      }
-
-      const rawUiPreset = localStorage.getItem(UI_PRESET_STORAGE_KEY);
-      if (rawUiPreset === "standard" || rawUiPreset === "field" || rawUiPreset === "compact") {
-        setUiPreset(rawUiPreset);
-      } else {
-        setUiPreset("standard");
       }
 
       const loadedUsers = ensureUsers() as UserAccount[];
@@ -3986,13 +3991,6 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   }, [csvHeaders, csvDraftRows, hydrated]);
 
   useEffect(() => {
-    if (!hydrated) {
-      return;
-    }
-    localStorage.setItem(UI_PRESET_STORAGE_KEY, uiPreset);
-  }, [hydrated, uiPreset]);
-
-  useEffect(() => {
     try {
       const scheduleRaw = localStorage.getItem(SCHEDULE_TEMPLATE_STORAGE_KEY);
       const scheduleProcedureRaw = localStorage.getItem(SCHEDULE_PROCEDURE_TEMPLATE_STORAGE_KEY);
@@ -4180,15 +4178,21 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   const canEdit = !!currentUser && currentUser.role !== "viewer";
   const canAdmin = !!currentUser && isAdminLikeRole(currentUser.role);
   const canApprove = !!currentUser && (isAdminLikeRole(currentUser.role) || currentUser.role === "editor");
-  const cropEditorAspectRatio = useMemo(
-    () => resolveCropAspectRatio(cropEditorAspect, cropEditorImageSize),
-    [cropEditorAspect, cropEditorImageSize],
+  const cropEditorFrameAspectRatio = useMemo(() => {
+    if (!cropEditorImageSize || !cropEditorImageSize.width || !cropEditorImageSize.height) {
+      return 4 / 3;
+    }
+    return cropEditorImageSize.width / cropEditorImageSize.height;
+  }, [cropEditorImageSize]);
+  const cropEditorSelectionStyle = useMemo<CSSProperties>(
+    () => ({
+      left: `${cropEditorSelection.x * 100}%`,
+      top: `${cropEditorSelection.y * 100}%`,
+      width: `${cropEditorSelection.width * 100}%`,
+      height: `${cropEditorSelection.height * 100}%`,
+    }),
+    [cropEditorSelection],
   );
-  const cropEditorPreviewTransform = useMemo(() => {
-    const xPercent = Math.round(cropEditorOffsetX * 20);
-    const yPercent = Math.round(cropEditorOffsetY * 20);
-    return `translate(${xPercent}%, ${yPercent}%) scale(${cropEditorZoom})`;
-  }, [cropEditorOffsetX, cropEditorOffsetY, cropEditorZoom]);
   const userStats = useMemo(() => {
     const total = users.length;
     const admins = users.filter((user) => isAdminLikeRole(user.role)).length;
@@ -6183,10 +6187,8 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     setCropEditorTarget(target);
     setCropEditorSourceDataUrl(sourceDataUrl);
     setCropEditorImageSize(null);
-    setCropEditorAspect("free");
-    setCropEditorZoom(1);
-    setCropEditorOffsetX(0);
-    setCropEditorOffsetY(0);
+    setCropEditorSelection({ x: 0, y: 0, width: 1, height: 1 });
+    setCropEditorDrag(null);
     setCropEditorError("");
     setCropEditorSaving(false);
     setCropEditorOpen(true);
@@ -6211,10 +6213,81 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     setCropEditorSourceDataUrl("");
     setCropEditorImageSize(null);
     setCropEditorError("");
-    setCropEditorZoom(1);
-    setCropEditorOffsetX(0);
-    setCropEditorOffsetY(0);
-    setCropEditorAspect("free");
+    setCropEditorSelection({ x: 0, y: 0, width: 1, height: 1 });
+    setCropEditorDrag(null);
+  }
+
+  function resolveCropPointerPoint(event: ReactPointerEvent<HTMLDivElement>): { x: number; y: number } | null {
+    const target = cropEditorPreviewRef.current;
+    if (!target) {
+      return null;
+    }
+    const rect = target.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return null;
+    }
+    return {
+      x: clamp((event.clientX - rect.left) / rect.width, 0, 1),
+      y: clamp((event.clientY - rect.top) / rect.height, 0, 1),
+    };
+  }
+
+  function onCropPointerDown(event: ReactPointerEvent<HTMLDivElement>): void {
+    if (!cropEditorSourceDataUrl || cropEditorSaving) {
+      return;
+    }
+    const point = resolveCropPointerPoint(event);
+    if (!point) {
+      return;
+    }
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setCropEditorDrag({
+      pointerId: event.pointerId,
+      startX: point.x,
+      startY: point.y,
+      moved: false,
+      previousSelection: cropEditorSelection,
+    });
+    setCropEditorSelection(createCropSelectionRect(point.x, point.y, point.x, point.y));
+  }
+
+  function onCropPointerMove(event: ReactPointerEvent<HTMLDivElement>): void {
+    if (!cropEditorDrag || cropEditorDrag.pointerId !== event.pointerId) {
+      return;
+    }
+    const point = resolveCropPointerPoint(event);
+    if (!point) {
+      return;
+    }
+    event.preventDefault();
+    setCropEditorSelection(createCropSelectionRect(cropEditorDrag.startX, cropEditorDrag.startY, point.x, point.y));
+    setCropEditorDrag((prev) => {
+      if (!prev || prev.pointerId !== event.pointerId) {
+        return prev;
+      }
+      const moved = prev.moved || Math.abs(point.x - prev.startX) > 0.002 || Math.abs(point.y - prev.startY) > 0.002;
+      return moved === prev.moved ? prev : { ...prev, moved };
+    });
+  }
+
+  function onCropPointerEnd(event: ReactPointerEvent<HTMLDivElement>): void {
+    if (!cropEditorDrag || cropEditorDrag.pointerId !== event.pointerId) {
+      return;
+    }
+    event.preventDefault();
+    const point = resolveCropPointerPoint(event);
+    const movedNow = !!point && (Math.abs(point.x - cropEditorDrag.startX) > 0.002 || Math.abs(point.y - cropEditorDrag.startY) > 0.002);
+    if (point) {
+      setCropEditorSelection(createCropSelectionRect(cropEditorDrag.startX, cropEditorDrag.startY, point.x, point.y));
+    }
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    if (!cropEditorDrag.moved && !movedNow) {
+      setCropEditorSelection(cropEditorDrag.previousSelection);
+    }
+    setCropEditorDrag(null);
   }
 
   async function saveImageCropEditor(): Promise<void> {
@@ -6234,10 +6307,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
         ? TARGET_LAYOUT_DATA_URL_BYTES
         : TARGET_PHOTO_DATA_URL_BYTES;
       const croppedDataUrl = await cropImageDataUrl(cropEditorSourceDataUrl, {
-        zoom: cropEditorZoom,
-        offsetX: cropEditorOffsetX,
-        offsetY: cropEditorOffsetY,
-        aspectRatio: cropEditorAspectRatio,
+        selection: normalizeCropSelectionRect(cropEditorSelection),
         maxEdge,
         quality,
         targetBytes,
@@ -8555,7 +8625,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
 
   return (
     <>
-      <main className={`planner-app ${isCsvMode ? "planner-app-csv" : ""} ui-preset-${uiPreset}`}>
+      <main className={`planner-app ${isCsvMode ? "planner-app-csv" : ""}`}>
         <header className={`top-bar ${isTrackingMode ? "top-bar-tracking" : "top-bar-work"} ${isCsvMode ? "top-bar-csv" : ""}`} aria-label="Top">
           <div className="top-logo-slot">
             <img
@@ -8654,22 +8724,6 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
           <Link href="/menu" className="workspace-link subtle">メニューへ戻る</Link>
         </nav>
 
-        <div className="ui-custom-bar" role="region" aria-label="表示カスタム">
-          <span className="ui-custom-label"><span className="btn-icon"><UiIcon name="settings" /></span>表示カスタム</span>
-          <div className="ui-preset-segment" role="group" aria-label="表示モード">
-            {UI_PRESET_OPTIONS.map((option) => (
-              <button
-                key={`ui_preset_${option.value}`}
-                type="button"
-                className={`ui-preset-btn ${uiPreset === option.value ? "is-active" : ""}`}
-                onClick={() => setUiPreset(option.value)}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
         <div
           className={`mobile-drawer-backdrop ${mobileMenuOpen ? "is-open" : ""}`}
           onClick={() => setMobileMenuOpen(false)}
@@ -8729,21 +8783,6 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
             <Link href="/csv" className={`workspace-link ${isCsvMode ? "active" : ""}`} onClick={() => setMobileMenuOpen(false)}>CSV編集スペース</Link>
             <Link href="/tracking" className={`workspace-link ${isTrackingMode ? "active" : ""}`} onClick={() => setMobileMenuOpen(false)}>ログイン管理</Link>
             <Link href="/menu" className="workspace-link subtle mobile-menu-back-link" onClick={() => setMobileMenuOpen(false)}>メニューへ戻る</Link>
-          </div>
-          <div className="mobile-drawer-section">
-            <p className="mobile-drawer-section-title"><span className="btn-icon"><UiIcon name="settings" /></span>表示カスタム</p>
-            <div className="ui-preset-segment mobile">
-              {UI_PRESET_OPTIONS.map((option) => (
-                <button
-                  key={`ui_preset_mobile_${option.value}`}
-                  type="button"
-                  className={`ui-preset-btn ${uiPreset === option.value ? "is-active" : ""}`}
-                  onClick={() => setUiPreset(option.value)}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
           </div>
         </aside>
 
@@ -11549,7 +11588,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
           <div className="crop-editor-head">
             <div>
               <h3>{cropEditorTarget ? `${cropEditorTarget.label} 画像トリミング` : "画像トリミング"}</h3>
-              <p className="mini">比率・拡大・位置を調整して保存すると、画像が切り抜かれて反映されます。</p>
+              <p className="mini">画像の上をドラッグして切り抜き枠を決めてください。</p>
             </div>
             <div className="inline-row">
               <button type="button" className="btn btn-subtle" onClick={closeImageCropEditor} disabled={cropEditorSaving}>
@@ -11570,88 +11609,44 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
           <div className="crop-editor-body">
             <div className="crop-editor-preview-wrap">
               <div
+                ref={cropEditorPreviewRef}
                 className="crop-editor-frame"
-                style={cropEditorAspectRatio ? { aspectRatio: `${cropEditorAspectRatio}` } : undefined}
+                style={{ aspectRatio: `${cropEditorFrameAspectRatio}` }}
+                onPointerDown={onCropPointerDown}
+                onPointerMove={onCropPointerMove}
+                onPointerUp={onCropPointerEnd}
+                onPointerCancel={onCropPointerEnd}
               >
                 {cropEditorSourceDataUrl ? (
                   <img
                     src={cropEditorSourceDataUrl}
                     alt={cropEditorTarget ? `${cropEditorTarget.label} トリミングプレビュー` : "トリミングプレビュー"}
                     className="crop-editor-image"
-                    style={{ transform: cropEditorPreviewTransform }}
                   />
                 ) : (
                   <p className="mini">画像を読み込み中です...</p>
                 )}
+                <span className="crop-editor-selection" style={cropEditorSelectionStyle} />
+                <span className="crop-editor-hint">{cropEditorDrag ? "ドラッグ中..." : "ドラッグして切り抜き範囲を選択"}</span>
               </div>
               {cropEditorImageSize ? (
                 <p className="mini crop-editor-meta">元画像サイズ: {cropEditorImageSize.width} x {cropEditorImageSize.height}px</p>
               ) : null}
             </div>
             <div className="crop-editor-controls">
-              <label className="field">
-                <span>比率</span>
-                <select
-                  className="control"
-                  value={cropEditorAspect}
-                  onChange={(event) => setCropEditorAspect(event.target.value as CropAspectPreset)}
-                  disabled={cropEditorSaving}
-                >
-                  {CROP_ASPECT_OPTIONS.map((option) => (
-                    <option key={`crop_aspect_${option.value}`} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field crop-editor-slider-row">
-                <span>拡大</span>
-                <input
-                  type="range"
-                  min={1}
-                  max={3}
-                  step={0.01}
-                  value={cropEditorZoom}
-                  onChange={(event) => setCropEditorZoom(clamp(parseNumericInput(event.target.value, cropEditorZoom), 1, 3))}
-                  disabled={cropEditorSaving}
-                />
-                <span className="crop-editor-slider-meta">{cropEditorZoom.toFixed(2)}x</span>
-              </label>
-              <label className="field crop-editor-slider-row">
-                <span>左右位置</span>
-                <input
-                  type="range"
-                  min={-1}
-                  max={1}
-                  step={0.01}
-                  value={cropEditorOffsetX}
-                  onChange={(event) => setCropEditorOffsetX(clamp(parseNumericInput(event.target.value, cropEditorOffsetX), -1, 1))}
-                  disabled={cropEditorSaving}
-                />
-              </label>
-              <label className="field crop-editor-slider-row">
-                <span>上下位置</span>
-                <input
-                  type="range"
-                  min={-1}
-                  max={1}
-                  step={0.01}
-                  value={cropEditorOffsetY}
-                  onChange={(event) => setCropEditorOffsetY(clamp(parseNumericInput(event.target.value, cropEditorOffsetY), -1, 1))}
-                  disabled={cropEditorSaving}
-                />
-              </label>
+              <p className="mini">操作: 画像をドラッグして範囲を指定し、保存を押すだけです。</p>
+              <p className="mini crop-editor-selection-meta">
+                選択範囲: 横 {Math.round(cropEditorSelection.width * 100)}% / 縦 {Math.round(cropEditorSelection.height * 100)}%
+              </p>
               <button
                 type="button"
                 className="btn btn-subtle"
                 onClick={() => {
-                  setCropEditorZoom(1);
-                  setCropEditorOffsetX(0);
-                  setCropEditorOffsetY(0);
+                  setCropEditorSelection({ x: 0, y: 0, width: 1, height: 1 });
                 }}
                 disabled={cropEditorSaving}
               >
-                位置と拡大をリセット
+                全体を選択（リセット）
               </button>
               {cropEditorError ? <p className="crop-editor-error">{cropEditorError}</p> : null}
             </div>
