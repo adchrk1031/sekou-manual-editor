@@ -2671,6 +2671,15 @@ p {
   height: 13px;
 }
 
+/* Keep auth submit buttons as large as tab controls on all breakpoints. */
+.auth-form .btn.auth-login-btn {
+  min-height: 64px;
+  height: 64px;
+  padding: 0 16px;
+  font-size: 1rem;
+  border-radius: 12px;
+}
+
 @media (max-width: 1320px) and (min-width: 1024px) {
   .top-bar {
     grid-template-columns: 76px minmax(230px, 300px) minmax(320px, 1fr) auto auto auto;
