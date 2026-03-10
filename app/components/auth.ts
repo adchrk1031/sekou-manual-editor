@@ -100,7 +100,17 @@ function pickPreferredCandidate(candidates: AuthUser[]): AuthUser | null {
   if (!candidates.length) {
     return null;
   }
-  return [...candidates].sort((a, b) => getUserPriorityScore(b) - getUserPriorityScore(a))[0] ?? null;
+  const approvedAndActive = candidates.filter((user) => user.active && user.approvalStatus === "approved");
+  const source = approvedAndActive.length ? approvedAndActive : candidates;
+  return [...source].sort((a, b) => {
+    const scoreDiff = getUserPriorityScore(b) - getUserPriorityScore(a);
+    if (scoreDiff !== 0) {
+      return scoreDiff;
+    }
+    const aTime = Date.parse(a.createdAt ?? "") || 0;
+    const bTime = Date.parse(b.createdAt ?? "") || 0;
+    return bTime - aTime;
+  })[0] ?? null;
 }
 
 export function getLoginFailureMessage(reason?: AuthLoginFailureReason): string {
@@ -302,8 +312,8 @@ export function touchSessionActivity(): void {
 }
 
 function sanitizeUsers(users: AuthUser[]): AuthUser[] {
-  if (!Array.isArray(users) || users.length === 0) {
-    return users;
+  if (!Array.isArray(users)) {
+    return [];
   }
   const sanitized = users.map((user) => {
     const normalizedEmail = normalizeEmail(typeof user.email === "string" ? user.email : "");
@@ -579,7 +589,7 @@ export function loginWithCredentials(
     appendLoginAttempt({ email: targetEmail, userName: "-", result: "failed", source });
     return { user: null, reason: "locked" };
   }
-  const candidates = users.filter((user) => user.email.toLowerCase() === targetEmail);
+  const candidates = users.filter((user) => normalizeEmail(user.email) === targetEmail);
   if (!candidates.length) {
     markLoginFailed(targetEmail);
     appendLoginAttempt({ email: targetEmail, userName: "-", result: "failed", source });

@@ -93,7 +93,7 @@ export default function Page() {
       if (!synced) {
         setMessage({
           type: "error",
-          text: "共有データへ接続できません。安全のためログイン/登録を停止しています。管理者に連絡してください。",
+          text: "共有データへの接続に失敗しました。この端末の保存データでログインを継続します。新規登録は共有接続時のみ可能です。",
         });
       }
       setHydrated(true);
@@ -109,13 +109,20 @@ export default function Page() {
     setHasUsers(users.length > 0);
   }
 
-  async function ensureSharedReadyOrFail(): Promise<boolean> {
+  async function ensureSharedReadyOrFail(mode: "login" | "register"): Promise<boolean> {
     const synced = await pullSharedStorageSnapshot();
     setSharedSyncReady(synced);
     if (!synced) {
+      if (mode === "login") {
+        setMessage({
+          type: "error",
+          text: "共有データへの接続に失敗しました。この端末の保存データでログインを継続します。",
+        });
+        return true;
+      }
       setMessage({
         type: "error",
-        text: "共有データへ接続できません。安全のためログイン/登録を停止しています。管理者に連絡してください。",
+        text: "共有データへ接続できません。新規登録は共有接続時のみ可能です。時間をおいて再試行してください。",
       });
       return false;
     }
@@ -124,7 +131,7 @@ export default function Page() {
 
   async function onLogin(): Promise<void> {
     setMessage(null);
-    if (!(await ensureSharedReadyOrFail())) {
+    if (!(await ensureSharedReadyOrFail("login"))) {
       return;
     }
     refreshUsersState();
@@ -139,7 +146,7 @@ export default function Page() {
 
   async function onRegister(): Promise<void> {
     setMessage(null);
-    if (!(await ensureSharedReadyOrFail())) {
+    if (!(await ensureSharedReadyOrFail("register"))) {
       return;
     }
     refreshUsersState();
@@ -241,7 +248,6 @@ export default function Page() {
             role="tab"
             aria-selected={authTab === "register"}
             className={`auth-switch-btn ${authTab === "register" ? "is-active" : ""}`}
-            disabled={!sharedSyncReady}
             onClick={() => setAuthTab("register")}
           >
             初めて利用する方
@@ -251,7 +257,6 @@ export default function Page() {
             role="tab"
             aria-selected={authTab === "login"}
             className={`auth-switch-btn ${authTab === "login" ? "is-active" : ""}`}
-            disabled={!sharedSyncReady}
             onClick={() => setAuthTab("login")}
           >
             登録済みの方はこちら（ログイン）
@@ -335,7 +340,12 @@ export default function Page() {
                 </button>
               </div>
             </label>
-            <button type="button" className="btn btn-accent auth-login-btn" onClick={onLogin} disabled={!sharedSyncReady}>
+            <button
+              type="button"
+              className="btn btn-accent auth-login-btn"
+              onClick={onLogin}
+              disabled={!loginEmail.trim() || !loginPassword.trim()}
+            >
               ログインして続行
             </button>
           </section>
