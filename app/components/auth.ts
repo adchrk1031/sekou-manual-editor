@@ -69,6 +69,40 @@ function isApproverRole(role: AuthRole): boolean {
   return role === "system_admin" || role === "admin";
 }
 
+function getRolePriority(role: AuthRole): number {
+  if (role === "system_admin") {
+    return 40;
+  }
+  if (role === "admin") {
+    return 30;
+  }
+  if (role === "editor") {
+    return 20;
+  }
+  return 10;
+}
+
+function getApprovalPriority(status: UserApprovalStatus): number {
+  if (status === "approved") {
+    return 30;
+  }
+  if (status === "pending") {
+    return 20;
+  }
+  return 10;
+}
+
+function getUserPriorityScore(user: AuthUser): number {
+  return getRolePriority(user.role) + getApprovalPriority(user.approvalStatus) + (user.active ? 5 : 0);
+}
+
+function pickPreferredCandidate(candidates: AuthUser[]): AuthUser | null {
+  if (!candidates.length) {
+    return null;
+  }
+  return [...candidates].sort((a, b) => getUserPriorityScore(b) - getUserPriorityScore(a))[0] ?? null;
+}
+
 export function getLoginFailureMessage(reason?: AuthLoginFailureReason): string {
   if (reason === "not_registered") {
     return "このメールアドレスは未登録です。管理者にユーザー追加を依頼してください。";
@@ -348,19 +382,32 @@ function sanitizeUsers(users: AuthUser[]): AuthUser[] {
         ...sanitized,
       ];
 
-  const hasActiveApprover = withSystemAdmin.some(
+  const dedupedByEmail = new Map<string, AuthUser>();
+  withSystemAdmin.forEach((user) => {
+    const key = normalizeEmail(user.email);
+    if (!key) {
+      return;
+    }
+    const previous = dedupedByEmail.get(key);
+    if (!previous || getUserPriorityScore(user) > getUserPriorityScore(previous)) {
+      dedupedByEmail.set(key, user);
+    }
+  });
+  const dedupedUsers = Array.from(dedupedByEmail.values());
+
+  const hasActiveApprover = dedupedUsers.some(
     (user) => isApproverRole(user.role) && user.active && user.approvalStatus === "approved",
   );
   if (hasActiveApprover) {
-    return withSystemAdmin;
+    return dedupedUsers;
   }
 
-  const promoteIndex = withSystemAdmin.findIndex((user) => user.active);
+  const promoteIndex = dedupedUsers.findIndex((user) => user.active);
   if (promoteIndex < 0) {
-    return withSystemAdmin;
+    return dedupedUsers;
   }
 
-  return withSystemAdmin.map((user, index) =>
+  return dedupedUsers.map((user, index) =>
     index === promoteIndex
       ? { ...user, role: "admin" as const }
       : user,
@@ -432,13 +479,16 @@ export function registerSelfUser(name: string, email: string, password: string):
     return { user: null, error: "client_only" };
   }
   const trimmedName = name.trim();
-  const trimmedEmail = email.trim().toLowerCase();
+  const trimmedEmail = normalizeEmail(email);
   const trimmedPassword = password.trim();
   if (!trimmedName || !trimmedEmail || !trimmedPassword) {
     return { user: null, error: "missing" };
   }
+  if (isSystemAdminEmail(trimmedEmail)) {
+    return { user: null, error: "reserved_email" };
+  }
   const users = ensureUsers();
-  if (users.some((user) => user.email.toLowerCase() === trimmedEmail)) {
+  if (users.some((user) => normalizeEmail(user.email) === trimmedEmail)) {
     return { user: null, error: "duplicate_email" };
   }
   const next: AuthUser = {
@@ -535,7 +585,13 @@ export function loginWithCredentials(
     appendLoginAttempt({ email: targetEmail, userName: "-", result: "failed", source });
     return { user: null, reason: "not_registered" };
   }
-  const foundByEmail = candidates.find((user) => user.password === password) ?? candidates[0];
+  const passwordMatched = candidates.filter((user) => user.password === password);
+  const foundByEmail = pickPreferredCandidate(passwordMatched.length ? passwordMatched : candidates);
+  if (!foundByEmail) {
+    markLoginFailed(targetEmail);
+    appendLoginAttempt({ email: targetEmail, userName: "-", result: "failed", source });
+    return { user: null, reason: "invalid_password" };
+  }
   if (foundByEmail.password !== password) {
     markLoginFailed(targetEmail);
     appendLoginAttempt({ email: targetEmail, userName: "-", result: "failed", source });
@@ -583,7 +639,7 @@ export function loginWithGoogleEmail(
     appendLoginAttempt({ email: targetEmail, userName: "-", result: "failed", source });
     return { user: null, reason: "locked" };
   }
-  const found = users.find((user) => user.email.toLowerCase() === targetEmail);
+  const found = pickPreferredCandidate(users.filter((user) => normalizeEmail(user.email) === targetEmail));
   if (!found) {
     markLoginFailed(targetEmail);
     appendLoginAttempt({ email: targetEmail, userName: "-", result: "failed", source });
