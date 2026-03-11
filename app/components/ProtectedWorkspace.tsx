@@ -3,15 +3,13 @@
 import { ReactNode, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getSessionUser, touchSessionActivity } from "./auth";
-import { pullSharedStorageSnapshot } from "./sharedStorage";
 
 export default function ProtectedWorkspace({ children }: { children: ReactNode }) {
   const router = useRouter();
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const checkSession = async (): Promise<void> => {
-      await pullSharedStorageSnapshot();
+    const checkSession = (): void => {
       const user = getSessionUser();
       if (!user) {
         setReady(false);
@@ -21,10 +19,10 @@ export default function ProtectedWorkspace({ children }: { children: ReactNode }
       setReady(true);
     };
 
-    void checkSession();
+    checkSession();
 
     const timer = window.setInterval(() => {
-      void checkSession();
+      checkSession();
     }, 15 * 1000);
     const onActivity = (): void => {
       touchSessionActivity();
@@ -33,7 +31,7 @@ export default function ProtectedWorkspace({ children }: { children: ReactNode }
       if (event.key && !event.key.startsWith("sekou-tool-session")) {
         return;
       }
-      void checkSession();
+      checkSession();
     };
     window.addEventListener("pointerdown", onActivity, { passive: true });
     window.addEventListener("keydown", onActivity);

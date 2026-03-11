@@ -3894,11 +3894,13 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     }
     saveTimerRef.current = window.setTimeout(() => {
       persistProjectsToStorage(projects);
+      saveTimerRef.current = null;
     }, PROJECT_SAVE_DEBOUNCE_MS);
 
     return () => {
       if (saveTimerRef.current) {
         window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
       }
     };
   }, [projects, hydrated, persistProjectsToStorage]);
@@ -3912,10 +3914,12 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     }
     sharedSyncTimerRef.current = window.setTimeout(() => {
       void pushSharedStorageSnapshot();
+      sharedSyncTimerRef.current = null;
     }, 900);
     return () => {
       if (sharedSyncTimerRef.current) {
         window.clearTimeout(sharedSyncTimerRef.current);
+        sharedSyncTimerRef.current = null;
       }
     };
   }, [
@@ -3940,16 +3944,23 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     const flushNow = () => {
       if (saveTimerRef.current) {
         window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
       }
       persistProjectsToStorage(projectsRef.current);
       if (csvSaveTimerRef.current) {
         window.clearTimeout(csvSaveTimerRef.current);
+        csvSaveTimerRef.current = null;
       }
       const serialized = stringifyForStorage({ headers: csvHeadersRef.current, rows: csvDraftRowsRef.current });
       if (serialized !== csvSerializedCacheRef.current) {
         localStorage.setItem(CSV_EDITOR_STORAGE_KEY, serialized);
         csvSerializedCacheRef.current = serialized;
       }
+      if (sharedSyncTimerRef.current) {
+        window.clearTimeout(sharedSyncTimerRef.current);
+        sharedSyncTimerRef.current = null;
+      }
+      void pushSharedStorageSnapshot();
     };
     const handleVisibilityChange = () => {
       if (document.visibilityState === "hidden") {
@@ -3962,6 +3973,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
+      flushNow();
       window.removeEventListener("pagehide", flushNow);
       window.removeEventListener("beforeunload", flushNow);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
@@ -4002,10 +4014,12 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
         localStorage.setItem(CSV_EDITOR_STORAGE_KEY, serialized);
         csvSerializedCacheRef.current = serialized;
       }
+      csvSaveTimerRef.current = null;
     }, CSV_SAVE_DEBOUNCE_MS);
     return () => {
       if (csvSaveTimerRef.current) {
         window.clearTimeout(csvSaveTimerRef.current);
+        csvSaveTimerRef.current = null;
       }
     };
   }, [csvHeaders, csvDraftRows, hydrated]);
@@ -4982,7 +4996,11 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
       }
       return;
     }
-    const nextProject = syncProjectWorkRange(updater(selectedProject));
+    const currentProject = projectsRef.current.find((project) => project.projectId === selectedId);
+    if (!currentProject) {
+      return;
+    }
+    const nextProject = syncProjectWorkRange(updater(currentProject));
     setProjects((prev) => prev.map((project) => (project.projectId === selectedId ? nextProject : project)));
     if (meta?.action) {
       appendAudit(meta.action, meta.detail ?? "", nextProject.projectId);
@@ -10065,8 +10083,8 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
               </thead>
               <tbody>
                 <tr key="row_outage_edit">
-                  <td><input className="control" value="停電時間" readOnly /></td>
-                  <td>
+                  <td data-label="項目"><input className="control" value="停電時間" readOnly /></td>
+                  <td data-label="開始日時">
                     <input
                       className="control"
                       type="datetime-local"
@@ -10077,7 +10095,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
                       }}
                     />
                   </td>
-                  <td>
+                  <td data-label="終了日時">
                     <input
                       className="control"
                       type="datetime-local"
@@ -10088,14 +10106,14 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
                       }}
                     />
                   </td>
-                  <td><input type="checkbox" checked={selectedProject.outageEnabled} onChange={(event) => handleProjectField("outageEnabled", event.target.checked)} /></td>
-                  <td><input className="control" value="全館停電" readOnly /></td>
-                  <td><span className="mini">表示切替</span></td>
+                  <td data-label="停電"><input type="checkbox" checked={selectedProject.outageEnabled} onChange={(event) => handleProjectField("outageEnabled", event.target.checked)} /></td>
+                  <td data-label="備考"><input className="control" value="全館停電" readOnly /></td>
+                  <td data-label="操作"><span className="mini">表示切替</span></td>
                 </tr>
                 {selectedProject.scheduleRows.map((row) => (
                   <tr key={row.id}>
-                    <td><input className="control" value={row.label} onChange={(event) => updateScheduleRow(row.id, { label: event.target.value })} /></td>
-                    <td>
+                    <td data-label="項目"><input className="control" value={row.label} onChange={(event) => updateScheduleRow(row.id, { label: event.target.value })} /></td>
+                    <td data-label="開始日時">
                       <input
                         className="control"
                         type="datetime-local"
@@ -10106,7 +10124,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
                         }}
                       />
                     </td>
-                    <td>
+                    <td data-label="終了日時">
                       <input
                         className="control"
                         type="datetime-local"
@@ -10117,8 +10135,8 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
                         }}
                       />
                     </td>
-                    <td><input type="checkbox" checked={row.outage} onChange={(event) => updateScheduleRow(row.id, { outage: event.target.checked })} /></td>
-                    <td>
+                    <td data-label="停電"><input type="checkbox" checked={row.outage} onChange={(event) => updateScheduleRow(row.id, { outage: event.target.checked })} /></td>
+                    <td data-label="備考">
                       <textarea
                         className="control textarea schedule-note-input"
                         value={row.note}
@@ -10126,7 +10144,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
                         placeholder="備考を入力（長文可）"
                       />
                     </td>
-                    <td className="timeline-action-cell">
+                    <td className="timeline-action-cell" data-label="操作">
                       <div className="row-action-group">
                         <button type="button" className="btn btn-subtle row-action-btn" onClick={() => moveScheduleRow(row.id, -1)}><span className="btn-icon"><UiIcon name="up" /></span>上へ</button>
                         <button type="button" className="btn btn-subtle row-action-btn" onClick={() => moveScheduleRow(row.id, 1)}><span className="btn-icon"><UiIcon name="down" /></span>下へ</button>

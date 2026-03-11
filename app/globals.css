@@ -2455,6 +2455,13 @@ p {
   background: #fff;
 }
 
+input.control[type="date"],
+input.control[type="time"],
+input.control[type="datetime-local"] {
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+
 .control-missing {
   border-color: #d92d20;
   box-shadow: inset 0 0 0 1px #d92d20;
@@ -4697,6 +4704,90 @@ p {
   .timeline-edit-table td:last-child {
     min-width: 136px;
     width: 136px;
+  }
+
+  .field input.control[type="date"],
+  .field input.control[type="time"],
+  .timeline-edit-table input.control[type="datetime-local"] {
+    width: 100%;
+    min-width: 0;
+    min-height: 48px;
+    padding: 10px 12px;
+    font-size: 0.95rem;
+    line-height: 1.25;
+  }
+
+  .timeline-edit-table {
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  .timeline-edit-table thead {
+    display: none;
+  }
+
+  .timeline-edit-table tbody {
+    display: grid;
+    gap: 10px;
+  }
+
+  .timeline-edit-table tbody tr {
+    display: grid;
+    gap: 8px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px;
+    background: #fff;
+  }
+
+  .timeline-edit-table tbody td {
+    display: grid;
+    grid-template-columns: minmax(80px, 94px) minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    border: 0;
+    padding: 0;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .timeline-edit-table tbody td:last-child {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .timeline-edit-table tbody td::before {
+    content: attr(data-label);
+    font-size: 0.76rem;
+    font-weight: 800;
+    color: #5a7290;
+    letter-spacing: 0.01em;
+  }
+
+  .timeline-edit-table tbody td[data-label="操作"] {
+    grid-template-columns: 1fr;
+  }
+
+  .timeline-edit-table tbody td[data-label="操作"]::before {
+    margin-bottom: 2px;
+  }
+
+  .timeline-edit-table tbody td[data-label="停電"] input[type="checkbox"] {
+    justify-self: start;
+  }
+
+  .timeline-edit-table .timeline-action-cell {
+    text-align: left;
+  }
+
+  .timeline-edit-table .row-action-group {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .timeline-edit-table .row-action-btn {
+    min-height: 48px;
+    font-size: 0.88rem;
+    padding-inline: 8px;
   }
 
   .csv-op-col,
