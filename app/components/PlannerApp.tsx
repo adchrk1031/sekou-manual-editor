@@ -8608,6 +8608,23 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     focusTarget?.focus();
   }
 
+  function scrollToMiniInput(): void {
+    if (requiredMissingKeys.length) {
+      scrollToMissingField();
+      return;
+    }
+    const firstRequired = document.querySelector('[data-required-key="propertyName"]') as HTMLElement | null;
+    if (!firstRequired) {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+    firstRequired.scrollIntoView({ behavior: "smooth", block: "center" });
+    const focusTarget = firstRequired.matches("input, select, textarea")
+      ? firstRequired
+      : (firstRequired.querySelector("input, select, textarea, button") as HTMLElement | null);
+    focusTarget?.focus();
+  }
+
   function selectProjectFromSearch(projectId: string): void {
     setSelectedId(projectId);
     setProjectSearchText("");
@@ -8771,6 +8788,17 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
             メニュー
           </button>
         </header>
+        <button
+          type="button"
+          className={`btn mobile-fab-menu ${mobileMenuOpen ? "is-open" : ""}`}
+          aria-expanded={mobileMenuOpen}
+          aria-controls="mobile-global-menu"
+          aria-label={mobileMenuOpen ? "メニューを閉じる" : "メニューを開く"}
+          onClick={() => setMobileMenuOpen((prev) => !prev)}
+        >
+          <span className="btn-icon"><UiIcon name={mobileMenuOpen ? "clear" : "menu"} /></span>
+          {mobileMenuOpen ? "閉じる" : "メニュー"}
+        </button>
 
         <nav className="workspace-switch" aria-label="Workspace navigation">
           <Link href="/editor" className={`workspace-link ${isEditorMode ? "active" : ""}`}>施工計画書編集</Link>
@@ -8840,6 +8868,17 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
             <Link href="/menu" className="workspace-link subtle mobile-menu-back-link" onClick={() => setMobileMenuOpen(false)}>メニューへ戻る</Link>
           </div>
         </aside>
+        {isEditorMode && hasSelectedProject ? (
+          <button
+            type="button"
+            className="btn mobile-fab-missing"
+            onClick={scrollToMiniInput}
+            title="未入力項目へ移動"
+          >
+            <span className="btn-icon"><UiIcon name="down" /></span>
+            ミニ入力へ移動
+          </button>
+        ) : null}
 
         {isCsvMode ? <p className="import-status">{importStatus}</p> : null}
 
