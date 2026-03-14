@@ -736,16 +736,23 @@ p {
 }
 
 .auth-switch-btn {
-  min-height: 64px;
-  height: 64px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-height: 72px;
+  height: 72px;
   border: 1px solid var(--btn-soft-border);
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--btn-soft-bg);
   color: var(--btn-soft-text);
-  font-size: 1rem;
-  font-weight: 700;
+  font-size: 1.125rem;
+  font-weight: 800;
+  line-height: 1;
   padding: 0 16px;
   cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
 }
 
 .auth-switch-btn.is-active {
@@ -768,10 +775,10 @@ p {
 
 .auth-login-btn {
   width: 100%;
-  min-height: 64px;
-  height: 64px;
+  min-height: 72px;
+  height: 72px;
   justify-self: stretch;
-  font-size: 1rem;
+  font-size: 1.125rem;
   padding: 0 16px;
 }
 
@@ -2693,11 +2700,21 @@ input.control[type="datetime-local"] {
 
 /* Keep auth submit buttons as large as tab controls on all breakpoints. */
 .auth-form .btn.auth-login-btn {
-  min-height: 64px;
-  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 72px;
+  height: 72px;
   padding: 0 16px;
-  font-size: 1rem;
+  font-size: 1.125rem;
+  font-weight: 800;
+  line-height: 1;
   border-radius: 12px;
+  white-space: nowrap;
+  appearance: none;
+  -webkit-appearance: none;
 }
 
 @media (max-width: 1320px) and (min-width: 1024px) {
