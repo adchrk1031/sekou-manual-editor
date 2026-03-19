@@ -55,6 +55,20 @@ function EyeIcon({ open }: { open: boolean }) {
   );
 }
 
+const AUTH_PRIMARY_BUTTON_STYLE = {
+  width: "100%",
+  minHeight: "72px",
+  height: "72px",
+  padding: "0 16px",
+  borderRadius: "12px",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  fontSize: "1.125rem",
+  fontWeight: 800,
+  lineHeight: 1,
+} as const;
+
 export default function Page() {
   const router = useRouter();
   const [hydrated, setHydrated] = useState(false);
@@ -304,7 +318,13 @@ export default function Page() {
                 onChange={(event) => setRegisterPasswordConfirm(event.target.value)}
               />
             </label>
-            <button type="button" className="btn btn-accent auth-login-btn" onClick={onRegister} disabled={!sharedSyncReady}>
+            <button
+              type="button"
+              className="btn btn-accent auth-login-btn"
+              style={AUTH_PRIMARY_BUTTON_STYLE}
+              onClick={onRegister}
+              disabled={!sharedSyncReady}
+            >
               {isInitialSetup ? "初期管理者を登録する" : "登録する"}
             </button>
             {!isInitialSetup ? (
@@ -343,6 +363,7 @@ export default function Page() {
             <button
               type="button"
               className="btn btn-accent auth-login-btn"
+              style={AUTH_PRIMARY_BUTTON_STYLE}
               onClick={onLogin}
               disabled={!loginEmail.trim() || !loginPassword.trim()}
             >
