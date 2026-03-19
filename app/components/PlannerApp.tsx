@@ -2,1072 +2,152 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { CSSProperties, ChangeEvent, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode, WheelEvent as ReactWheelEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { compressToUTF16, decompressFromUTF16 } from "lz-string";
+import { CSSProperties, ChangeEvent, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { clearSession, ensureUsers, getLoginAttempts, getLoginFailureMessage, getSessionUser, loginWithCredentials, type LoginAttemptLog } from "./auth";
 import { SHARED_STORAGE_UPDATED_EVENT, pullSharedStorageSnapshot, pushSharedStorageSnapshot } from "./sharedStorage";
-
-type WorkCode = "KOUATSU_CABLE" | "UGS" | "PAS" | "GROUND_A" | "GROUND_B" | "GROUND_C";
-
-type ScheduleRow = {
-  id: string;
-  label: string;
-  startDate: string;
-  start: string;
-  endDate: string;
-  end: string;
-  outage: boolean;
-  text: string;
-  note: string;
-};
-
-type PhotoSlot = {
-  id: string;
-  label: string;
-  dataUrl: string;
-  layoutAnnotations: LayoutAnnotation[];
-  layoutAnnotationsV2: LayoutAnnotationV2[];
-};
-
-type PhotoSlots = PhotoSlot[];
-type LayoutTextAlign = "left" | "center" | "right";
-
-type LayoutAnnotationType = "arrow" | "rect" | "polygon" | "text";
-
-type LayoutAnnotationBase = {
-  id: string;
-  type: LayoutAnnotationType;
-  color: string;
-  groupId?: string;
-  rotation?: number;
-  fillColor?: string;
-  fillOpacity?: number;
-  name?: string;
-  visible?: boolean;
-  locked?: boolean;
-};
-
-type LayoutArrowAnnotation = LayoutAnnotationBase & {
-  type: "arrow";
-  fromX: number;
-  fromY: number;
-  toX: number;
-  toY: number;
-  strokeWidth: number;
-  arrowHead?: boolean;
-};
-
-type LayoutRectAnnotation = LayoutAnnotationBase & {
-  type: "rect";
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  strokeWidth: number;
-};
-
-type LayoutPolygonAnnotation = LayoutAnnotationBase & {
-  type: "polygon";
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  sides: number;
-  strokeWidth: number;
-};
-
-type LayoutTextAnnotation = LayoutAnnotationBase & {
-  type: "text";
-  x: number;
-  y: number;
-  text: string;
-  fontSize: number;
-  fontWeight: number;
-  fontFamily: string;
-  textStrokeColor: string;
-  textStrokeWidth: number;
-  textAlign: LayoutTextAlign;
-};
-
-type LayoutAnnotation = LayoutArrowAnnotation | LayoutRectAnnotation | LayoutPolygonAnnotation | LayoutTextAnnotation;
-
-type LayoutAnnotationV2Type = "arrow" | "rect" | "polygon" | "text";
-
-type LayoutAnnotationV2Transform = {
-  x: number;
-  y: number;
-  rotation: number;
-  scaleX: number;
-  scaleY: number;
-};
-
-type LayoutAnnotationV2Style = {
-  stroke: string;
-  strokeWidth: number;
-  fill: string;
-  fillOpacity: number;
-  textColor: string;
-  fontSize: number;
-  fontWeight: number;
-  fontFamily: string;
-  textStrokeColor: string;
-  textStrokeWidth: number;
-  textAlign: LayoutTextAlign;
-};
-
-type LayoutAnnotationV2Base = {
-  id: string;
-  type: LayoutAnnotationV2Type;
-  groupId?: string;
-  transform: LayoutAnnotationV2Transform;
-  style: LayoutAnnotationV2Style;
-  name?: string;
-  visible?: boolean;
-  locked?: boolean;
-};
-
-type LayoutArrowAnnotationV2 = LayoutAnnotationV2Base & {
-  type: "arrow";
-  points: [number, number, number, number];
-  arrowHead?: boolean;
-};
-
-type LayoutRectAnnotationV2 = LayoutAnnotationV2Base & {
-  type: "rect";
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-};
-
-type LayoutPolygonAnnotationV2 = LayoutAnnotationV2Base & {
-  type: "polygon";
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  sides: number;
-};
-
-type LayoutTextAnnotationV2 = LayoutAnnotationV2Base & {
-  type: "text";
-  x: number;
-  y: number;
-  text: string;
-};
-
-type LayoutAnnotationV2 = LayoutArrowAnnotationV2 | LayoutRectAnnotationV2 | LayoutPolygonAnnotationV2 | LayoutTextAnnotationV2;
-
-type LayoutAnnotationListEntry = {
-  key: string;
-  annotationIds: string[];
-  primaryId: string;
-  title: string;
-  visible: boolean;
-  locked: boolean;
-  isGroup: boolean;
-};
-
-type RelatedParty = {
-  enabled: boolean;
-  title: string;
-  company: string;
-  person: string;
-  office: string;
-  tel: string;
-};
-
-type UserRole = "system_admin" | "admin" | "editor" | "viewer";
-type UserApprovalStatus = "approved" | "pending" | "rejected";
-type RelatedPartyKey = "owner" | "utility" | "contractor" | "management" | "residents";
-
-type UserAccount = {
-  id: string;
-  name: string;
-  email: string;
-  password: string;
-  role: UserRole;
-  active: boolean;
-  approvalStatus: UserApprovalStatus;
-  approvedAt?: string;
-  approvedById?: string;
-  approvedByName?: string;
-  createdAt?: string;
-  createdById?: string;
-  createdByName?: string;
-  lastLoginAt?: string;
-};
-
-type AuditLog = {
-  id: string;
-  projectId: string;
-  at: string;
-  userId: string;
-  userName: string;
-  action: string;
-  detail: string;
-};
-
-type PartyCompanyTemplatePreset = {
-  id: string;
-  label: string;
-  title: string;
-  company: string;
-  person: string;
-  office: string;
-  tel: string;
-};
-
-type Project = {
-  projectId: string;
-  propertyName: string;
-  propertyAddress: string;
-  titleSubject: string;
-  workDateStart: string;
-  workDateEnd: string;
-  outageDateStart: string;
-  outageDateEnd: string;
-  outageTimeStart: string;
-  outageTimeEnd: string;
-  outageEnabled: boolean;
-  flags: Record<WorkCode, boolean>;
-  selectedWorkCodes: WorkCode[];
-  noteSpecial: string;
-  noteApprovalExtra: string;
-  coverRecipientSuffix: string;
-  pdfTemplateId: PdfTemplateId;
-  pdfCompanyName: string;
-  pdfTeam: string;
-  pdfContactPerson: string;
-  pdfAddress: string;
-  pdfEmail: string;
-  pdfTel: string;
-  pdfFax: string;
-  layoutImageDataUrl: string;
-  layoutAnnotations: LayoutAnnotation[];
-  layoutAnnotationsV2: LayoutAnnotationV2[];
-  scheduleRows: ScheduleRow[];
-  detailPhotos: PhotoSlots;
-  layoutPhotos: PhotoSlots;
-  relatedParties: {
-    owner: RelatedParty;
-    utility: RelatedParty;
-    contractor: RelatedParty;
-    management: RelatedParty;
-    residents: RelatedParty;
-  };
-  approvalStatus: "draft" | "submitted" | "approved" | "rejected";
-  approvalComment: string;
-  approvedBy: string;
-  approvedAt: string;
-  pdfExportCount: number;
-  pdfLastExportedAt: string;
-};
-
-type ProjectSnapshot = Pick<
+import { isAdminLikeRole, formatAuditAction, formatAuditScreen, formatAuditDetail, formatAuditDetailForNonAdmin, formatUserCreatedByLabel, formatUserApprovedByLabel } from "./planner/utils/audit";
+import {
+  APPROVAL_STATUS_LABELS,
+  AUDIT_STORAGE_KEY,
+  CSV_EDITOR_STORAGE_KEY,
+  CSV_PAGE_SIZE_OPTIONS,
+  CSV_PROJECT_FIELD_ALIASES,
+  CSV_SAVE_DEBOUNCE_MS,
+  CSV_WORK_COLUMN_ALIASES,
+  DEFAULT_ANNOTATION_COLOR,
+  DEFAULT_ANNOTATION_FILL_COLOR,
+  DEFAULT_ANNOTATION_FILL_OPACITY,
+  DEFAULT_ANNOTATION_STROKE_WIDTH,
+  DEFAULT_LAYOUT_MAX_SIZE,
+  DEFAULT_PHOTO_MAX_SIZE,
+  DEFAULT_SCHEDULE_PROCEDURE_TEMPLATES,
+  DEFAULT_TEXT_FONT_FAMILY,
+  DEFAULT_TEXT_STROKE_COLOR,
+  DEFAULT_TEXT_STROKE_WIDTH,
+  DETAIL_PHOTO_TEMPLATE_STORAGE_KEY,
+  DRAG_SNAP_MINUTES,
+  EMPTY_PARTY_TEMPLATE_SELECTIONS,
+  getCsvHeaderLabel,
+  HEADER_LOGO_SRC,
+  LAYOUT_CANVAS_SIZE,
+  LAYOUT_SNAP_THRESHOLD,
+  LAYOUT_TEMPLATE_STORAGE_KEY,
+  LAYOUT_TEXT_FONT_OPTIONS,
+  LEGACY_DATE_TRACE_DEBUG_KEY,
+  MAX_ANNOTATION_HISTORY,
+  MAX_AUDIT_LOGS,
+  MAX_REVISIONS,
+  MAX_UPLOAD_FILE_BYTES,
+  MIN_BLOCK_MINUTES,
+  OUTAGE_TRACE_DEBUG_KEY,
+  PARTY_COMPANY_TEMPLATE_PRESETS,
+  PARTY_COMPANY_TEMPLATE_STORAGE_KEY,
+  PARTY_TEMPLATE_STORAGE_KEY,
+  PDF_LOGO_FALLBACK_SRC,
+  PDF_LOGO_SRC,
+  PDF_TEMPLATE_PRESETS,
+  PDF_TEMPLATE_PRESET_MAP,
+  PROJECT_DATA_STORAGE_PREFIX,
+  PROJECT_INDEX_STORAGE_KEY,
+  PROJECT_SAVE_DEBOUNCE_MS,
+  REVISION_STORAGE_KEY,
+  ROLE_LABELS,
+  SCHEDULE_PROCEDURE_TEMPLATE_STORAGE_KEY,
+  SCHEDULE_TEMPLATE_STORAGE_KEY,
+  STORAGE_KEY,
+  TARGET_LAYOUT_DATA_URL_BYTES,
+  TARGET_PHOTO_DATA_URL_BYTES,
+  TEMPLATE_SCOPE_META,
+  TEST_EDITOR_SEED_STORAGE_KEY,
+  TEST_EDITOR_USER_PRESETS,
+  USERS_STORAGE_KEY,
+  USER_APPROVAL_LABELS,
+  USER_LIST_VISIBLE_COUNT,
+  WORK_MASTER,
+} from "./planner/constants";
+import { createCsvValueGetter, inferCsvHeaders, normalizeCsvRows, parseCsv, recordsToCsv } from "./planner/utils/csv";
+import { DAY_TOTAL_MINUTES, addDays, buildTimelineTicks, diffDays, formatDateRange, formatDateTimeRange, formatDateWithWeekday, formatShortDate, fromTimelineOffset, normalizeDate, normalizeDateTimeValue, normalizeTime, startOfDay, tickLabel, toBoolean, toHHMM, toMinutes, toTimelineOffset, todayLocalISO } from "./planner/utils/dateTime";
+import { parseStorageJson, stringifyForStorage } from "./planner/utils/storage";
+import {
+  createEmptyPartyCompanyTemplates,
+  normalizePartyCompanyTemplateMap,
+} from "./planner/utils/partyCompanyTemplates";
+import type {
+  AuditLog,
+  CropSelectionDragState,
+  CropSelectionRect,
+  CsvExportFilter,
+  CsvRecord,
+  DragInfo,
+  LayoutAdvancedTab,
+  LayoutAnnotation,
+  LayoutAnnotationBase,
+  LayoutAnnotationListEntry,
+  LayoutAnnotationV2,
+  LayoutAnnotationV2Base,
+  LayoutAnnotationV2Style,
+  LayoutAnnotationV2Transform,
+  LayoutAnnotationV2Type,
+  LayoutArrowAnnotation,
+  LayoutArrowAnnotationV2,
+  LayoutDrawingDraft,
+  LayoutEditorTarget,
+  LayoutEditorTool,
+  LayoutGuideLine,
+  LayoutMarqueeState,
+  LayoutMoveState,
+  LayoutPolygonAnnotation,
+  LayoutPolygonAnnotationV2,
+  LayoutTextAlign,
+  LayoutPanState,
+  LayoutRectAnnotation,
+  LayoutRectAnnotationV2,
+  LayoutResizeCorner,
+  LayoutResizeState,
+  LayoutRotateState,
+  LayoutTemplatePayload,
+  LocalStorageExportItem,
+  LocalStorageExportPayload,
+  NoticeAdviceItem,
+  NoticeAdvicePhase,
+  NoticeOutageState,
+  NoticeScheduleRow,
+  NoticeWorkType,
+  OutageTraceEntry,
+  OutageWindow,
+  PartyCompanyTemplatePreset,
+  PdfTemplateId,
+  PdfTemplatePreset,
+  PhotoSlot,
+  PhotoSlots,
   Project,
-  | "propertyName"
-  | "propertyAddress"
-  | "titleSubject"
-  | "workDateStart"
-  | "workDateEnd"
-  | "outageDateStart"
-  | "outageDateEnd"
-  | "outageTimeStart"
-  | "outageTimeEnd"
-  | "outageEnabled"
-  | "selectedWorkCodes"
-  | "noteSpecial"
-  | "noteApprovalExtra"
-  | "coverRecipientSuffix"
-  | "pdfTemplateId"
-  | "pdfCompanyName"
-  | "pdfTeam"
-  | "pdfContactPerson"
-  | "pdfAddress"
-  | "pdfEmail"
-  | "pdfTel"
-  | "pdfFax"
-  | "pdfExportCount"
-  | "pdfLastExportedAt"
-  | "layoutAnnotations"
-  | "layoutAnnotationsV2"
-  | "scheduleRows"
-  | "relatedParties"
->;
-
-type ProjectRevision = {
-  id: string;
-  projectId: string;
-  at: string;
-  userId: string;
-  userName: string;
-  label: string;
-  snapshot: ProjectSnapshot;
-};
-
-type CsvRecord = Record<string, string>;
-
-type WorkMaster = {
-  code: WorkCode;
-  name: string;
-  detailText: string;
-  defaultText: string;
-};
-
-type ScheduleProcedureTemplateStep = {
-  id: string;
-  label: string;
-  durationMinutes: number;
-  outage: boolean;
-  note: string;
-};
-
-type ScheduleProcedureTemplate = {
-  id: string;
-  name: string;
-  createdAt: string;
-  workCodes: WorkCode[];
-  steps: ScheduleProcedureTemplateStep[];
-};
-
-type TemplateScope = "schedule" | "detailPhotos" | "relatedParties" | "layout";
-type PdfTemplateId = "standard" | "kansai" | "night";
-
-type PdfTemplatePreset = {
-  id: PdfTemplateId;
-  label: string;
-  description: string;
-  coverKicker: string;
-  coverTeamLabel: string;
-  coverOfficeLabel: string;
-  tocItems: [string, string, string, string, string];
-  sectionOverview: string;
-  sectionDetail: string;
-  sectionApproval: string;
-  sectionOrganization: string;
-  sectionEmergency: string;
-};
-
-type LayoutTemplatePayload = {
-  layoutImageDataUrl: string;
-  layoutPhotos: PhotoSlots;
-  layoutAnnotations: LayoutAnnotation[];
-  layoutAnnotationsV2?: LayoutAnnotationV2[];
-};
-
-type DragInfo = {
-  rowId: string;
-  mode: "start" | "end" | "move";
-  startX: number;
-  trackWidth: number;
-  viewSpan: number;
-  fullSpan: number;
-  baseDate: string;
-  baseStart: number;
-  baseEnd: number;
-  currentStart: number;
-  currentEnd: number;
-};
-
-type TimelineWindow = {
-  id: string;
-  viewStart: number;
-  viewEnd: number;
-  viewSpan: number;
-  lineTicks: number[];
-  labelTicks: number[];
-  startDate: string;
-  endDate: string;
-};
-
-type SimpleTemplate<T> = {
-  id: string;
-  name: string;
-  createdAt: string;
-  payload: T;
-};
-
-type LayoutEditorTool = "select" | "arrow" | "rect" | "chain" | "text";
-type LayoutAdvancedTab = "transform" | "style" | "arrange";
-type LayoutEditorTarget =
-  | { kind: "layoutImage"; label: string }
-  | { kind: "photo"; section: "detailPhotos" | "layoutPhotos"; photoId: string; label: string };
-type CropSelectionRect = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-};
-
-type CropSelectionDragState = {
-  pointerId: number;
-  startX: number;
-  startY: number;
-  moved: boolean;
-  previousSelection: CropSelectionRect;
-};
-
-type LayoutDrawingDraft = {
-  type: "arrow" | "rect";
-  startX: number;
-  startY: number;
-  endX: number;
-  endY: number;
-  color: string;
-  strokeWidth: number;
-  fillColor: string;
-  fillOpacity: number;
-  arrowHead?: boolean;
-};
-
-type LayoutMoveState = {
-  annotationIds: string[];
-  startX: number;
-  startY: number;
-  snapshots: LayoutAnnotation[];
-};
-
-type LayoutResizeCorner = "nw" | "ne" | "sw" | "se";
-
-type LayoutResizeState =
-  | {
-      mode: "box";
-      annotationId: string;
-      corner: LayoutResizeCorner;
-      startX: number;
-      startY: number;
-      snapshot: LayoutRectAnnotation | LayoutPolygonAnnotation;
-    }
-  | {
-      mode: "arrow";
-      annotationId: string;
-      endpoint: "from" | "to";
-      startX: number;
-      startY: number;
-      snapshot: LayoutArrowAnnotation;
-    }
-  | {
-      mode: "text";
-      annotationId: string;
-      startY: number;
-      snapshot: LayoutTextAnnotation;
-    }
-  | {
-      mode: "groupBox";
-      annotationIds: string[];
-      corner: LayoutResizeCorner;
-      startX: number;
-      startY: number;
-      bounds: { x: number; y: number; width: number; height: number };
-      snapshots: LayoutAnnotation[];
-    };
-
-type LayoutRotateState = {
-  annotationIds: string[];
-  centerX: number;
-  centerY: number;
-  startAngle: number;
-  snapshots: LayoutAnnotation[];
-};
-
-type LayoutPanState = {
-  pointerId: number;
-  startClientX: number;
-  startClientY: number;
-  startPanX: number;
-  startPanY: number;
-};
-
-type LayoutMarqueeState = {
-  startX: number;
-  startY: number;
-  endX: number;
-  endY: number;
-  additive: boolean;
-};
-
-type LayoutGuideLine = {
-  id: string;
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-};
-
-type UiIconName =
-  | "upload"
-  | "plus"
-  | "menu"
-  | "settings"
-  | "cursor"
-  | "shapeLine"
-  | "shapeArrow"
-  | "shapeRect"
-  | "shapePolygon"
-  | "shapeText"
-  | "magnet"
-  | "login"
-  | "logout"
-  | "userPlus"
-  | "send"
-  | "check"
-  | "undo"
-  | "save"
-  | "history"
-  | "apply"
-  | "delete"
-  | "copy"
-  | "arrowLeft"
-  | "arrowRight"
-  | "pdf"
-  | "refresh"
-  | "addRow"
-  | "up"
-  | "down"
-  | "photo"
-  | "clear"
-  | "lock"
-  | "template"
-  | "crop";
-
-type UserCreateNotice = {
-  type: "ok" | "error";
-  text: string;
-};
-
-type CsvExportFilter = "all" | "exported" | "unexported";
-
-type LocalStorageExportItem = {
-  key: string;
-  value: string;
-};
-
-type LocalStorageExportPayload = {
-  app: "sekou-manual-editor";
-  exportedAt: string;
-  items: LocalStorageExportItem[];
-};
-
-type OutageWindow = Pick<Project, "outageDateStart" | "outageTimeStart" | "outageDateEnd" | "outageTimeEnd">;
-
-type OutageTraceEntry = {
-  seq: number;
-  at: string;
-  source: string;
-  changedFields: string[];
-  before: OutageWindow;
-  after: OutageWindow;
-  rangeStart: string;
-  rangeEnd: string;
-  dateShifted: boolean;
-};
-
-type LegacyDateRiskEntry = {
-  source: string;
-  projectId: string;
-  field: string;
-  raw: string;
-};
-
-const STORAGE_KEY = "sekou-tool-projects-v5";
-const PROJECT_INDEX_STORAGE_KEY = "sekou-project-index-v1";
-const PROJECT_DATA_STORAGE_PREFIX = "sekou-project-data-v1:";
-const CSV_EDITOR_STORAGE_KEY = "sekou-csv-editor-v1";
-const USERS_STORAGE_KEY = "sekou-tool-users-v1";
-const TEST_EDITOR_SEED_STORAGE_KEY = "sekou-tool-test-editors-seeded-v2";
-const AUDIT_STORAGE_KEY = "sekou-tool-audit-v1";
-const REVISION_STORAGE_KEY = "sekou-tool-revision-v1";
-const SCHEDULE_TEMPLATE_STORAGE_KEY = "sekou-tool-template-schedule-v1";
-const SCHEDULE_PROCEDURE_TEMPLATE_STORAGE_KEY = "sekou-tool-template-schedule-procedures-v1";
-const DETAIL_PHOTO_TEMPLATE_STORAGE_KEY = "sekou-tool-template-detail-photos-v1";
-const PARTY_TEMPLATE_STORAGE_KEY = "sekou-tool-template-parties-v1";
-const PARTY_COMPANY_TEMPLATE_STORAGE_KEY = "sekou-tool-template-party-companies-v1";
-const LAYOUT_TEMPLATE_STORAGE_KEY = "sekou-tool-template-layout-v1";
-const OUTAGE_TRACE_DEBUG_KEY = "sekou-debug-outage-trace";
-const LEGACY_DATE_TRACE_DEBUG_KEY = "sekou-debug-legacy-date";
-const DAY_TOTAL_MINUTES = 24 * 60;
-const MIN_BLOCK_MINUTES = 60;
-const DRAG_SNAP_MINUTES = 5;
-const HEADER_LOGO_SRC = "/header-logo.svg";
-const PDF_LOGO_SRC = "/logo.png";
-const PDF_LOGO_FALLBACK_SRC = "/rezil-fixed-logo.svg";
-const MAX_AUDIT_LOGS = 500;
-const MAX_REVISIONS = 200;
-const CSV_PAGE_SIZE_OPTIONS = [20, 50, 100, 200, 300];
-const PROJECT_SAVE_DEBOUNCE_MS = 350;
-const CSV_SAVE_DEBOUNCE_MS = 700;
-const DEFAULT_PHOTO_MAX_SIZE = 1280;
-const DEFAULT_LAYOUT_MAX_SIZE = 1600;
-const MAX_UPLOAD_FILE_BYTES = 10 * 1024 * 1024;
-const TARGET_PHOTO_DATA_URL_BYTES = 850_000;
-const TARGET_LAYOUT_DATA_URL_BYTES = 1_100_000;
-const STORAGE_COMPRESSION_PREFIX = "lz:";
-const STORAGE_COMPRESSION_THRESHOLD = 4 * 1024;
-const LAYOUT_CANVAS_SIZE = 1000;
-const MAX_ANNOTATION_HISTORY = 150;
-const DEFAULT_ANNOTATION_COLOR = "#d92d20";
-const DEFAULT_ANNOTATION_STROKE_WIDTH = 1;
-const DEFAULT_ANNOTATION_FILL_COLOR = "#f59e0b";
-const DEFAULT_ANNOTATION_FILL_OPACITY = 0.22;
-const DEFAULT_TEXT_FONT_FAMILY = "\"Noto Sans JP\", \"Hiragino Kaku Gothic ProN\", \"Yu Gothic\", sans-serif";
-const DEFAULT_TEXT_STROKE_COLOR = "#ffffff";
-const DEFAULT_TEXT_STROKE_WIDTH = 3;
-const LAYOUT_SNAP_THRESHOLD = 10;
-const USER_LIST_VISIBLE_COUNT = 5;
-const LAYOUT_TEXT_FONT_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: DEFAULT_TEXT_FONT_FAMILY, label: "ゴシック（標準）" },
-  { value: "\"Yu Mincho\", \"Hiragino Mincho ProN\", serif", label: "明朝" },
-  { value: "\"Meiryo\", \"Yu Gothic\", sans-serif", label: "メイリオ" },
-  { value: "\"Arial\", sans-serif", label: "Arial" },
-  { value: "\"Courier New\", monospace", label: "等幅（Monospace）" },
-];
-
-const TEST_EDITOR_USER_PRESETS: Array<{ id: string; name: string; email: string; password: string }> = [
-  { id: "user_test_editor_01", name: "テスト編集者1", email: "test.editor01@example.com", password: "testpass01" },
-  { id: "user_test_editor_02", name: "テスト編集者2", email: "test.editor02@example.com", password: "testpass02" },
-  { id: "user_test_editor_03", name: "テスト編集者3", email: "test.editor03@example.com", password: "testpass03" },
-  { id: "user_test_editor_04", name: "テスト編集者4", email: "test.editor04@example.com", password: "testpass04" },
-  { id: "user_test_editor_05", name: "テスト編集者5", email: "test.editor05@example.com", password: "testpass05" },
-  { id: "user_test_editor_06", name: "テスト編集者6", email: "test.editor06@example.com", password: "testpass06" },
-];
-
-const ROLE_LABELS: Record<UserRole, string> = {
-  system_admin: "システム管理者",
-  admin: "管理者",
-  editor: "編集者",
-  viewer: "閲覧者",
-};
-
-function isAdminLikeRole(role: UserRole): boolean {
-  return role === "system_admin" || role === "admin";
-}
-
-const USER_APPROVAL_LABELS: Record<UserApprovalStatus, string> = {
-  approved: "承認済み",
-  pending: "承認待ち",
-  rejected: "利用不可",
-};
-
-const APPROVAL_STATUS_LABELS: Record<Project["approvalStatus"], string> = {
-  draft: "編集中",
-  submitted: "確認依頼中",
-  approved: "確定",
-  rejected: "修正依頼",
-};
-
-const AUDIT_ACTION_LABELS: Record<string, string> = {
-  login: "ログイン",
-  logout: "ログアウト",
-  user_create: "ユーザー作成",
-  backup_save: "履歴保存",
-  backup_restore: "履歴復元",
-  approval_update: "状態更新",
-  schedule_regenerate: "工程再生成",
-  schedule_add_row: "工程行追加",
-  schedule_remove_row: "工程行削除",
-  schedule_reorder: "工程順序変更",
-  timeline_drag: "工程バー調整",
-  photo_add: "写真枠追加",
-  photo_remove: "写真枠削除",
-  layout_image_replace: "配置図アップロード",
-  layout_image_crop: "配置図トリミング",
-  layout_annotation_save: "配置図注釈保存",
-  photo_crop: "写真トリミング",
-  pdf_export: "PDF出力",
-  project_create: "案件作成",
-  project_delete: "案件削除",
-  copy_from_project: "他案件引用",
-  template_apply: "テンプレート適用",
-  csv_apply: "CSV反映",
-  login_failed: "ログイン失敗",
-  user_update_email: "管理者メール変更",
-  user_approval_update: "利用承認更新",
-  user_delete: "ユーザー削除",
-};
-
-const WORK_MASTER: WorkMaster[] = [
-  { code: "KOUATSU_CABLE", name: "高圧ケーブル交換", detailText: "既設高圧ケーブル撤去、新規ケーブルへ切替を実施", defaultText: "高圧ケーブル切替" },
-  { code: "UGS", name: "UGS交換", detailText: "UGS本体の更新・端末処理・絶縁確認を実施", defaultText: "UGS交換" },
-  { code: "PAS", name: "PAS交換", detailText: "PAS撤去・新設・動作確認を実施", defaultText: "PAS交換" },
-  { code: "GROUND_A", name: "A種接地是正", detailText: "A種接地抵抗値測定と是正工事を実施", defaultText: "A種接地是正" },
-  { code: "GROUND_B", name: "B種接地是正", detailText: "B種接地抵抗値測定と是正工事を実施", defaultText: "B種接地是正" },
-  { code: "GROUND_C", name: "C種接地是正", detailText: "C種接地抵抗値測定と是正工事を実施", defaultText: "C種接地是正" },
-];
-
-const DEFAULT_SCHEDULE_PROCEDURE_TEMPLATES: ScheduleProcedureTemplate[] = [
-  {
-    id: "proc_kouatsu_standard",
-    name: "高圧ケーブル交換（標準段取り）",
-    createdAt: "system",
-    workCodes: ["KOUATSU_CABLE"],
-    steps: [
-      { id: "step_prepare", label: "事前準備", durationMinutes: 90, outage: false, note: "資材搬入・KY・停電前チェック" },
-      { id: "step_shutdown", label: "停電切替", durationMinutes: 60, outage: true, note: "停電開始・安全確認" },
-      { id: "step_replace", label: "高圧ケーブル交換", durationMinutes: 240, outage: true, note: "既設撤去・新設・端末処理" },
-      { id: "step_test", label: "絶縁・耐圧試験", durationMinutes: 90, outage: true, note: "試験・記録採取" },
-      { id: "step_recover", label: "復電・最終確認", durationMinutes: 60, outage: false, note: "復電・巡回確認・引継ぎ" },
-    ],
-  },
-  {
-    id: "proc_pas_ugs_standard",
-    name: "PAS/UGS更新（標準段取り）",
-    createdAt: "system",
-    workCodes: ["PAS", "UGS"],
-    steps: [
-      { id: "step_prepare", label: "事前準備", durationMinutes: 60, outage: false, note: "作業動線確保・保安体制確認" },
-      { id: "step_shutdown", label: "停電切替", durationMinutes: 45, outage: true, note: "停電開始・絶縁確認" },
-      { id: "step_ugs", label: "UGS交換", durationMinutes: 120, outage: true, note: "UGS更新・端末処理" },
-      { id: "step_pas", label: "PAS交換", durationMinutes: 120, outage: true, note: "PAS更新・動作確認" },
-      { id: "step_recover", label: "復電・最終確認", durationMinutes: 45, outage: false, note: "復電・確認・報告" },
-    ],
-  },
-  {
-    id: "proc_ground_standard",
-    name: "接地是正（標準段取り）",
-    createdAt: "system",
-    workCodes: ["GROUND_A", "GROUND_B", "GROUND_C"],
-    steps: [
-      { id: "step_prepare", label: "事前準備", durationMinutes: 60, outage: false, note: "測定計画・安全確認" },
-      { id: "step_measure", label: "接地測定", durationMinutes: 90, outage: true, note: "接地抵抗測定" },
-      { id: "step_improve", label: "是正作業", durationMinutes: 180, outage: true, note: "接地改修・再測定" },
-      { id: "step_finalize", label: "復旧・報告", durationMinutes: 45, outage: false, note: "復旧・記録提出" },
-    ],
-  },
-];
-
-const CSV_WORK_COLUMN_ALIASES: Record<WorkCode, string[]> = {
-  KOUATSU_CABLE: ["flag_kouatsu_cable", "高圧ケーブル交換", "高圧ケーブル切替", "高圧ケーブル", "kouatsu_cable"],
-  UGS: ["flag_ugs", "UGS交換", "ugs"],
-  PAS: ["flag_pas", "PAS交換", "pas"],
-  GROUND_A: ["flag_ground_a", "A種接地是正", "ground_a", "a種接地是正"],
-  GROUND_B: ["flag_ground_b", "B種接地是正", "ground_b", "b種接地是正"],
-  GROUND_C: ["flag_ground_c", "C種接地是正", "ground_c", "c種接地是正"],
-};
-
-const CSV_PROJECT_FIELD_ALIASES = {
-  projectId: ["project_id", "projectid", "案件ID", "案件id", "物件ID", "物件id", "pj_id"],
-  propertyName: ["property_name", "propertyname", "物件名", "案件名", "建物名", "施設名"],
-  propertyAddress: ["property_address", "propertyaddress", "住所", "所在地", "物件住所", "工事場所"],
-  titleSubject: ["title_subject", "titlesubject", "件名", "工事件名", "工事名", "タイトル"],
-  workDateStart: ["work_date_start", "workdatestart", "work_date_main", "工事開始日", "工事日開始", "工事日"],
-  workDateEnd: ["work_date_end", "workdateend", "工事終了日", "工事日終了"],
-  outageDateStart: ["outage_date_start", "outagedatestart", "outage_date", "停電開始日", "停電日", "停電日開始"],
-  outageDateEnd: ["outage_date_end", "outagedateend", "停電終了日", "停電日終了"],
-  outageTimeStart: ["outage_time_start", "outagetimestart", "work_time_start", "停電開始時間", "停電開始時刻"],
-  outageTimeEnd: ["outage_time_end", "outagetimeend", "work_time_end", "停電終了時間", "停電終了時刻"],
-  outageEnabled: ["outage_enabled", "停電あり", "停電有無", "停電有", "停電バー表示"],
-  noteSpecial: ["note_special", "特記事項", "備考", "メモ"],
-  noteApprovalExtra: ["note_approval_extra", "承認事項追記", "注意事項", "ご承認いただきたい事項追記"],
-  coverRecipientSuffix: ["cover_recipient_suffix", "表紙宛名", "宛名", "宛先末尾"],
-  pdfTemplateId: ["pdf_template_id", "pdf_template", "pdf_format", "PDFフォーマット", "様式テンプレート"],
-  pdfCompanyName: ["pdf_company_name", "会社名", "発注者会社名"],
-  pdfTeam: ["pdf_team", "技術チーム", "部署", "事業所"],
-  pdfContactPerson: ["pdf_contact_person", "担当者", "担当者名"],
-  pdfAddress: ["pdf_address", "連絡先住所", "住所連絡先", "会社住所"],
-  pdfEmail: ["pdf_email", "連絡先メール", "email", "メール"],
-  pdfTel: ["pdf_tel", "連絡先TEL", "tel", "電話番号"],
-  pdfFax: ["pdf_fax", "連絡先FAX", "fax"],
-  pdfExportCount: ["pdf_export_count", "pdf_count", "PDF出力回数", "出力回数"],
-  pdfLastExportedAt: ["pdf_last_exported_at", "last_pdf_exported_at", "PDF最終出力日時", "最終出力日時"],
-  workList: ["工事項目", "作業項目", "selected_work_codes", "selected_works"],
-  photoSlotALabel: ["photo_slot_a_label", "写真Aラベル"],
-  photoSlotBLabel: ["photo_slot_b_label", "写真Bラベル"],
-  photoSlotCLabel: ["photo_slot_c_label", "写真Cラベル"],
-  photoSlotDLabel: ["photo_slot_d_label", "写真Dラベル"],
-  layoutPhotoSlotALabel: ["layout_photo_slot_a_label", "配置図写真Aラベル"],
-  layoutPhotoSlotBLabel: ["layout_photo_slot_b_label", "配置図写真Bラベル"],
-  layoutPhotoSlotCLabel: ["layout_photo_slot_c_label", "配置図写真Cラベル"],
-  layoutPhotoSlotDLabel: ["layout_photo_slot_d_label", "配置図写真Dラベル"],
-} as const;
-
-const CSV_HEADER_JA_LABELS: Record<string, string> = {
-  project_id: "案件ID",
-  property_name: "物件名",
-  property_address: "住所",
-  title_subject: "件名",
-  work_date_start: "工事開始日",
-  work_date_end: "工事終了日",
-  outage_date_start: "停電開始日",
-  outage_date_end: "停電終了日",
-  outage_time_start: "停電開始時間",
-  outage_time_end: "停電終了時間",
-  outage_enabled: "停電あり",
-  note_special: "特記事項",
-  note_approval_extra: "承認事項追記",
-  pdf_template_id: "PDFフォーマット",
-  pdf_company_name: "会社名",
-  pdf_team: "技術チーム",
-  pdf_contact_person: "担当者",
-  pdf_address: "連絡先住所",
-  pdf_email: "連絡先メール",
-  pdf_tel: "連絡先TEL",
-  pdf_fax: "連絡先FAX",
-  pdf_export_count: "PDF出力回数",
-  pdf_last_exported_at: "PDF最終出力日時",
-  photo_slot_a_label: "写真Aラベル",
-  photo_slot_b_label: "写真Bラベル",
-  photo_slot_c_label: "写真Cラベル",
-  photo_slot_d_label: "写真Dラベル",
-  layout_photo_slot_a_label: "配置図写真Aラベル",
-  layout_photo_slot_b_label: "配置図写真Bラベル",
-  layout_photo_slot_c_label: "配置図写真Cラベル",
-  layout_photo_slot_d_label: "配置図写真Dラベル",
-};
-
-function getCsvHeaderLabel(header: string): string {
-  const key = sanitizeCsvHeader(header).toLowerCase();
-  return CSV_HEADER_JA_LABELS[key] || sanitizeCsvHeader(header);
-}
-
-const TEMPLATE_SCOPE_META: Record<
+  ProjectRevision,
+  ProjectSnapshot,
+  RelatedParty,
+  RelatedPartyKey,
+  ScheduleProcedureTemplate,
+  ScheduleProcedureTemplateStep,
+  ScheduleRow,
+  SimpleTemplate,
   TemplateScope,
-  { cardLabel: string; title: string; shortHelp: string; copyLabel: string }
-> = {
-  schedule: {
-    cardLabel: "PDF3",
-    title: "工事概要・工程表",
-    shortHelp: "工程行の並び・時間帯をまとめて保存して再利用できます",
-    copyLabel: "この案件へ引用",
-  },
-  detailPhotos: {
-    cardLabel: "PDF4",
-    title: "工事詳細説明（参考写真）",
-    shortHelp: "写真ラベルと写真セットをテンプレートとして再利用できます",
-    copyLabel: "この案件へ引用",
-  },
-  relatedParties: {
-    cardLabel: "PDF6",
-    title: "施工体制表・緊急連絡体制表",
-    shortHelp: "関係各社の連絡先構成をテンプレートとして使い回せます",
-    copyLabel: "この案件へ引用",
-  },
-  layout: {
-    cardLabel: "PDF7",
-    title: "配置図・写真",
-    shortHelp: "配置図画像と写真セットをテンプレート化できます",
-    copyLabel: "この案件へ引用",
-  },
-};
-
-const PDF_TEMPLATE_PRESETS: PdfTemplatePreset[] = [
-  {
-    id: "standard",
-    label: "標準（現行）",
-    description: "現在の施工計画書フォーマットです。",
-    coverKicker: "施工計画書自動発行ツール",
-    coverTeamLabel: "技術チーム",
-    coverOfficeLabel: "技術設計グループ",
-    tocItems: ["工事概要", "工事詳細説明", "ご承認いただきたい事項", "施工体制表", "緊急連絡体制表"],
-    sectionOverview: "工事概要",
-    sectionDetail: "工事詳細説明",
-    sectionApproval: "ご承認いただきたい事項",
-    sectionOrganization: "施工体制表",
-    sectionEmergency: "緊急連絡体制表",
-  },
-  {
-    id: "kansai",
-    label: "関西向け",
-    description: "関西案件向けの表記に合わせたフォーマットです。",
-    coverKicker: "施工計画書（関西向け）",
-    coverTeamLabel: "部署・事業所",
-    coverOfficeLabel: "部署・事業所",
-    tocItems: ["工事概要", "工事詳細説明", "承認事項", "施工体制表", "緊急連絡体制"],
-    sectionOverview: "工事概要",
-    sectionDetail: "工事詳細説明",
-    sectionApproval: "承認事項",
-    sectionOrganization: "施工体制表",
-    sectionEmergency: "緊急連絡体制",
-  },
-  {
-    id: "night",
-    label: "深夜停電向け",
-    description: "深夜作業・停電帯を強調するフォーマットです。",
-    coverKicker: "施工計画書（深夜停電対応）",
-    coverTeamLabel: "技術チーム",
-    coverOfficeLabel: "技術設計グループ",
-    tocItems: ["工事概要（深夜作業）", "工事詳細説明", "承認事項", "施工体制表", "緊急連絡体制表"],
-    sectionOverview: "工事概要（深夜作業）",
-    sectionDetail: "工事詳細説明",
-    sectionApproval: "承認事項",
-    sectionOrganization: "施工体制表",
-    sectionEmergency: "緊急連絡体制表",
-  },
-];
-
-const PDF_TEMPLATE_PRESET_MAP: Record<PdfTemplateId, PdfTemplatePreset> = {
-  standard: PDF_TEMPLATE_PRESETS[0],
-  kansai: PDF_TEMPLATE_PRESETS[1],
-  night: PDF_TEMPLATE_PRESETS[2],
-};
-
-const PARTY_COMPANY_TEMPLATE_PRESETS: Record<RelatedPartyKey, PartyCompanyTemplatePreset[]> = {
-  owner: [
-    { id: "owner_a_den", label: "A電（発注者）", title: "発注者", company: "A電", person: "設備管理担当", office: "設備管理部", tel: "03-1111-2222" },
-    { id: "owner_rezil", label: "REZIL（発注者）", title: "発注者", company: "REZIL", person: "計画担当", office: "建物管理部", tel: "03-2222-3333" },
-  ],
-  utility: [
-    { id: "utility_tepco", label: "東京電力PG", title: "電力会社", company: "東京電力パワーグリッド", person: "配電保安担当", office: "○○支社", tel: "0120-995-007" },
-    { id: "utility_hepco", label: "北海道電力NW", title: "電力会社", company: "北海道電力ネットワーク", person: "配電担当", office: "○○営業所", tel: "0120-060-134" },
-  ],
-  contractor: [
-    { id: "contractor_sanriku", label: "三陸組（施工者）", title: "施工者", company: "三陸組", person: "現場責任者", office: "工事部", tel: "090-1111-2222" },
-    { id: "contractor_adenkoji", label: "A電工事（施工者）", title: "施工者", company: "A電工事", person: "工事担当", office: "施工管理課", tel: "090-3333-4444" },
-  ],
-  management: [
-    { id: "management_union", label: "管理組合", title: "管理組合・管理会社", company: "管理組合", person: "理事長", office: "管理組合事務局", tel: "03-5555-6666" },
-    { id: "management_company", label: "管理会社", title: "管理組合・管理会社", company: "管理会社", person: "管理担当", office: "フロント課", tel: "03-6666-7777" },
-  ],
-  residents: [
-    { id: "residents_all", label: "居住者さま", title: "居住者", company: "居住者さま", person: "", office: "", tel: "" },
-    { id: "residents_board", label: "理事会", title: "居住者", company: "理事会", person: "理事会担当", office: "", tel: "" },
-  ],
-};
-
-const EMPTY_PARTY_TEMPLATE_SELECTIONS: Record<RelatedPartyKey, string> = {
-  owner: "",
-  utility: "",
-  contractor: "",
-  management: "",
-  residents: "",
-};
-
-function createEmptyPartyCompanyTemplates(): Record<RelatedPartyKey, PartyCompanyTemplatePreset[]> {
-  return {
-    owner: [],
-    utility: [],
-    contractor: [],
-    management: [],
-    residents: [],
-  };
-}
-
-function normalizePartyCompanyTemplate(value: unknown): PartyCompanyTemplatePreset | null {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-  const source = value as Partial<PartyCompanyTemplatePreset>;
-  const id = typeof source.id === "string" ? source.id.trim() : "";
-  const label = typeof source.label === "string" ? source.label.trim() : "";
-  const title = typeof source.title === "string" ? source.title.trim() : "";
-  const company = typeof source.company === "string" ? source.company.trim() : "";
-  const person = typeof source.person === "string" ? source.person.trim() : "";
-  const office = typeof source.office === "string" ? source.office.trim() : "";
-  const tel = typeof source.tel === "string" ? source.tel.trim() : "";
-  if (!id || !label) {
-    return null;
-  }
-  return {
-    id,
-    label,
-    title,
-    company,
-    person,
-    office,
-    tel,
-  };
-}
-
-function normalizePartyCompanyTemplateMap(value: unknown): Record<RelatedPartyKey, PartyCompanyTemplatePreset[]> {
-  const next = createEmptyPartyCompanyTemplates();
-  if (!value || typeof value !== "object") {
-    return next;
-  }
-  const source = value as Partial<Record<RelatedPartyKey, unknown>>;
-  (Object.keys(next) as RelatedPartyKey[]).forEach((key) => {
-    const list = Array.isArray(source[key]) ? source[key] : [];
-    next[key] = list
-      .map((item) => normalizePartyCompanyTemplate(item))
-      .filter((item): item is PartyCompanyTemplatePreset => item !== null);
-  });
-  return next;
-}
-
-function UiIcon({ name }: { name: UiIconName }) {
-  const common = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
-  switch (name) {
-    case "upload":
-      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="M10 13V4m0 0-3 3m3-3 3 3M4 14v2h12v-2" /></svg>;
-    case "plus":
-    case "addRow":
-      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="M10 4v12M4 10h12" /></svg>;
-    case "menu":
-      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="M3 5h14M3 10h14M3 15h14" /></svg>;
-    case "settings":
-      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="M10 3v2m0 10v2m7-7h-2M5 10H3m11.95-4.95-1.4 1.4M6.45 13.55l-1.4 1.4m0-9.9 1.4 1.4m8.1 8.1 1.4 1.4M13 10a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" /></svg>;
-    case "cursor":
-      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="M4 3v13l3-3 2 4 2-1-2-4h4z" /></svg>;
-    case "shapeLine":
-      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="M4 14 16 6" /></svg>;
-    case "shapeArrow":
-      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="m4 14 9-9m0 0h-4m4 0v4" /></svg>;
-    case "shapeRect":
-      return <svg viewBox="0 0 20 20" aria-hidden="true"><rect {...common} x="4" y="5" width="12" height="10" rx="2" ry="2" /></svg>;
-    case "shapePolygon":
-      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="M10 3 16 8 13.5 16h-7L4 8z" /></svg>;
-    case "shapeText":
-      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="M4 5h12M10 5v10m-3 0h6" /></svg>;
-    case "magnet":
-      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="M6 4v6a4 4 0 1 0 8 0V4m-8 0h3m2 0h3" /></svg>;
-    case "login":
-      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="M8 5H4v10h4m4-7 3 2-3 2m3-2H7" /></svg>;
-    case "logout":
-      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="M12 5h4v10h-4m-4-7-3 2 3 2m-3-2h8" /></svg>;
-    case "userPlus":
-      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="M13 16v-1a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v1m5-8a3 3 0 1 0 0-6 3 3 0 0 0 0 6m7 1v4m-2-2h4" /></svg>;
-    case "send":
-      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="m3 10 13-6-3 12-3-5-7-1Z" /></svg>;
-    case "check":
-    case "apply":
-      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="m4 10 4 4 8-8" /></svg>;
-    case "undo":
-      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="M7 7H3v4m0-4 3 3a6 6 0 1 0 1-5" /></svg>;
-    case "save":
-      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="M4 4h10l2 2v10H4zM7 4v5h6V4M7 16v-4h6v4" /></svg>;
-    case "history":
-      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="M3 10a7 7 0 1 0 2-5M3 5v4h4M10 7v4l3 2" /></svg>;
-    case "delete":
-      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="M4 6h12M8 6V4h4v2m-6 0 1 10h6l1-10" /></svg>;
-    case "copy":
-      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="M7 7h9v9H7zM4 13H3V4h9v1" /></svg>;
-    case "arrowLeft":
-      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="M12 4 6 10l6 6M6 10h10" /></svg>;
-    case "arrowRight":
-      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="m8 4 6 6-6 6m6-6H4" /></svg>;
-    case "pdf":
-      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="M5 3h7l3 3v11H5zM12 3v3h3M7 13h1.4a1.3 1.3 0 0 0 0-2.6H7V15m3-2h2.4m-2.4 2v-4.6h2.6M14 15v-4.6h2.4" /></svg>;
-    case "refresh":
-      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="M16 10a6 6 0 1 1-1.5-4M16 4v4h-4" /></svg>;
-    case "up":
-      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="m5 12 5-5 5 5" /></svg>;
-    case "down":
-      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="m5 8 5 5 5-5" /></svg>;
-    case "photo":
-      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="M3 5h4l1-2h4l1 2h4v11H3zM6 13l2-2 2 2 3-3 2 3" /></svg>;
-    case "clear":
-      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="m5 5 10 10M15 5 5 15" /></svg>;
-    case "lock":
-      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="M5 9h10v8H5zM7 9V7a3 3 0 0 1 6 0v2" /></svg>;
-    case "template":
-      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="M4 4h12v12H4zM4 8h12M8 8v8" /></svg>;
-    case "crop":
-      return <svg viewBox="0 0 20 20" aria-hidden="true"><path {...common} d="M6 3v11a2 2 0 0 0 2 2h9M3 6h11a2 2 0 0 1 2 2v9M6 6h8v8H6z" /></svg>;
-    default:
-      return <svg viewBox="0 0 20 20" aria-hidden="true"><circle {...common} cx="10" cy="10" r="6" /></svg>;
-  }
-}
-
-function CardPreview({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <details className="card-preview">
-      <summary>
-        <span className="card-preview-title">このカードの出力プレビュー</span>
-        <span className="card-preview-hint">{title}</span>
-      </summary>
-      <div className="card-preview-canvas">{children}</div>
-    </details>
-  );
-}
+  TimelineWindow,
+  UserAccount,
+  UserApprovalStatus,
+  UserCreateNotice,
+  UserRole,
+  WorkCode,
+  WorkMaster,
+  LegacyDateRiskEntry,
+  LayoutAnnotationType,
+  LayoutTextAnnotation,
+  LayoutTextAnnotationV2,
+} from "./planner/types";
+import { UiIcon } from "./planner/ui/UiIcon";
+import { CardPreview } from "./planner/ui/CardPreview";
+import { CsvEditorSection } from "./planner/ui/CsvEditorSection";
+import { TrackingSection } from "./planner/ui/TrackingSection";
+import { PdfCoverAndTocSection } from "./planner/ui/PdfCoverAndTocSection";
+import { PdfWorkOverviewPreview } from "./planner/ui/PdfWorkOverviewPreview";
 
 function LayoutAnnotatedImage({
   imageUrl,
@@ -1265,8 +345,6 @@ function UploadDropZone({
   );
 }
 
-const JP_WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
-
 function isPdfTemplateId(value: unknown): value is PdfTemplateId {
   return value === "standard" || value === "kansai" || value === "night";
 }
@@ -1406,6 +484,130 @@ function cloneRelatedParties(parties: Project["relatedParties"]): Project["relat
     management: { ...parties.management },
     residents: { ...parties.residents },
   };
+}
+
+function cloneNoticeScheduleRows(rows: NoticeScheduleRow[]): NoticeScheduleRow[] {
+  return rows.map((row) => ({ ...row }));
+}
+
+function cloneNoticeAdviceItems(items: NoticeAdviceItem[]): NoticeAdviceItem[] {
+  return items.map((item) => ({ ...item }));
+}
+
+function shiftIsoDate(baseDate: string, days: number): string {
+  const parsed = new Date(`${baseDate}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return "";
+  parsed.setDate(parsed.getDate() + days);
+  return parsed.toISOString().slice(0, 10);
+}
+
+function createDefaultNoticeScheduleRows(mainWorkDate?: string): NoticeScheduleRow[] {
+  if (!mainWorkDate) {
+    return [
+      {
+        id: crypto.randomUUID(),
+        date: "",
+        workType: "本工事",
+        outageState: "停電あり",
+        note: "本工事",
+      },
+    ];
+  }
+
+  return [
+    {
+      id: crypto.randomUUID(),
+      date: shiftIsoDate(mainWorkDate, -2),
+      workType: "事前工事",
+      outageState: "停電なし",
+      note: "前工事",
+    },
+    {
+      id: crypto.randomUUID(),
+      date: shiftIsoDate(mainWorkDate, -1),
+      workType: "事前工事",
+      outageState: "停電なし",
+      note: "前工事",
+    },
+    {
+      id: crypto.randomUUID(),
+      date: mainWorkDate,
+      workType: "本工事",
+      outageState: "停電あり",
+      note: "本工事",
+    },
+  ];
+}
+
+function createDefaultNoticeAdviceItems(): NoticeAdviceItem[] {
+  return [
+    {
+      id: crypto.randomUUID(),
+      phase: "before",
+      title: "電気機器",
+      body: "復電時の火災防止のため、ドライヤー、トースター、アイロンなどの電熱機器のプラグはコンセントから抜いてください。",
+    },
+    {
+      id: crypto.randomUUID(),
+      phase: "before",
+      title: "パソコンなどの精密機器",
+      body: "パソコン、テレビ、HDDレコーダー、電話機、インターネット関連機器などは、データの消失や再起動時のトラブルを防止するため、電源をあらかじめ切り、コンセントからプラグを抜いてください。",
+    },
+    {
+      id: crypto.randomUUID(),
+      phase: "before",
+      title: "インターネット環境",
+      body: "マンション共用設備を通じたインターネット、ホームWi-Fiはご利用できません。必要に応じてスマートフォンのテザリング機能等をご準備ください。",
+    },
+    {
+      id: crypto.randomUUID(),
+      phase: "before",
+      title: "水道",
+      body: "停電中は共用部の水道ポンプが作動しないため、ポンプ式の場合は断水します。トイレの利用等も制限されますので、必要に応じて汲み置きなどにより水を確保してください。",
+    },
+    {
+      id: crypto.randomUUID(),
+      phase: "before",
+      title: "給水直結型の家電製品",
+      body: "洗濯機、食洗器、ウォシュレットなどをご使用されており、停電中に外出される場合は、可能であれば止水栓の閉栓を行ってください。また、蛇口の締め忘れがないようにご注意ください。",
+    },
+    {
+      id: crypto.randomUUID(),
+      phase: "before",
+      title: "セキュリティシステム",
+      body: "セキュリティシステムをご契約の方は、停電を警備会社が異常として感知し現地に出動する場合があるため、あらかじめ警備会社へご連絡ください。",
+    },
+    {
+      id: crypto.randomUUID(),
+      phase: "before",
+      title: "医療機器",
+      body: "人工呼吸器などの医療機器をご使用されている場合は、バッテリーなどの代替電源のご準備や、医療機関等への退避などによりご対応ください。特別なご事情があり停電中に電源が必要な場合は、弊社までご連絡ください。",
+    },
+    {
+      id: crypto.randomUUID(),
+      phase: "during",
+      title: "冷蔵庫",
+      body: "停電中はドアの開閉を控えていただき、庫内の保冷にご注意ください。",
+    },
+    {
+      id: crypto.randomUUID(),
+      phase: "after",
+      title: "タイマー機能のある電気製品",
+      body: "HDDレコーダー、炊飯器、電気給湯器など、停電に伴いタイマーが初期化される場合があるため、ご確認のうえ再設定してください。",
+    },
+    {
+      id: crypto.randomUUID(),
+      phase: "after",
+      title: "エアコン",
+      body: "自動復帰機能付のエアコンの場合、動作しているかどうか、再度電源をご確認ください。",
+    },
+    {
+      id: crypto.randomUUID(),
+      phase: "after",
+      title: "水道",
+      body: "停電復旧後に濁り水が出る場合があります。その際は濁った水が出なくなるまで水を出してください。",
+    },
+  ];
 }
 
 function createDefaultRelatedParties(
@@ -2241,319 +1443,11 @@ function getLayoutAnnotationDisplayName(annotation: LayoutAnnotation): string {
   }
   return getLayoutAnnotationDefaultName(annotation);
 }
-
-function toMinutes(value: string): number {
-  const [h = "0", m = "0"] = value.split(":");
-  return Number(h) * 60 + Number(m);
-}
-
-function toHHMM(minutes: number): string {
-  const clamped = clamp(minutes, 0, DAY_TOTAL_MINUTES - 1);
-  const h = String(Math.floor(clamped / 60)).padStart(2, "0");
-  const m = String(clamped % 60).padStart(2, "0");
-  return `${h}:${m}`;
-}
-
-function tickLabel(minutes: number): string {
-  if (minutes >= DAY_TOTAL_MINUTES) {
-    return "24:00";
-  }
-  return toHHMM(minutes);
-}
-
-function startOfDay(date: string): Date {
-  const normalized = normalizeDate(date);
-  if (!normalized) {
-    return new Date(Number.NaN);
-  }
-  const [year, month, day] = normalized.split("-").map((part) => Number(part));
-  return new Date(Date.UTC(year, month - 1, day));
-}
-
-function diffDays(start: string, end: string): number {
-  const s = startOfDay(start).getTime();
-  const e = startOfDay(end).getTime();
-  if (Number.isNaN(s) || Number.isNaN(e)) {
-    return 0;
-  }
-  return Math.round((e - s) / (24 * 60 * 60 * 1000));
-}
-
-function addDays(date: string, days: number): string {
-  const d = startOfDay(date);
-  d.setUTCDate(d.getUTCDate() + days);
-  const y = d.getUTCFullYear();
-  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(d.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-function todayLocalISO(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-function toTimelineOffset(date: string, time: string, baseDate: string): number {
-  const dayOffset = diffDays(baseDate, date) * DAY_TOTAL_MINUTES;
-  return dayOffset + toMinutes(time);
-}
-
-function fromTimelineOffset(offset: number, baseDate: string): { date: string; time: string } {
-  const safe = Math.max(0, offset);
-  const day = Math.floor(safe / DAY_TOTAL_MINUTES);
-  const minute = safe % DAY_TOTAL_MINUTES;
-  return {
-    date: addDays(baseDate, day),
-    time: toHHMM(minute),
-  };
-}
-
-function formatShortDate(value: string): string {
-  const d = startOfDay(value);
-  if (Number.isNaN(d.getTime())) {
-    return value;
-  }
-  return `${String(d.getUTCMonth() + 1).padStart(2, "0")}/${String(d.getUTCDate()).padStart(2, "0")}`;
-}
-
-function isLeapYear(year: number): boolean {
-  return year % 400 === 0 || (year % 4 === 0 && year % 100 !== 0);
-}
-
-function isValidDateParts(year: number, month: number, day: number): boolean {
-  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
-    return false;
-  }
-  if (month < 1 || month > 12) {
-    return false;
-  }
-  const daysByMonth = [31, isLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-  const maxDay = daysByMonth[month - 1];
-  return day >= 1 && day <= maxDay;
-}
-
-function normalizeDate(value: string): string {
-  if (!value) {
-    return "";
-  }
-  const trimmed = value.trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
-    const [y, m, d] = trimmed.split("-").map((part) => Number(part));
-    return isValidDateParts(y, m, d) ? trimmed : "";
-  }
-  const replaced = trimmed.replace(/\//g, "-");
-  const m = replaced.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-  if (!m) {
-    return "";
-  }
-  const y = Number(m[1]);
-  const month = Number(m[2]);
-  const day = Number(m[3]);
-  if (!isValidDateParts(y, month, day)) {
-    return "";
-  }
-  return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
-}
-
-function normalizeTime(value: string, fallback: string): string {
-  if (!value) {
-    return fallback;
-  }
-  const m = value.trim().match(/^(\d{1,2}):(\d{2})$/);
-  if (!m) {
-    return fallback;
-  }
-  const hh = Number(m[1]);
-  const mm = Number(m[2]);
-  if (!Number.isInteger(hh) || !Number.isInteger(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) {
-    return fallback;
-  }
-  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
-}
-
-function toBoolean(value: string): boolean {
-  const v = String(value ?? "").trim().toLowerCase();
-  if (!v) {
-    return false;
-  }
-  if (["1", "true", "yes", "y", "on", "t", "ok", "有", "あり", "はい", "○", "●", "済", "対象"].includes(v)) {
-    return true;
-  }
-  if (["0", "false", "no", "n", "off", "f", "ng", "無", "なし", "いいえ", "×", "-", "未", "対象外"].includes(v)) {
-    return false;
-  }
-  return false;
-}
-
-function sanitizeCsvHeader(header: string): string {
-  return String(header ?? "").replace(/^\uFEFF/, "").trim();
-}
-
-function normalizeCsvLookupKey(value: string): string {
-  return sanitizeCsvHeader(value)
-    .toLowerCase()
-    .replace(/[ \t　_\-\/]/g, "");
-}
-
-function createCsvValueGetter(record: CsvRecord): (...keys: string[]) => string {
-  const raw = new Map<string, string>();
-  Object.entries(record).forEach(([key, value]) => {
-    raw.set(sanitizeCsvHeader(key), String(value ?? "").trim());
-  });
-  const normalized = new Map<string, string>();
-  raw.forEach((value, key) => {
-    const normalizedKey = normalizeCsvLookupKey(key);
-    if (!normalized.has(normalizedKey)) {
-      normalized.set(normalizedKey, value);
-    }
-  });
-  return (...keys: string[]) => {
-    for (const key of keys) {
-      const direct = raw.get(sanitizeCsvHeader(key));
-      if (direct !== undefined && direct !== "") {
-        return direct;
-      }
-      const viaNormalized = normalized.get(normalizeCsvLookupKey(key));
-      if (viaNormalized !== undefined && viaNormalized !== "") {
-        return viaNormalized;
-      }
-    }
-    return "";
-  };
-}
-
-function formatDateWithWeekday(value: string): string {
-  const normalized = normalizeDate(value);
-  if (!normalized) {
-    return "-";
-  }
-  const d = startOfDay(normalized);
-  if (Number.isNaN(d.getTime())) {
-    return normalized;
-  }
-  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(d.getUTCDate()).padStart(2, "0");
-  return `${mm}月${dd}日(${JP_WEEKDAYS[d.getUTCDay()]})`;
-}
-
-function formatDateRange(start: string, end: string): string {
-  if (!start && !end) {
-    return "-";
-  }
-  if (!end || start === end) {
-    return formatDateWithWeekday(start || end);
-  }
-  return `${formatDateWithWeekday(start)}〜${formatDateWithWeekday(end)}`;
-}
-
-function formatDateTimeRange(startDate: string, startTime: string, endDate: string, endTime: string): string {
-  const start = `${formatDateWithWeekday(startDate)} ${startTime}`;
-  const end = `${formatDateWithWeekday(endDate)} ${endTime}`;
-  if (startDate === endDate) {
-    return `${formatDateWithWeekday(startDate)} ${startTime}〜${endTime}`;
-  }
-  return `${start}〜${end}`;
-}
-
 function getRowColorType(row: Pick<ScheduleRow, "id" | "label"> & { outage?: boolean }): "outage" | "main" | "additional" {
   if (row.id === "__outage_fixed__" || row.outage) {
     return "outage";
   }
   return row.label.includes("追加") ? "additional" : "main";
-}
-
-function parseCsv(text: string): CsvRecord[] {
-  const rows: string[][] = [];
-  let cell = "";
-  let row: string[] = [];
-  let inQuote = false;
-
-  for (let i = 0; i < text.length; i += 1) {
-    const c = text[i];
-    const n = text[i + 1];
-
-    if (inQuote) {
-      if (c === '"' && n === '"') {
-        cell += '"';
-        i += 1;
-      } else if (c === '"') {
-        inQuote = false;
-      } else {
-        cell += c;
-      }
-      continue;
-    }
-
-    if (c === '"') {
-      inQuote = true;
-      continue;
-    }
-    if (c === ",") {
-      row.push(cell);
-      cell = "";
-      continue;
-    }
-    if (c === "\n") {
-      row.push(cell);
-      rows.push(row);
-      row = [];
-      cell = "";
-      continue;
-    }
-    if (c === "\r") {
-      continue;
-    }
-    cell += c;
-  }
-
-  if (cell.length || row.length) {
-    row.push(cell);
-    rows.push(row);
-  }
-  if (!rows.length) {
-    return [];
-  }
-
-  const headers = rows[0].map((h) => sanitizeCsvHeader(h));
-  return rows
-    .slice(1)
-    .filter((r) => r.some((c) => c.trim().length > 0))
-    .map((r) => {
-      const record: CsvRecord = {};
-      headers.forEach((h, idx) => {
-        record[h] = (r[idx] ?? "").trim();
-      });
-      return record;
-    });
-}
-
-function inferCsvHeaders(records: CsvRecord[]): string[] {
-  const ordered: string[] = [];
-  const seen = new Set<string>();
-  records.forEach((record) => {
-    Object.keys(record).forEach((key) => {
-      const header = key.trim();
-      if (!header || seen.has(header)) {
-        return;
-      }
-      seen.add(header);
-      ordered.push(header);
-    });
-  });
-  return ordered;
-}
-
-function normalizeCsvRows(records: CsvRecord[], headers: string[]): CsvRecord[] {
-  return records.map((record) => {
-    const normalized: CsvRecord = {};
-    headers.forEach((header) => {
-      normalized[header] = String(record[header] ?? "");
-    });
-    return normalized;
-  });
 }
 
 function collectLegacyDateRisks(source: string, raw: Partial<Project> & { workDateMain?: string }): LegacyDateRiskEntry[] {
@@ -2592,72 +1486,6 @@ function collectLegacyDateRisks(source: string, raw: Partial<Project> & { workDa
   }
 
   return risks;
-}
-
-function escapeCsvCell(value: string): string {
-  if (/[",\n\r]/.test(value)) {
-    return `"${value.replace(/"/g, "\"\"")}"`;
-  }
-  return value;
-}
-
-function recordsToCsv(headers: string[], rows: CsvRecord[]): string {
-  if (!headers.length) {
-    return "";
-  }
-  const lines = [headers.map((h) => escapeCsvCell(h)).join(",")];
-  rows.forEach((row) => {
-    lines.push(headers.map((header) => escapeCsvCell(String(row[header] ?? ""))).join(","));
-  });
-  return lines.join("\n");
-}
-
-function encodeStoragePayload(rawJson: string): string {
-  if (rawJson.length < STORAGE_COMPRESSION_THRESHOLD) {
-    return rawJson;
-  }
-  try {
-    const compressed = compressToUTF16(rawJson);
-    if (!compressed) {
-      return rawJson;
-    }
-    const wrapped = `${STORAGE_COMPRESSION_PREFIX}${compressed}`;
-    return wrapped.length < rawJson.length ? wrapped : rawJson;
-  } catch {
-    return rawJson;
-  }
-}
-
-function decodeStoragePayload(raw: string | null): string | null {
-  if (!raw) {
-    return null;
-  }
-  if (!raw.startsWith(STORAGE_COMPRESSION_PREFIX)) {
-    return raw;
-  }
-  const encoded = raw.slice(STORAGE_COMPRESSION_PREFIX.length);
-  try {
-    const decoded = decompressFromUTF16(encoded);
-    return decoded ?? null;
-  } catch {
-    return null;
-  }
-}
-
-function stringifyForStorage(value: unknown): string {
-  return encodeStoragePayload(JSON.stringify(value));
-}
-
-function parseStorageJson<T>(raw: string | null): T | null {
-  const payload = decodeStoragePayload(raw);
-  if (!payload) {
-    return null;
-  }
-  try {
-    return JSON.parse(payload) as T;
-  } catch {
-    return null;
-  }
 }
 
 function estimateDataUrlBytes(dataUrl: string): number {
@@ -2889,13 +1717,6 @@ function normalizeRowRange(start: number, end: number, span: number): { start: n
   return { start: safeStart, end: safeEnd };
 }
 
-function normalizeDateTimeValue(value: string, fallbackDate: string, fallbackTime: string): { date: string; time: string } {
-  const [dateRaw, timeRaw] = value.split("T");
-  const date = normalizeDate(dateRaw ?? "") || fallbackDate;
-  const time = normalizeTime(timeRaw ?? "", fallbackTime);
-  return { date, time };
-}
-
 function fitRowIntoRange(row: ScheduleRow, rangeStart: string, rangeEnd: string): ScheduleRow {
   const dayCount = Math.max(1, diffDays(rangeStart, rangeEnd) + 1);
   const span = dayCount * DAY_TOTAL_MINUTES;
@@ -2963,54 +1784,6 @@ function floorToStep(value: number, step: number): number {
 
 function ceilToStep(value: number, step: number): number {
   return Math.ceil(value / step) * step;
-}
-
-function chooseTimelineSteps(viewSpan: number): { lineStep: number; labelStep: number } {
-  if (viewSpan <= 12 * 60) {
-    return { lineStep: 30, labelStep: 60 };
-  }
-  if (viewSpan <= 36 * 60) {
-    return { lineStep: 60, labelStep: 180 };
-  }
-  if (viewSpan <= 72 * 60) {
-    return { lineStep: 120, labelStep: 360 };
-  }
-  if (viewSpan <= 7 * DAY_TOTAL_MINUTES) {
-    return { lineStep: 360, labelStep: 720 };
-  }
-  if (viewSpan <= 14 * DAY_TOTAL_MINUTES) {
-    return { lineStep: 720, labelStep: DAY_TOTAL_MINUTES };
-  }
-  return { lineStep: DAY_TOTAL_MINUTES, labelStep: DAY_TOTAL_MINUTES * 2 };
-}
-
-function buildTimelineTicks(viewStart: number, viewEnd: number): { lineTicks: number[]; labelTicks: number[] } {
-  const viewSpan = Math.max(60, viewEnd - viewStart);
-  const { lineStep, labelStep } = chooseTimelineSteps(viewSpan);
-
-  const lineTicks: number[] = [];
-  for (let tick = floorToStep(viewStart, lineStep); tick <= viewEnd; tick += lineStep) {
-    if (tick >= viewStart && tick <= viewEnd) {
-      lineTicks.push(tick);
-    }
-  }
-
-  const labelTickSet = new Set<number>();
-  for (let tick = floorToStep(viewStart, labelStep); tick <= viewEnd; tick += labelStep) {
-    if (tick >= viewStart && tick <= viewEnd) {
-      labelTickSet.add(tick);
-    }
-  }
-  const firstDayBoundary = Math.ceil(viewStart / DAY_TOTAL_MINUTES) * DAY_TOTAL_MINUTES;
-  for (let tick = firstDayBoundary; tick <= viewEnd; tick += DAY_TOTAL_MINUTES) {
-    if (tick >= viewStart && tick <= viewEnd) {
-      labelTickSet.add(tick);
-    }
-  }
-  labelTickSet.add(viewStart);
-  labelTickSet.add(viewEnd);
-  const labelTicks = Array.from(labelTickSet).sort((a, b) => a - b);
-  return { lineTicks, labelTicks };
 }
 
 function createScheduleFromWorks(project: Project): ScheduleRow[] {
@@ -3161,6 +1934,7 @@ function createBlankProject(seed?: Partial<Project>): Project {
   const legacyLayoutAnnotations = seed?.layoutAnnotationsV2 && !seed?.layoutAnnotations
     ? layoutAnnotationsV2ToLegacy(layoutAnnotationsV2)
     : normalizedLegacySeed;
+  const noticeMainWorkDate = seed?.noticeMainWorkDate ?? seed?.workDateStart ?? "";
 
   return {
     projectId: seed?.projectId ?? `PJ-${new Date().getFullYear()}-${Math.floor(Math.random() * 9000 + 1000)}`,
@@ -3200,6 +1974,33 @@ function createBlankProject(seed?: Partial<Project>): Project {
     approvedAt: seed?.approvedAt ?? "",
     pdfExportCount: seed?.pdfExportCount ?? 0,
     pdfLastExportedAt: seed?.pdfLastExportedAt ?? "",
+    noticePropertyName: seed?.noticePropertyName ?? seed?.propertyName ?? "",
+    noticeRecipientName: seed?.noticeRecipientName ?? "お住まいの皆さまへ",
+    noticeSenderCompany: seed?.noticeSenderCompany ?? seed?.pdfCompanyName ?? "レジル株式会社",
+    noticeHeadline: seed?.noticeHeadline ?? "電気設備点検に伴う全館停電のお知らせ",
+    noticeIntroText:
+      seed?.noticeIntroText ??
+      "平素より弊社サービスをご利用いただき誠にありがとうございます。\nこの度、以下日程にて停電を伴う法定点検を実施いたします。\nお客さまにはご不便をお掛け致しますが、ご理解とご協力のほどよろしくお願い申し上げます。",
+    noticeMainWorkDate,
+    noticeOutageDate: seed?.noticeOutageDate ?? seed?.outageDateStart ?? noticeMainWorkDate,
+    noticeOutageTimeStart: seed?.noticeOutageTimeStart ?? seed?.outageTimeStart ?? "09:00",
+    noticeOutageTimeEnd: seed?.noticeOutageTimeEnd ?? seed?.outageTimeEnd ?? "17:00",
+    noticeScheduleRows: seed?.noticeScheduleRows ? cloneNoticeScheduleRows(seed.noticeScheduleRows) : createDefaultNoticeScheduleRows(noticeMainWorkDate),
+    noticePrivateAreaText:
+      seed?.noticePrivateAreaText ??
+      "【専有部】家電製品（電気で作動するもの全て）、水道\n※専有部についてのご注意は裏面をご覧ください",
+    noticeCommonAreaText:
+      seed?.noticeCommonAreaText ??
+      "【共用部】エレベーター、オートロック式ドア、インターホン、宅配ボックス、機械式駐車場など\n※上記設備は停電中ご利用いただけませんのでご注意ください",
+    noticeCompensationText:
+      seed?.noticeCompensationText ??
+      "電気設備点検時に発生したお客さまの家電製品及び設備の故障は、弊社に過失がない（通常の点検を実施している）場合、補償いたしかねますので、あらかじめご了承ください。",
+    noticeContactCompany: seed?.noticeContactCompany ?? seed?.pdfCompanyName ?? "レジル株式会社",
+    noticeContactDepartment: seed?.noticeContactDepartment ?? "サポートセンター",
+    noticeContactAddress: seed?.noticeContactAddress ?? "大阪府東大阪市瓜生堂1-2-18",
+    noticeContactTel: seed?.noticeContactTel ?? "0120-45-2020",
+    noticeContactHours: seed?.noticeContactHours ?? "9:00〜17:00（土日・祝日・年末年始を除く）",
+    noticeAdviceItems: seed?.noticeAdviceItems ? cloneNoticeAdviceItems(seed.noticeAdviceItems) : createDefaultNoticeAdviceItems(),
   };
 }
 
@@ -3333,6 +2134,25 @@ function normalizeProject(
       approvedAt: project.approvedAt,
       pdfExportCount: Number.isFinite(project.pdfExportCount) ? Number(project.pdfExportCount) : 0,
       pdfLastExportedAt: project.pdfLastExportedAt,
+      noticePropertyName: project.noticePropertyName,
+      noticeRecipientName: project.noticeRecipientName,
+      noticeSenderCompany: project.noticeSenderCompany,
+      noticeHeadline: project.noticeHeadline,
+      noticeIntroText: project.noticeIntroText,
+      noticeMainWorkDate: project.noticeMainWorkDate,
+      noticeOutageDate: project.noticeOutageDate,
+      noticeOutageTimeStart: project.noticeOutageTimeStart,
+      noticeOutageTimeEnd: project.noticeOutageTimeEnd,
+      noticeScheduleRows: project.noticeScheduleRows,
+      noticePrivateAreaText: project.noticePrivateAreaText,
+      noticeCommonAreaText: project.noticeCommonAreaText,
+      noticeCompensationText: project.noticeCompensationText,
+      noticeContactCompany: project.noticeContactCompany,
+      noticeContactDepartment: project.noticeContactDepartment,
+      noticeContactAddress: project.noticeContactAddress,
+      noticeContactTel: project.noticeContactTel,
+      noticeContactHours: project.noticeContactHours,
+      noticeAdviceItems: project.noticeAdviceItems,
     }),
     flags,
   };
@@ -3454,79 +2274,10 @@ function projectFromCsv(record: CsvRecord): Project | null {
   return project;
 }
 
-function formatAuditAction(action: string): string {
-  return AUDIT_ACTION_LABELS[action] || "その他操作";
-}
-
-function formatAuditScreen(action: string): string {
-  if (action.startsWith("csv_")) {
-    return "CSV編集スペース";
-  }
-  if (["login", "logout", "login_failed", "user_create", "user_update_email", "user_approval_update", "user_delete", "user_role_update"].includes(action)) {
-    return "ログイン管理";
-  }
-  if (["backup_save", "backup_restore", "pdf_export", "approval_update", "schedule_regenerate", "schedule_add_row", "schedule_remove_row", "schedule_reorder", "timeline_drag", "photo_add", "photo_remove", "photo_crop", "layout_image_replace", "layout_image_crop", "layout_annotation_save", "project_create", "project_delete", "copy_from_project", "template_apply"].includes(action)) {
-    return "施工計画書編集";
-  }
-  return "その他";
-}
-
-function formatAuditDetail(detail: string): string {
-  return detail
-    .replaceAll("draft", "編集中")
-    .replaceAll("submitted", "確認依頼中")
-    .replaceAll("approved", "確定")
-    .replaceAll("rejected", "修正依頼");
-}
-
-function formatAuditDetailForNonAdmin(log: AuditLog): string {
-  if (["user_create", "user_update_email", "login", "login_failed"].includes(log.action)) {
-    return "管理者のみ表示";
-  }
-  return formatAuditDetail(log.detail || "-");
-}
-
-function formatUserCreatedByLabel(user: UserAccount): string {
-  const label = (user.createdByName || "").trim();
-  if (user.createdById === "self_signup" || label.includes("セルフ登録")) {
-    return "本人申請（セルフ登録）";
-  }
-  if (user.createdById === "self" || label === "初期登録") {
-    return "初期管理者登録";
-  }
-  if (!label || label === "システム") {
-    return "システム登録";
-  }
-  return label;
-}
-
-function formatUserApprovedByLabel(user: UserAccount): string {
-  const label = (user.approvedByName || "").trim();
-  if (label) {
-    return label;
-  }
-  if (user.approvalStatus === "pending") {
-    return "承認待ち";
-  }
-  if (user.approvalStatus === "rejected") {
-    return "未承認";
-  }
-  if (user.approvalStatus === "approved") {
-    if (user.role === "system_admin") {
-      return "システム管理者";
-    }
-    if (user.role === "admin") {
-      return "管理者";
-    }
-    return formatUserCreatedByLabel(user);
-  }
-  return "-";
-}
-
 const seedProjects: Project[] = [
 ];
 
-export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv" | "tracking" }) {
+export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv" | "tracking" | "notice" }) {
   const router = useRouter();
   const [projects, setProjects] = useState<Project[]>(seedProjects);
   const [selectedId, setSelectedId] = useState<string>("");
@@ -3535,6 +2286,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [sharedStorageReady, setSharedStorageReady] = useState(false);
+  const [sharedSyncState, setSharedSyncState] = useState<"idle" | "pending" | "syncing" | "synced" | "error">("idle");
   const [lastSavedAt, setLastSavedAt] = useState("-");
   const [importStatus, setImportStatus] = useState("CSV未取込");
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
@@ -3850,14 +2602,15 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     }
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    const bootstrapSharedStorage = async () => {
-      await pullSharedStorageSnapshot();
-      if (!cancelled) {
-        setSharedStorageReady(true);
-      }
-    };
+useEffect(() => {
+  let cancelled = false;
+  const bootstrapSharedStorage = async () => {
+    const pulled = await pullSharedStorageSnapshot();
+    if (!cancelled) {
+      setSharedSyncState(pulled ? "synced" : "idle");
+      setSharedStorageReady(true);
+    }
+  };
     void bootstrapSharedStorage();
     return () => {
       cancelled = true;
@@ -3872,15 +2625,16 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     setHydrated(true);
   }, [sharedStorageReady, loadWorkspaceStateFromStorage]);
 
-  useEffect(() => {
-    if (!hydrated) {
-      return;
-    }
-    const handleSharedStorageUpdated = () => {
-      loadWorkspaceStateFromStorage(true);
-    };
-    window.addEventListener(SHARED_STORAGE_UPDATED_EVENT, handleSharedStorageUpdated);
-    return () => {
+useEffect(() => {
+  if (!hydrated) {
+    return;
+  }
+  const handleSharedStorageUpdated = () => {
+    loadWorkspaceStateFromStorage(true);
+    setSharedSyncState("synced");
+  };
+  window.addEventListener(SHARED_STORAGE_UPDATED_EVENT, handleSharedStorageUpdated);
+  return () => {
       window.removeEventListener(SHARED_STORAGE_UPDATED_EVENT, handleSharedStorageUpdated);
     };
   }, [hydrated, loadWorkspaceStateFromStorage]);
@@ -3905,17 +2659,21 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     };
   }, [projects, hydrated, persistProjectsToStorage]);
 
-  useEffect(() => {
-    if (!hydrated) {
-      return;
-    }
-    if (sharedSyncTimerRef.current) {
-      window.clearTimeout(sharedSyncTimerRef.current);
-    }
-    sharedSyncTimerRef.current = window.setTimeout(() => {
-      void pushSharedStorageSnapshot();
-      sharedSyncTimerRef.current = null;
-    }, 900);
+useEffect(() => {
+  if (!hydrated) {
+    return;
+  }
+  setSharedSyncState("pending");
+  if (sharedSyncTimerRef.current) {
+    window.clearTimeout(sharedSyncTimerRef.current);
+  }
+  sharedSyncTimerRef.current = window.setTimeout(() => {
+    setSharedSyncState("syncing");
+    void pushSharedStorageSnapshot().then((ok) => {
+      setSharedSyncState(ok ? "synced" : "error");
+    });
+    sharedSyncTimerRef.current = null;
+  }, 900);
     return () => {
       if (sharedSyncTimerRef.current) {
         window.clearTimeout(sharedSyncTimerRef.current);
@@ -3956,14 +2714,17 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
         localStorage.setItem(CSV_EDITOR_STORAGE_KEY, serialized);
         csvSerializedCacheRef.current = serialized;
       }
-      if (sharedSyncTimerRef.current) {
-        window.clearTimeout(sharedSyncTimerRef.current);
-        sharedSyncTimerRef.current = null;
-      }
-      void pushSharedStorageSnapshot();
-    };
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "hidden") {
+    if (sharedSyncTimerRef.current) {
+      window.clearTimeout(sharedSyncTimerRef.current);
+      sharedSyncTimerRef.current = null;
+    }
+    setSharedSyncState("syncing");
+    void pushSharedStorageSnapshot({ keepalive: true, force: true, timeoutMs: 1500 }).then((ok) => {
+      setSharedSyncState(ok ? "synced" : "error");
+    });
+  };
+  const handleVisibilityChange = () => {
+    if (document.visibilityState === "hidden") {
         flushNow();
       }
     };
@@ -3978,7 +2739,39 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
       window.removeEventListener("beforeunload", flushNow);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [hydrated, persistProjectsToStorage]);
+}, [hydrated, persistProjectsToStorage]);
+
+useEffect(() => {
+  if (!hydrated) {
+    return;
+  }
+
+  const resyncWorkspace = async () => {
+    setSharedSyncState("syncing");
+    const pulled = await pullSharedStorageSnapshot();
+    loadWorkspaceStateFromStorage(true);
+    const pushed = await pushSharedStorageSnapshot({ force: true });
+    setSharedSyncState(pulled || pushed ? "synced" : "error");
+  };
+
+  const handleOnline = () => {
+    void resyncWorkspace();
+  };
+
+  const handleVisible = () => {
+    if (document.visibilityState === "visible") {
+      void resyncWorkspace();
+    }
+  };
+
+  window.addEventListener("online", handleOnline);
+  document.addEventListener("visibilitychange", handleVisible);
+
+  return () => {
+    window.removeEventListener("online", handleOnline);
+    document.removeEventListener("visibilitychange", handleVisible);
+  };
+}, [hydrated, loadWorkspaceStateFromStorage]);
 
   useEffect(() => {
     if (!hydrated) {
@@ -4389,6 +3182,25 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
       pdfFax: project.pdfFax,
       pdfExportCount: project.pdfExportCount,
       pdfLastExportedAt: project.pdfLastExportedAt,
+      noticePropertyName: project.noticePropertyName,
+      noticeRecipientName: project.noticeRecipientName,
+      noticeSenderCompany: project.noticeSenderCompany,
+      noticeHeadline: project.noticeHeadline,
+      noticeIntroText: project.noticeIntroText,
+      noticeMainWorkDate: project.noticeMainWorkDate,
+      noticeOutageDate: project.noticeOutageDate,
+      noticeOutageTimeStart: project.noticeOutageTimeStart,
+      noticeOutageTimeEnd: project.noticeOutageTimeEnd,
+      noticeScheduleRows: cloneNoticeScheduleRows(project.noticeScheduleRows),
+      noticePrivateAreaText: project.noticePrivateAreaText,
+      noticeCommonAreaText: project.noticeCommonAreaText,
+      noticeCompensationText: project.noticeCompensationText,
+      noticeContactCompany: project.noticeContactCompany,
+      noticeContactDepartment: project.noticeContactDepartment,
+      noticeContactAddress: project.noticeContactAddress,
+      noticeContactTel: project.noticeContactTel,
+      noticeContactHours: project.noticeContactHours,
+      noticeAdviceItems: cloneNoticeAdviceItems(project.noticeAdviceItems),
       layoutAnnotations: cloneLayoutAnnotations(project.layoutAnnotations),
       layoutAnnotationsV2: cloneLayoutAnnotationsV2(project.layoutAnnotationsV2),
       scheduleRows: project.scheduleRows.map((row) => ({ ...row })),
@@ -8672,6 +7484,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   const isEditorMode = mode === "editor";
   const isCsvMode = mode === "csv";
   const isTrackingMode = mode === "tracking";
+  const isNoticeMode = mode === "notice";
   const showEditorAssist = false;
 
   useEffect(() => {
@@ -8822,6 +7635,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
           <Link href="/editor" className={`workspace-link ${isEditorMode ? "active" : ""}`}>施工計画書編集</Link>
           <Link href="/csv" className={`workspace-link ${isCsvMode ? "active" : ""}`}>CSV編集スペース</Link>
           <Link href="/tracking" className={`workspace-link ${isTrackingMode ? "active" : ""}`}>ログイン管理</Link>
+          <Link href="/notice" className={`workspace-link ${isNoticeMode ? "active" : ""}`}>停電案内文</Link>
           <Link href="/menu" className="workspace-link subtle">メニューへ戻る</Link>
         </nav>
 
@@ -8883,6 +7697,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
             <Link href="/editor" className={`workspace-link ${isEditorMode ? "active" : ""}`} onClick={() => setMobileMenuOpen(false)}>施工計画書編集</Link>
             <Link href="/csv" className={`workspace-link ${isCsvMode ? "active" : ""}`} onClick={() => setMobileMenuOpen(false)}>CSV編集スペース</Link>
             <Link href="/tracking" className={`workspace-link ${isTrackingMode ? "active" : ""}`} onClick={() => setMobileMenuOpen(false)}>ログイン管理</Link>
+            <Link href="/notice" className={`workspace-link ${isNoticeMode ? "active" : ""}`} onClick={() => setMobileMenuOpen(false)}>停電案内文</Link>
             <Link href="/menu" className="workspace-link subtle mobile-menu-back-link" onClick={() => setMobileMenuOpen(false)}>メニューへ戻る</Link>
           </div>
         </aside>
@@ -8898,609 +7713,130 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
           </button>
         ) : null}
 
-        {isCsvMode ? <p className="import-status">{importStatus}</p> : null}
+        <CsvEditorSection
+          isCsvMode={isCsvMode}
+          importStatus={importStatus}
+          canEdit={canEdit}
+          handleCsvImport={handleCsvImport}
+          applyCsvRowsToProjects={applyCsvRowsToProjects}
+          csvDraftRows={csvDraftRows}
+          exportCsvEditor={exportCsvEditor}
+          addCsvRow={addCsvRow}
+          deleteSelectedCsvRows={deleteSelectedCsvRows}
+          csvSelectedRows={csvSelectedRows}
+          deleteAllCsvRows={deleteAllCsvRows}
+          csvSearch={csvSearch}
+          setCsvSearch={setCsvSearch}
+          csvExportFilter={csvExportFilter}
+          setCsvExportFilter={setCsvExportFilter}
+          csvPageSize={csvPageSize}
+          setCsvPageSize={setCsvPageSize}
+          newCsvColumn={newCsvColumn}
+          setNewCsvColumn={setNewCsvColumn}
+          addCsvColumn={addCsvColumn}
+          csvDeleteHeader={csvDeleteHeader}
+          setCsvDeleteHeader={setCsvDeleteHeader}
+          csvHeaders={csvHeaders}
+          deleteCsvColumn={deleteCsvColumn}
+          csvBulkHeader={csvBulkHeader}
+          setCsvBulkHeader={setCsvBulkHeader}
+          csvBulkValue={csvBulkValue}
+          setCsvBulkValue={setCsvBulkValue}
+          applyBulkCsvEdit={applyBulkCsvEdit}
+          csvBulkNotice={csvBulkNotice}
+          setCsvBulkNotice={setCsvBulkNotice}
+          csvAllVisibleSelected={csvAllVisibleSelected}
+          toggleCsvVisibleSelection={toggleCsvVisibleSelection}
+          csvVisibleRows={csvVisibleRows}
+          csvColumnWidthMap={csvColumnWidthMap}
+          csvSelectedSet={csvSelectedSet}
+          toggleCsvRowSelection={toggleCsvRowSelection}
+          updateCsvCell={updateCsvCell}
+          deleteCsvRow={deleteCsvRow}
+          projectExportMetaById={projectExportMetaById}
+          csvPage={csvPage}
+          setCsvPage={setCsvPage}
+          csvTotalPages={csvTotalPages}
+        />
 
-        {isCsvMode ? (
-        <section className="panel csv-editor-panel">
+        {isNoticeMode ? (
+        <section className="panel">
           <div className="panel-head">
-            <h3 className="section-title"><span className="section-icon"><UiIcon name="template" /></span>CSV編集スペース</h3>
-            <p className="mini">取込後にこの画面で修正し、案件データへ再反映できます</p>
-          </div>
-          <details className="csv-mapping-guide">
-            <summary>CSVカラム対応表（ここだけ埋めれば、ほぼ自動でPDF化）</summary>
-            <div className="csv-mapping-body">
-              <p className="mini">必須: <code>project_id（または 案件ID）</code></p>
-              <p className="mini">推奨: <code>案件名 / 物件名</code>、<code>件名</code>、<code>工事開始日・工事終了日</code>、<code>停電開始日・停電終了日・停電開始時間・停電終了時間</code>、工事項目フラグ</p>
-              <div className="table-wrap">
-                <table className="schedule-table csv-mapping-table">
-                  <thead>
-                    <tr>
-                      <th>反映先</th>
-                      <th>CSVカラム（どれか1つで可）</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr><td>案件ID</td><td><code>project_id</code>, <code>案件ID</code></td></tr>
-                    <tr><td>物件名</td><td><code>property_name</code>, <code>物件名</code>, <code>案件名</code>, <code>建物名</code></td></tr>
-                    <tr><td>住所</td><td><code>property_address</code>, <code>住所</code>, <code>所在地</code>, <code>工事場所</code></td></tr>
-                    <tr><td>件名</td><td><code>title_subject</code>, <code>件名</code>, <code>工事件名</code>, <code>工事名</code></td></tr>
-                    <tr><td>工事期間</td><td><code>work_date_start</code>, <code>work_date_end</code>, <code>工事開始日</code>, <code>工事終了日</code></td></tr>
-                    <tr><td>停電期間</td><td><code>outage_date_start</code>, <code>outage_date_end</code>, <code>停電開始日</code>, <code>停電終了日</code></td></tr>
-                    <tr><td>停電時間</td><td><code>outage_time_start</code>, <code>outage_time_end</code>, <code>停電開始時間</code>, <code>停電終了時間</code></td></tr>
-                    <tr><td>停電バー表示</td><td><code>outage_enabled</code>, <code>停電あり</code>, <code>停電有無</code>（例: 1/0, true/false, 有/無）</td></tr>
-                    <tr><td>工事項目</td><td><code>flag_kouatsu_cable</code>, <code>flag_ugs</code>, <code>flag_pas</code>, <code>flag_ground_a</code>, <code>flag_ground_b</code>, <code>flag_ground_c</code> または <code>工事項目</code>（カンマ区切り）</td></tr>
-                    <tr><td>特記事項・承認事項</td><td><code>note_special</code>, <code>note_approval_extra</code></td></tr>
-                    <tr><td>PDF連絡先</td><td><code>pdf_company_name</code>, <code>pdf_team</code>, <code>pdf_contact_person</code>, <code>pdf_address</code>, <code>pdf_email</code>, <code>pdf_tel</code>, <code>pdf_fax</code></td></tr>
-                  </tbody>
-                </table>
-              </div>
+            <div>
+              <h3 className="section-title">
+                <span className="section-icon" aria-hidden="true">
+                  <UiIcon name="template" />
+                </span>
+                停電案内文
+              </h3>
+              <p className="mini">
+                停電案内文の作成、事前工事日の整理、専用PDF出力を行うための独立ワークスペースです。
+              </p>
             </div>
-          </details>
-          <div className="csv-editor-toolbar">
-            <div className="inline-row wrap">
-              <label className="btn btn-subtle file-btn">
-                <span className="btn-icon"><UiIcon name="upload" /></span>
-                CSV取込
-                <input type="file" accept=".csv,text/csv" onChange={handleCsvImport} disabled={!canEdit} />
-              </label>
-              <button type="button" className="btn btn-accent" onClick={() => applyCsvRowsToProjects(csvDraftRows, "editor")} disabled={!canEdit || !csvDraftRows.length}>
-                <span className="btn-icon"><UiIcon name="apply" /></span>この編集内容を案件に反映
-              </button>
-              <button type="button" className="btn btn-subtle" onClick={exportCsvEditor} disabled={!csvDraftRows.length}>
-                <span className="btn-icon"><UiIcon name="save" /></span>CSVファイルを保存（ダウンロード）
-              </button>
-              <button type="button" className="btn btn-subtle" onClick={addCsvRow} disabled={!canEdit || !csvHeaders.length}>
-                <span className="btn-icon"><UiIcon name="plus" /></span>行追加
-              </button>
-              <button type="button" className="btn btn-danger" onClick={deleteSelectedCsvRows} disabled={!canEdit || !csvSelectedRows.length}>
-                <span className="btn-icon"><UiIcon name="delete" /></span>選択削除
-              </button>
-              <button type="button" className="btn btn-danger" onClick={deleteAllCsvRows} disabled={!canEdit || !csvDraftRows.length}>
-                <span className="btn-icon"><UiIcon name="clear" /></span>一括削除
-              </button>
-            </div>
-            <div className="inline-row wrap">
-              <label className="field csv-small-field">
-                <span>検索</span>
-                <input className="control" value={csvSearch} onChange={(event) => setCsvSearch(event.target.value)} placeholder="案件ID・物件名など" />
-              </label>
-              <label className="field csv-small-field">
-                <span>出力状態</span>
-                <select className="control" value={csvExportFilter} onChange={(event) => setCsvExportFilter(event.target.value as CsvExportFilter)}>
-                  <option value="all">全件</option>
-                  <option value="exported">PDF出力済み</option>
-                  <option value="unexported">未出力</option>
-                </select>
-              </label>
-              <label className="field csv-small-field">
-                <span>表示件数</span>
-                <select className="control" value={csvPageSize} onChange={(event) => setCsvPageSize(Number(event.target.value))}>
-                  {CSV_PAGE_SIZE_OPTIONS.map((size) => (
-                    <option key={`csv_size_${size}`} value={size}>{size}件</option>
-                  ))}
-                </select>
-              </label>
-            </div>
-          </div>
-          <div className="csv-editor-toolbar">
-            <div className="inline-row wrap csv-column-add-row">
-              <label className="field csv-small-field">
-                <span>列追加（任意）</span>
-                <input className="control" value={newCsvColumn} onChange={(event) => setNewCsvColumn(event.target.value)} placeholder="new_column" />
-              </label>
-              <button type="button" className="btn btn-subtle" onClick={addCsvColumn} disabled={!canEdit || !newCsvColumn.trim()}>
-                <span className="btn-icon"><UiIcon name="plus" /></span>列追加
-              </button>
-              <label className="field csv-small-field">
-                <span>列削除（任意）</span>
-                <select
-                  className="control"
-                  value={csvDeleteHeader}
-                  onChange={(event) => {
-                    setCsvDeleteHeader(event.target.value);
-                    setCsvBulkNotice(null);
-                  }}
-                  disabled={!canEdit || !csvHeaders.length}
-                >
-                  {!csvHeaders.length ? <option value="">削除できる列がありません</option> : null}
-                  {csvHeaders.map((header) => (
-                    <option key={`delete_col_${header}`} value={header}>
-                      {getCsvHeaderLabel(header)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button
-                type="button"
-                className="btn btn-danger"
-                onClick={deleteCsvColumn}
-                disabled={!canEdit || !csvHeaders.length || !csvDeleteHeader}
-              >
-                <span className="btn-icon"><UiIcon name="delete" /></span>列削除
-              </button>
-            </div>
-            <div className="inline-row wrap csv-bulk-edit-row">
-              <label className="field csv-small-field">
-                <span>選択編集（列）</span>
-                <select
-                  className="control"
-                  value={csvBulkHeader}
-                  onChange={(event) => {
-                    setCsvBulkHeader(event.target.value);
-                    setCsvBulkNotice(null);
-                  }}
-                  disabled={!canEdit || !csvHeaders.length}
-                >
-                  {csvHeaders.map((header) => (
-                    <option key={`bulk_col_${header}`} value={header}>
-                      {getCsvHeaderLabel(header)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field csv-small-field">
-                <span>一括入力する値</span>
-                <input
-                  className="control"
-                  value={csvBulkValue}
-                  onChange={(event) => {
-                    setCsvBulkValue(event.target.value);
-                    setCsvBulkNotice(null);
-                  }}
-                  placeholder="選択行に入力する値"
-                  disabled={!canEdit}
-                />
-              </label>
-              <div className="field csv-bulk-action-field">
-                <span className="csv-bulk-action-label">実行</span>
-                <button
-                  type="button"
-                  className="btn btn-subtle csv-bulk-action-btn"
-                  onClick={applyBulkCsvEdit}
-                  disabled={!canEdit || !csvSelectedRows.length || !csvHeaders.length}
-                >
-                  <span className="btn-icon"><UiIcon name="apply" /></span>選択行へ一括反映
-                </button>
-              </div>
-            </div>
-            {csvBulkNotice ? <p className={`mini ${csvBulkNotice.type === "error" ? "error-text" : "ok-text"}`}>{csvBulkNotice.text}</p> : null}
-            <p className="mini">行: {csvDraftRows.length} / 列: {csvHeaders.length} / 選択: {csvSelectedRows.length}</p>
           </div>
 
-          {!csvHeaders.length ? (
-            <p className="mini">CSVを取り込むと、ここで編集できるようになります。</p>
-          ) : (
-            <>
-              <div className="table-wrap csv-editor-wrap">
-                <table className="schedule-table csv-editor-table">
-                  <thead>
-                    <tr>
-                      <th style={{ width: 56 }}>
-                        <input
-                          type="checkbox"
-                          aria-label="表示中の行を全選択"
-                          checked={csvAllVisibleSelected}
-                          onChange={(event) => toggleCsvVisibleSelection(event.target.checked)}
-                          disabled={!canEdit || !csvVisibleRows.length}
-                        />
-                      </th>
-                      {csvHeaders.map((header) => (
-                        <th key={`csv_header_${header}`} style={csvColumnWidthMap[header]}>
-                          {getCsvHeaderLabel(header)}
-                        </th>
-                      ))}
-                      <th className="csv-op-col">操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {csvVisibleRows.length ? (
-                      csvVisibleRows.map(({ row, index }) => {
-                        const getField = createCsvValueGetter(row);
-                        const rowProjectId = getField(...CSV_PROJECT_FIELD_ALIASES.projectId).trim();
-                        const exported = projectExportMetaById.get(rowProjectId)?.exported ?? false;
-                        return (
-                        <tr key={`csv_row_${index}`} className={exported ? "csv-row-exported" : undefined}>
-                          <td>
-                            <input
-                              type="checkbox"
-                              aria-label={`${index + 1}行目を選択`}
-                              checked={csvSelectedSet.has(index)}
-                              onChange={() => toggleCsvRowSelection(index)}
-                              disabled={!canEdit}
-                            />
-                          </td>
-                          {csvHeaders.map((header) => (
-                            <td key={`csv_cell_${index}_${header}`} style={csvColumnWidthMap[header]}>
-                              <input
-                                className="control csv-cell-input"
-                                value={row[header] ?? ""}
-                                onChange={(event) => updateCsvCell(index, header, event.target.value)}
-                                disabled={!canEdit}
-                              />
-                            </td>
-                          ))}
-                          <td className="csv-op-cell">
-                            <button type="button" className="btn btn-danger csv-row-delete-btn" onClick={() => deleteCsvRow(index)} disabled={!canEdit}>
-                              <span className="btn-icon"><UiIcon name="delete" /></span>削除
-                            </button>
-                          </td>
-                        </tr>
-                        );
-                      })
-                    ) : (
-                      <tr><td colSpan={csvHeaders.length + 2}>該当データがありません</td></tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-              <div className="csv-pagination">
-                <button type="button" className="btn btn-subtle" onClick={() => setCsvPage((prev) => Math.max(0, prev - 1))} disabled={csvPage <= 0}>
-                  <span className="btn-icon"><UiIcon name="arrowLeft" /></span>前へ
-                </button>
-                <span className="mini">{csvPage + 1} / {csvTotalPages}</span>
-                <button type="button" className="btn btn-subtle" onClick={() => setCsvPage((prev) => Math.min(csvTotalPages - 1, prev + 1))} disabled={csvPage >= csvTotalPages - 1}>
-                  <span className="btn-icon"><UiIcon name="arrowRight" /></span>次へ
-                </button>
-              </div>
-            </>
-          )}
+          <section className="sub-panel">
+            <h4>新しい停電案内文ページを追加しました</h4>
+            <p className="mini">
+              このページは施工計画書PDFの中へ差し込む用途ではなく、停電案内文を別ページとして作成するための専用ページです。
+              今後ここに、停電日・停電時間・事前工事日・注意事項・案内文テンプレートの生成機能を順番に実装していけます。
+            </p>
+          </section>
         </section>
         ) : null}
 
-        {isTrackingMode ? (
-        <section className="panel security-panel">
-          <div className="panel-head">
-            <h3 className="section-title"><span className="section-icon"><UiIcon name="login" /></span>ログイン管理</h3>
-            {currentUser ? <p className="status-chip ok">ログイン中: {currentUser.name} / {ROLE_LABELS[currentUser.role]}</p> : <p className="status-chip warn">未ログイン</p>}
-          </div>
-          {!currentUser ? (
-            <div className="field-grid">
-              <label className="field">
-                <span>メールアドレス</span>
-                <input className="control" value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} placeholder="name@example.com" />
-              </label>
-              <label className="field">
-                <span>パスワード</span>
-                <input className="control" type="password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} placeholder="********" />
-              </label>
-              <div className="inline-row wrap">
-                <button type="button" className="btn btn-accent" onClick={login}><span className="btn-icon"><UiIcon name="login" /></span>ログイン</button>
-                <p className="mini">初期登録済みのメールアドレスでログインしてください</p>
-              </div>
-              {loginError ? <p className="mini error-text">{loginError}</p> : null}
-            </div>
-          ) : (
-            <div className="inline-row wrap">
-              <p className="mini">ログアウトは画面上部のボタンから実行できます。</p>
-              {!canEdit ? <p className="mini">閲覧専用ユーザーです（編集不可）</p> : null}
-            </div>
-          )}
-          {canAdmin ? <p className="mini">管理者/システム管理者はこの画面で、ユーザー管理・バックアップ保存・復元・操作履歴確認ができます。</p> : null}
-
-          {canAdmin ? (
-            <section className="sub-panel user-admin-panel">
-              <h4 className="user-admin-title"><span className="section-icon"><UiIcon name="userPlus" /></span>管理者向け: ユーザー追加</h4>
-              <h4>利用ユーザー登録一覧</h4>
-              <p className="mini">登録ユーザーを一覧管理できます（承認・権限変更・有効/無効の切替）。承認操作は管理者/システム管理者のみ可能です。</p>
-              <div className="user-stats-grid" aria-label="ユーザー集計">
-                <article className="user-stat-card">
-                  <p className="user-stat-label">総ユーザー</p>
-                  <p className="user-stat-value">{userStats.total}名</p>
-                </article>
-                <article className="user-stat-card">
-                  <p className="user-stat-label">有効</p>
-                  <p className="user-stat-value">{userStats.activeUsers}名</p>
-                </article>
-                <article className="user-stat-card">
-                  <p className="user-stat-label">承認済み</p>
-                  <p className="user-stat-value">{userStats.approvedUsers}名</p>
-                </article>
-                <article className="user-stat-card">
-                  <p className="user-stat-label">承認待ち</p>
-                  <p className="user-stat-value">{userStats.pendingUsers}名</p>
-                </article>
-                <article className="user-stat-card">
-                  <p className="user-stat-label">管理者</p>
-                  <p className="user-stat-value">{userStats.admins}名</p>
-                  <p className="user-stat-meta">有効承認済み {userStats.activeAdmins}名</p>
-                </article>
-              </div>
-              <div className="field-grid">
-                <label className="field"><span>名前</span><input className="control" value={newUserName} placeholder="例: 山田 太郎" onChange={(event) => setNewUserName(event.target.value)} /></label>
-                <label className="field"><span>メール</span><input className="control" value={newUserEmail} placeholder="例: name@gmail.com" onChange={(event) => setNewUserEmail(event.target.value)} /></label>
-                <label className="field"><span>パスワード</span><input className="control" type="password" value={newUserPassword} placeholder="8文字以上推奨" onChange={(event) => setNewUserPassword(event.target.value)} /></label>
-                <label className="field">
-                  <span>権限</span>
-                  <select className="control" value={newUserRole} onChange={(event) => setNewUserRole(event.target.value as UserRole)}>
-                    {currentUser?.role === "system_admin" ? <option value="system_admin">システム管理者</option> : null}
-                    <option value="admin">管理者</option>
-                    <option value="editor">編集者</option>
-                    <option value="viewer">閲覧者</option>
-                  </select>
-                </label>
-                <div className="inline-row wrap user-add-row">
-                  <button type="button" className="btn btn-accent" onClick={() => createUser()}><span className="btn-icon"><UiIcon name="userPlus" /></span>ユーザー追加</button>
-                </div>
-                {userCreateNotice ? <p className={`mini ${userCreateNotice.type === "error" ? "error-text" : "ok-text"}`}>{userCreateNotice.text}</p> : null}
-                {userManageNotice ? <p className={`mini ${userManageNotice.type === "error" ? "error-text" : "ok-text"}`}>{userManageNotice.text}</p> : null}
-              </div>
-              <h4 className="user-admin-heading">登録済みユーザー</h4>
-              <p className="mini user-admin-table-help">承認区分: 管理者の審査状態 / 利用状態: ログイン可否（有効・無効）</p>
-              <div className="table-wrap user-table-wrap">
-                <table className="schedule-table user-table">
-                  <thead>
-                    <tr><th>名前</th><th>メール</th><th>承認区分</th><th>権限</th><th>利用状態</th><th>承認者</th><th>登録日時</th><th>最終ログイン</th><th className="user-op-col">操作</th></tr>
-                  </thead>
-                  <tbody>
-                    {(userListExpanded ? users : users.slice(0, USER_LIST_VISIBLE_COUNT)).map((user) => (
-                      <tr key={`user_table_${user.id}`}>
-                        <td>{user.name}</td>
-                        <td>{user.email}</td>
-                        <td>
-                          <select
-                            className="control"
-                            value={user.approvalStatus}
-                            onChange={(event) => updateUserApprovalStatusByAdmin(user.id, event.target.value as UserApprovalStatus)}
-                            disabled={user.role === "system_admin"}
-                          >
-                            <option value="pending">承認待ち</option>
-                            <option value="approved">承認済み</option>
-                            <option value="rejected">利用不可</option>
-                          </select>
-                        </td>
-                        <td>
-                          <select
-                            className="control"
-                            value={user.role}
-                            onChange={(event) => updateUserRoleByAdmin(user.id, event.target.value as UserRole)}
-                            disabled={user.role === "system_admin"}
-                          >
-                            {(currentUser?.role === "system_admin" || user.role === "system_admin")
-                              ? <option value="system_admin">システム管理者</option>
-                              : null}
-                            <option value="admin">管理者</option>
-                            <option value="editor">編集者</option>
-                            <option value="viewer">閲覧者</option>
-                          </select>
-                        </td>
-                        <td>{user.active && user.approvalStatus === "approved" ? <span className="status-chip ok">有効</span> : <span className="status-chip warn">無効</span>}</td>
-                        <td><span className="user-meta-chip">{formatUserApprovedByLabel(user)}</span></td>
-                        <td>{user.createdAt ? new Date(user.createdAt).toLocaleString("ja-JP") : "未記録"}</td>
-                        <td>{user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString("ja-JP") : "未ログイン"}</td>
-                        <td className="user-op-cell">
-                          <div className="user-actions">
-                            {user.role === "system_admin" ? (
-                              <span className="mini">固定</span>
-                            ) : (
-                              <button type="button" className="btn btn-danger" onClick={() => deleteUserByAdmin(user.id)}>
-                                <span className="btn-icon"><UiIcon name="delete" /></span>削除
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                    {!users.length ? <tr><td colSpan={9}>ユーザーが未登録です</td></tr> : null}
-                    {users.length > USER_LIST_VISIBLE_COUNT ? (
-                      <tr className="access-log-more-row">
-                        <td className="access-log-more-cell" colSpan={9}>
-                          <button
-                            type="button"
-                            className="access-log-more-link"
-                            onClick={() => setUserListExpanded((prev) => !prev)}
-                          >
-                            {userListExpanded ? "登録済みユーザーをたたむ" : "登録済みユーザーをもっと表示する"}
-                          </button>
-                        </td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
-              </div>
-              <h4 className="user-admin-heading">アクセス試行履歴（成功/失敗）</h4>
-              <div className="table-wrap">
-                <table className="schedule-table access-log-table">
-                  <thead>
-                    <tr><th>日時</th><th>メール</th><th>判定</th><th>ユーザー名</th><th>経路</th></tr>
-                  </thead>
-                  <tbody>
-                    {(accessLogExpanded ? accessLogs : accessLogs.slice(0, 5)).map((log) => (
-                      <tr key={`access_log_${log.id}`}>
-                        <td>{new Date(log.at).toLocaleString("ja-JP")}</td>
-                        <td>{log.email || "-"}</td>
-                        <td>{log.result === "success" ? "成功" : "失敗"}</td>
-                        <td>{log.userName || "-"}</td>
-                        <td>{log.source === "login_page" ? "ログインページ" : "トラッキング画面"}</td>
-                      </tr>
-                    ))}
-                    {!accessLogs.length ? <tr><td colSpan={5}>アクセス履歴はまだありません</td></tr> : null}
-                    {accessLogs.length > 5 ? (
-                      <tr className="access-log-more-row">
-                        <td className="access-log-more-cell" colSpan={5}>
-                          <button
-                            type="button"
-                            className="access-log-more-link"
-                            onClick={() => setAccessLogExpanded((prev) => !prev)}
-                          >
-                            {accessLogExpanded ? "アクセス履歴をたたむ" : "アクセス履歴をもっと表示する"}
-                          </button>
-                        </td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
-              </div>
-              <h4 className="user-admin-heading">操作履歴（誰が / どこで / 何を）</h4>
-              <p className="mini">この欄で「保存」と「復元」を行います。操作履歴は下の表で確認できます。</p>
-              <div className="tracking-history-controls">
-                <div className="tracking-history-row">
-                  <label className="field tracking-revision-select tracking-filter-select">
-                    <span>ユーザーで絞り込み</span>
-                    <select className="control" value={operationLogUserFilter} onChange={(event) => setOperationLogUserFilter(event.target.value)}>
-                      <option value="all">全ユーザー</option>
-                      {adminAuditUserOptions.map((option) => (
-                        <option key={`operation_log_user_${option.id}`} value={option.id}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <button type="button" className="btn btn-subtle tracking-history-action-btn" onClick={saveManualRevision} disabled={!canEdit}>
-                    <span className="btn-icon"><UiIcon name="save" /></span>現在内容を履歴保存
-                  </button>
-                </div>
-                <div className="tracking-history-row">
-                  <div className="mini">この端末のlocalStorage全データをJSONでダウンロードします。</div>
-                  <button type="button" className="btn btn-subtle tracking-history-action-btn" onClick={exportLocalStorageData}>
-                    <span className="btn-icon"><UiIcon name="save" /></span>データをエクスポート
-                  </button>
-                </div>
-                <div className="tracking-history-row">
-                  <div className="mini">エクスポート済みJSONを読み込み、localStorageへ上書き保存します。</div>
-                  <div>
-                    <input
-                      ref={importFileInputRef}
-                      type="file"
-                      accept="application/json,.json"
-                      onChange={importLocalStorageData}
-                      style={{ display: "none" }}
-                    />
-                    <button type="button" className="btn btn-subtle tracking-history-action-btn" onClick={openImportFileDialog}>
-                      <span className="btn-icon"><UiIcon name="upload" /></span>データをインポート
-                    </button>
-                  </div>
-                </div>
-                <div className="tracking-history-row">
-                  <label className="field tracking-revision-select">
-                    <span>復元する履歴</span>
-                    <select className="control" value={selectedRevisionId} onChange={(event) => setSelectedRevisionId(event.target.value)}>
-                      <option value="">履歴を選択</option>
-                      {projectRevisions.map((revision) => (
-                        <option key={revision.id} value={revision.id}>
-                          {new Date(revision.at).toLocaleString("ja-JP")} / {revision.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <button type="button" className="btn btn-subtle tracking-history-action-btn" onClick={restoreRevision} disabled={!canEdit || !selectedRevision}>
-                    <span className="btn-icon"><UiIcon name="history" /></span>この時点に戻す
-                  </button>
-                </div>
-              </div>
-              <div className="table-wrap">
-                <table className="schedule-table access-log-table">
-                  <thead>
-                    <tr><th>日時</th><th>ユーザー</th><th>画面</th><th>案件ID</th><th>操作</th><th>詳細</th></tr>
-                  </thead>
-                  <tbody>
-                    {adminVisibleAuditLogs.map((log) => (
-                      <tr key={`admin_audit_${log.id}`}>
-                        <td>{new Date(log.at).toLocaleString("ja-JP")}</td>
-                        <td>{log.userName || "-"}</td>
-                        <td>{formatAuditScreen(log.action)}</td>
-                        <td>{log.projectId || "-"}</td>
-                        <td>{formatAuditAction(log.action)}</td>
-                        <td>{formatAuditDetail(log.detail || "-")}</td>
-                      </tr>
-                    ))}
-                    {!adminVisibleAuditLogs.length ? <tr><td colSpan={6}>操作履歴はまだありません</td></tr> : null}
-                    {adminFilteredAuditLogs.length > 5 ? (
-                      <tr className="access-log-more-row">
-                        <td className="access-log-more-cell" colSpan={6}>
-                          <button
-                            type="button"
-                            className="access-log-more-link"
-                            onClick={() => setOperationLogExpanded((prev) => !prev)}
-                          >
-                            {operationLogExpanded ? "操作履歴をたたむ" : "操作履歴をもっと表示する"}
-                          </button>
-                        </td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          ) : null}
-        </section>
-        ) : null}
-
-        {isTrackingMode && !!currentUser && !canAdmin ? (
-        <section className="panel history-panel">
-          <div className="panel-head">
-            <h3 className="section-title"><span className="section-icon"><UiIcon name="history" /></span>履歴管理</h3>
-            <p className="mini">編集者/閲覧者向け: 履歴復元と変更ログ確認ができます。</p>
-          </div>
-          <p className="mini">登録済みユーザー一覧・ユーザー管理情報は管理者のみ確認できます。変更履歴はログイン中ユーザー本人の作業のみ表示します。</p>
-          <article className="sub-panel">
-            <h4>履歴保存・復元</h4>
-            <p className="mini">「履歴を保存」を押すと今の状態を保存し、「この時点に戻す」で復元できます。</p>
-            <div className="inline-row wrap">
-              <button type="button" className="btn btn-subtle" onClick={saveManualRevision} disabled={!canEdit}><span className="btn-icon"><UiIcon name="save" /></span>現在内容を履歴保存</button>
-            </div>
-            <label className="field">
-              <span>復元する履歴</span>
-              <select className="control" value={selectedRevisionId} onChange={(event) => setSelectedRevisionId(event.target.value)}>
-                <option value="">履歴を選択</option>
-                {projectRevisions.map((revision) => (
-                  <option key={revision.id} value={revision.id}>
-                    {new Date(revision.at).toLocaleString("ja-JP")} / {revision.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="inline-row wrap">
-              <button type="button" className="btn btn-subtle" onClick={restoreRevision} disabled={!canEdit || !selectedRevision}><span className="btn-icon"><UiIcon name="history" /></span>この時点に戻す</button>
-            </div>
-          </article>
-          <article className="sub-panel">
-            <h4>変更履歴（監査ログ）</h4>
-            <div className="table-wrap">
-              <table className="schedule-table">
-                <thead>
-                  <tr><th>日時</th><th>操作</th><th>詳細</th></tr>
-                </thead>
-                <tbody>
-                  {userScopedProjectAuditLogs.map((log) => (
-                    <tr key={log.id}>
-                      <td>{new Date(log.at).toLocaleString("ja-JP")}</td>
-                      <td>{formatAuditAction(log.action)}</td>
-                      <td>{formatAuditDetailForNonAdmin(log)}</td>
-                    </tr>
-                  ))}
-                  {!userScopedProjectAuditLogs.length ? (
-                    <tr><td colSpan={3}>履歴はまだありません</td></tr>
-                  ) : null}
-                </tbody>
-              </table>
-            </div>
-          </article>
-          <article className="sub-panel">
-            <h4>全案件の変更履歴</h4>
-            <p className="mini">ログイン中ユーザー本人の全案件履歴を直近30件で表示します。</p>
-            <div className="table-wrap">
-              <table className="schedule-table">
-                <thead>
-                  <tr><th>日時</th><th>案件ID</th><th>操作</th><th>詳細</th></tr>
-                </thead>
-                <tbody>
-                  {userScopedGlobalAuditLogs.map((log) => (
-                    <tr key={`global_${log.id}`}>
-                      <td>{new Date(log.at).toLocaleString("ja-JP")}</td>
-                      <td>{log.projectId}</td>
-                      <td>{formatAuditAction(log.action)}</td>
-                      <td>{formatAuditDetailForNonAdmin(log)}</td>
-                    </tr>
-                  ))}
-                  {!userScopedGlobalAuditLogs.length ? (
-                    <tr><td colSpan={4}>履歴はまだありません</td></tr>
-                  ) : null}
-                </tbody>
-              </table>
-            </div>
-          </article>
-        </section>
-        ) : null}
+        <TrackingSection
+          isTrackingMode={isTrackingMode}
+          currentUser={currentUser}
+          loginEmail={loginEmail}
+          setLoginEmail={setLoginEmail}
+          loginPassword={loginPassword}
+          setLoginPassword={setLoginPassword}
+          login={login}
+          loginError={loginError}
+          canEdit={canEdit}
+          canAdmin={canAdmin}
+          userStats={userStats}
+          newUserName={newUserName}
+          setNewUserName={setNewUserName}
+          newUserEmail={newUserEmail}
+          setNewUserEmail={setNewUserEmail}
+          newUserPassword={newUserPassword}
+          setNewUserPassword={setNewUserPassword}
+          newUserRole={newUserRole}
+          setNewUserRole={setNewUserRole}
+          createUser={createUser}
+          userCreateNotice={userCreateNotice}
+          userManageNotice={userManageNotice}
+          userListExpanded={userListExpanded}
+          setUserListExpanded={setUserListExpanded}
+          users={users}
+          updateUserApprovalStatusByAdmin={updateUserApprovalStatusByAdmin}
+          updateUserRoleByAdmin={updateUserRoleByAdmin}
+          deleteUserByAdmin={deleteUserByAdmin}
+          accessLogExpanded={accessLogExpanded}
+          setAccessLogExpanded={setAccessLogExpanded}
+          accessLogs={accessLogs}
+          operationLogUserFilter={operationLogUserFilter}
+          setOperationLogUserFilter={setOperationLogUserFilter}
+          adminAuditUserOptions={adminAuditUserOptions}
+          saveManualRevision={saveManualRevision}
+          exportLocalStorageData={exportLocalStorageData}
+          importFileInputRef={importFileInputRef}
+          importLocalStorageData={importLocalStorageData}
+          openImportFileDialog={openImportFileDialog}
+          selectedRevisionId={selectedRevisionId}
+          setSelectedRevisionId={setSelectedRevisionId}
+          projectRevisions={projectRevisions}
+          restoreRevision={restoreRevision}
+          selectedRevision={selectedRevision ?? undefined}
+          adminVisibleAuditLogs={adminVisibleAuditLogs}
+          adminFilteredAuditLogs={adminFilteredAuditLogs}
+          operationLogExpanded={operationLogExpanded}
+          setOperationLogExpanded={setOperationLogExpanded}
+          userScopedProjectAuditLogs={userScopedProjectAuditLogs}
+          userScopedGlobalAuditLogs={userScopedGlobalAuditLogs}
+        />
 
         {isEditorMode && showEditorAssist ? (
         <section className="panel onboarding-panel">
@@ -9652,121 +7988,23 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
 
         {isEditorMode ? (
         <>
-        <section className="panel required-summary-panel">
-          <div className="panel-head">
-            <h3>必須入力チェック</h3>
-            <p className={`status-chip ${canExportPdf ? "ok" : "warn"}`}>
-              {canExportPdf ? "入力完了" : `未入力 ${totalMissingRequiredCount}件`}
-            </p>
-          </div>
-          {!canExportPdf ? (
-            <>
-              <p className="mini">未入力項目があるため、PDF出力は無効です。最初の未入力へ移動して入力してください。</p>
-              <div className="inline-row wrap">
-                <button type="button" className="btn btn-subtle" onClick={() => scrollToMissingField()}>
-                  <span className="btn-icon"><UiIcon name="down" /></span>最初の未入力へ移動
-                </button>
-              </div>
-            </>
-          ) : (
-            <p className="mini">必須項目はすべて入力済みです。PDF出力できます。</p>
-          )}
-          {requiredHint ? <p className="error-text">{requiredHint}</p> : null}
-        </section>
-        <section className="panel page-card" id="card-pdf1">
-          <div className="page-card-head">
-            <p className="page-card-index">PDF 1</p>
-            <div>
-              <h2>表紙</h2>
-              <p className="mini">このカードの入力がPDF1ページ目に反映されます</p>
-            </div>
-          </div>
-          <CardPreview title="PDF1 表紙">
-            <article className="preview-page">
-              <div className="preview-cover-top">
-                <p>{formatDateWithWeekday(selectedProject.workDateStart)}</p>
-                <p>{activePdfTemplate.coverKicker}</p>
-              </div>
-              <h3 className="preview-cover-building">{selectedProject.propertyName}　{selectedProject.coverRecipientSuffix || "管理組合御中"}</h3>
-              <p className="preview-cover-subject">{selectedProject.titleSubject}</p>
-              <p className="preview-cover-subject">施工計画書</p>
-              <div className="preview-logo-wrap">
-                <img
-                  className="preview-logo"
-                  src={activeLogoSrc}
-                  alt="Rezil ロゴ"
-                  onError={(event) => {
-                    event.currentTarget.src = PDF_LOGO_FALLBACK_SRC;
-                  }}
-                />
-              </div>
-              <section className="preview-company">
-                <h4>{activeParties.owner.company || selectedProject.pdfCompanyName || "-"}</h4>
-                <dl>
-                  <dt>{activePdfTemplate.coverTeamLabel}</dt>
-                  <dd>{activeParties.owner.office || selectedProject.pdfTeam || "-"}</dd>
-                  <dt>担当者</dt>
-                  <dd>{activeParties.owner.person || selectedProject.pdfContactPerson || "-"}</dd>
-                  <dt>住所</dt>
-                  <dd>{selectedProject.pdfAddress || "-"}</dd>
-                  <dt>E-mail</dt>
-                  <dd>{selectedProject.pdfEmail || "-"}</dd>
-                  <dt>電話番号（TEL）</dt>
-                  <dd>{activeParties.owner.tel || selectedProject.pdfTel || "-"}</dd>
-                  <dt>FAX</dt>
-                  <dd>{selectedProject.pdfFax || "-"}</dd>
-                </dl>
-              </section>
-            </article>
-          </CardPreview>
-          <article className="sub-panel">
-            <h3>表紙テキスト</h3>
-            <p className="field-help">上から順に入力すると迷いません。物件名 → 宛名 → 件名 の順で入力してください。</p>
-            <div className="field-grid">
-              <label className="field span-2">
-                <span>PDFフォーマット</span>
-                <select
-                  className="control"
-                  value={selectedProject.pdfTemplateId}
-                  onChange={(event) => handleProjectField("pdfTemplateId", normalizePdfTemplateId(event.target.value))}
-                >
-                  {PDF_TEMPLATE_PRESETS.map((template) => (
-                    <option key={`pdf_template_${template.id}`} value={template.id}>
-                      {template.label}
-                    </option>
-                  ))}
-                </select>
-                <p className="mini">{activePdfTemplate.description}</p>
-              </label>
-              <label className="field"><span>物件名</span><input data-required-key="propertyName" className={`control ${requiredMissingMap.propertyName ? "control-missing" : ""}`} value={selectedProject.propertyName} onChange={(event) => handleProjectField("propertyName", event.target.value)} /></label>
-              <label className="field"><span>表紙宛名（末尾）</span><input data-required-key="coverRecipientSuffix" className={`control ${requiredMissingMap.coverRecipientSuffix ? "control-missing" : ""}`} value={selectedProject.coverRecipientSuffix} onChange={(event) => handleProjectField("coverRecipientSuffix", event.target.value)} /></label>
-              <label className="field span-2"><span>件名</span><input data-required-key="titleSubject" className={`control ${requiredMissingMap.titleSubject ? "control-missing" : ""}`} value={selectedProject.titleSubject} onChange={(event) => handleProjectField("titleSubject", event.target.value)} /></label>
-            </div>
-          </article>
-        </section>
-
-        <section className="panel page-card" id="card-pdf2">
-          <div className="page-card-head">
-            <p className="page-card-index">PDF 2</p>
-            <div>
-              <h2>目次</h2>
-              <p className="mini">
-                目次は選択したPDFフォーマットに連動します
-                （1:{activePdfTemplate.tocItems[0]} / 2:{activePdfTemplate.tocItems[1]} / 3:{activePdfTemplate.tocItems[2]} / 4:{activePdfTemplate.tocItems[3]} / 5:{activePdfTemplate.tocItems[4]}）
-              </p>
-            </div>
-          </div>
-          <CardPreview title="PDF2 目次">
-            <article className="preview-page">
-              <h3>目次</h3>
-              <ol className="preview-toc-list">
-                {activePdfTemplate.tocItems.map((item) => (
-                  <li key={`preview_toc_${item}`}>{item}</li>
-                ))}
-              </ol>
-            </article>
-          </CardPreview>
-        </section>
+        <PdfCoverAndTocSection
+          canExportPdf={canExportPdf}
+          totalMissingRequiredCount={totalMissingRequiredCount}
+          scrollToMissingField={scrollToMissingField}
+          requiredHint={requiredHint}
+          selectedProject={selectedProject}
+          activePdfTemplate={activePdfTemplate}
+          activeLogoSrc={activeLogoSrc}
+          ownerParty={activeParties.owner}
+          requiredMissingMap={requiredMissingMap}
+          formatDateWithWeekday={formatDateWithWeekday}
+          pdfTemplatePresets={PDF_TEMPLATE_PRESETS}
+          handlePdfTemplateChange={(event) => handleProjectField("pdfTemplateId", normalizePdfTemplateId(event.target.value))}
+          onPropertyNameChange={(value) => handleProjectField("propertyName", value)}
+          onCoverRecipientSuffixChange={(value) => handleProjectField("coverRecipientSuffix", value)}
+          onTitleSubjectChange={(value) => handleProjectField("titleSubject", value)}
+        />
 
         <section className="panel page-card" id="card-pdf3">
           <div className="page-card-head">
@@ -9776,110 +8014,23 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
               <p className="mini">このカードの入力がPDF3ページ（工事概要）に反映されます</p>
             </div>
           </div>
-          <CardPreview title="PDF3 工事概要・工程表">
-            <article className="preview-page">
-              <h3>1．工事概要</h3>
-              <div className="preview-summary-lines">
-                <p><strong>■ 工事件名</strong> {selectedProject.titleSubject}</p>
-                <p><strong>■ 工事場所</strong> {selectedProject.propertyAddress || "-"}</p>
-                <p><strong>■ 工事期間</strong> {dateRangeLabel}</p>
-                <p><strong>■ 停電期間</strong> {outageDateTimeLabel}</p>
-              </div>
-              <h4>工事工程グラフ</h4>
-              <div className="preview-timeline-stack">
-                {timeline.windows.map((window, windowIndex) => (
-                  <div className="preview-timeline" key={`preview_window_${window.id}`}>
-                    {timeline.windows.length > 1 ? (
-                      <p className="mini timeline-split-caption">工程表 {windowIndex + 1}/{timeline.windows.length}（{formatDateRange(window.startDate, window.endDate)}）</p>
-                    ) : null}
-                    <div className="preview-timeline-scale">
-                      {window.labelTicks.map((tick) => {
-                        const left = ((tick - window.viewStart) / window.viewSpan) * 100;
-                        const point = fromTimelineOffset(tick, timeline.baseDate);
-                        const labelDate = formatShortDate(point.date);
-                        const labelTime = tickLabel(toMinutes(point.time));
-                        const labelText = labelTime === "00:00" || tick === window.viewStart || tick === window.viewEnd ? `${labelDate} ${labelTime}` : labelTime;
-                        return (
-                          <span
-                            key={`preview_pdf3_${window.id}_tick_${tick}`}
-                            className={tick === window.viewStart ? "edge-left" : tick === window.viewEnd ? "edge-right" : ""}
-                            style={{ left: `${Math.max(0, Math.min(100, left))}%` }}
-                          >
-                            {labelText}
-                          </span>
-                        );
-                      })}
-                    </div>
-                    <div className="preview-timeline-grid">
-                      {window.lineTicks.map((tick) => {
-                        const left = ((tick - window.viewStart) / window.viewSpan) * 100;
-                        return <i key={`preview_pdf3_${window.id}_line_${tick}`} style={{ left: `${Math.max(0, Math.min(100, left))}%` }} />;
-                      })}
-                      {graphRows.map((row) => {
-                        const normalized = normalizeRowRange(
-                          toTimelineOffset(row.startDate, row.start, timeline.baseDate),
-                          toTimelineOffset(row.endDate, row.end, timeline.baseDate),
-                          timeline.fullSpan,
-                        );
-                        const clippedStart = clamp(normalized.start, window.viewStart, window.viewEnd);
-                        const clippedEnd = clamp(normalized.end, window.viewStart, window.viewEnd);
-                        const visibleSpan = clippedEnd - clippedStart;
-                        if (visibleSpan <= 0) {
-                          return (
-                            <div className="preview-timeline-row" key={`preview_pdf3_${window.id}_row_${row.id}`}>
-                              <span className="preview-row-label">{row.label}</span>
-                              <div className="preview-row-track" />
-                            </div>
-                          );
-                        }
-                        const left = ((clippedStart - window.viewStart) / window.viewSpan) * 100;
-                        const width = Math.max(0.5, (visibleSpan / window.viewSpan) * 100);
-                        const colorType = getRowColorType(row);
-                        return (
-                          <div className="preview-timeline-row" key={`preview_pdf3_${window.id}_row_${row.id}`}>
-                            <span className="preview-row-label">{row.label}</span>
-                            <div className="preview-row-track">
-                              <div className={`preview-row-bar is-${colorType}`} style={{ left: `${left}%`, width: `${width}%` }}>
-                                {row.label}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <h4>工事工程表</h4>
-              <div className="table-wrap">
-                <table className="schedule-table preview-table">
-                  <thead>
-                    <tr><th>項目</th><th>開始日時</th><th>終了日時</th><th>停電</th><th>備考</th></tr>
-                  </thead>
-                  <tbody>
-                    {selectedProject.outageEnabled ? (
-                      <tr>
-                        <td>停電時間</td>
-                        <td>{`${formatDateWithWeekday(selectedProject.outageDateStart)} ${selectedProject.outageTimeStart}`}</td>
-                        <td>{`${formatDateWithWeekday(selectedProject.outageDateEnd)} ${selectedProject.outageTimeEnd}`}</td>
-                        <td>有</td>
-                        <td>全館停電</td>
-                      </tr>
-                    ) : null}
-                    {selectedProject.scheduleRows.slice(0, 5).map((row) => (
-                      <tr key={`preview_pdf3_table_${row.id}`}>
-                        <td>{row.label}</td>
-                        <td>{`${formatDateWithWeekday(row.startDate)} ${row.start}`}</td>
-                        <td>{`${formatDateWithWeekday(row.endDate)} ${row.end}`}</td>
-                        <td>{row.outage ? "有" : "無"}</td>
-                        <td>{row.note || "-"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </article>
-          </CardPreview>
+          <PdfWorkOverviewPreview
+            selectedProject={selectedProject}
+            dateRangeLabel={dateRangeLabel}
+            outageDateTimeLabel={outageDateTimeLabel}
+            timeline={timeline}
+            graphRows={graphRows}
+            formatDateRange={formatDateRange}
+            fromTimelineOffset={fromTimelineOffset}
+            formatShortDate={formatShortDate}
+            tickLabel={tickLabel}
+            toMinutes={toMinutes}
+            normalizeRowRange={normalizeRowRange}
+            toTimelineOffset={toTimelineOffset}
+            clamp={clamp}
+            getRowColorType={getRowColorType}
+            formatDateWithWeekday={formatDateWithWeekday}
+          />
           <div className="grid-2 pdf3-info-stack">
             <article className="sub-panel">
               <h3>基本情報</h3>
@@ -11784,6 +9935,16 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
       <footer className="bottom-bar" aria-label="Bottom">
         <p>
           保存: {lastSavedAt} / {selectedProject.projectId}
+          <span className={`pdf-export-meta ${sharedSyncState === "error" ? "warn" : ""}`}>
+            同期:
+            {sharedSyncState === "pending"
+              ? "保存待ち"
+              : sharedSyncState === "syncing"
+                ? "同期中"
+                : sharedSyncState === "error"
+                  ? "再試行待ち"
+                  : "保存済み"}
+          </span>
           <span className="pdf-export-meta">PDF出力: {selectedProjectExportCount}回 / 最終: {selectedProjectLastExportLabel}</span>
           <span className={`pdf-hint ${incompleteCards.length ? "warn" : "ok"}`}>
             {incompleteCards.length ? `未完了 ${incompleteCards.length}カード` : "PDF出力OK"}

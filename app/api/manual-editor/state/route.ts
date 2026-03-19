@@ -16,6 +16,14 @@ const MAX_SHARED_ITEMS = 3000;
 const MAX_SHARED_VALUE_LENGTH = 2_000_000;
 const MAX_SHARED_KEY_LENGTH = 256;
 
+function normalizeTimestamp(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim();
+  return normalized.length ? normalized : null;
+}
+
 function isSharedStatePayload(value: unknown): value is SharedStatePayload {
   if (!value || typeof value !== "object") {
     return false;
@@ -84,9 +92,9 @@ export async function GET() {
 }
 
 export async function PUT(req: NextRequest) {
-  let body: { payload?: unknown } = {};
+  let body: { payload?: unknown; baseUpdatedAt?: unknown } = {};
   try {
-    body = (await req.json()) as { payload?: unknown };
+    body = (await req.json()) as { payload?: unknown; baseUpdatedAt?: unknown };
   } catch {
     return NextResponse.json({ ok: false, error: "invalid_json" }, { status: 400 });
   }
@@ -96,6 +104,34 @@ export async function PUT(req: NextRequest) {
 
   try {
     await ensureSharedStateTable();
+    const existingRows = await prisma.$queryRawUnsafe<SharedStateRow[]>(
+      "SELECT id, payload, updated_at FROM manual_editor_states WHERE id = ? LIMIT 1",
+      SHARED_STATE_ID,
+    );
+    const existingRow = existingRows[0];
+    const baseUpdatedAt = normalizeTimestamp(body.baseUpdatedAt);
+    const currentUpdatedAt = normalizeTimestamp(existingRow?.updated_at);
+
+    if (existingRow && currentUpdatedAt !== baseUpdatedAt) {
+      const parsed = JSON.parse(existingRow.payload);
+      if (!isSharedStatePayload(parsed)) {
+        return NextResponse.json(
+          { ok: false, error: "invalid_stored_payload" },
+          { status: 500 },
+        );
+      }
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "conflict",
+          exists: true,
+          payload: parsed,
+          updatedAt: currentUpdatedAt,
+        },
+        { status: 409 },
+      );
+    }
+
     const serialized = JSON.stringify(body.payload);
     await prisma.$executeRawUnsafe(
       `
@@ -108,7 +144,17 @@ export async function PUT(req: NextRequest) {
       SHARED_STATE_ID,
       serialized,
     );
-    return NextResponse.json({ ok: true });
+
+    const updatedRows = await prisma.$queryRawUnsafe<SharedStateRow[]>(
+      "SELECT id, payload, updated_at FROM manual_editor_states WHERE id = ? LIMIT 1",
+      SHARED_STATE_ID,
+    );
+    const updatedRow = updatedRows[0];
+
+    return NextResponse.json({
+      ok: true,
+      updatedAt: normalizeTimestamp(updatedRow?.updated_at),
+    });
   } catch {
     return NextResponse.json({ ok: false, error: "failed_to_save_shared_state" }, { status: 500 });
   }

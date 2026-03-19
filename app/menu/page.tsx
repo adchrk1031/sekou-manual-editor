@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { clearSession, getSessionUser, touchSessionActivity } from "../components/auth";
 import { pullSharedStorageSnapshot } from "../components/sharedStorage";
 
-function MenuCardIcon({ type }: { type: "editor" | "csv" | "tracking" }) {
+function MenuCardIcon({ type }: { type: "editor" | "csv" | "tracking" | "notice" }) {
   const common = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
   if (type === "editor") {
     return (
@@ -21,6 +21,15 @@ function MenuCardIcon({ type }: { type: "editor" | "csv" | "tracking" }) {
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <rect {...common} x="4" y="4" width="16" height="16" rx="2" />
         <path {...common} d="M4 10h16M10 4v16M16 4v16" />
+      </svg>
+    );
+  }
+  if (type === "notice") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path {...common} d="M7 4h8l4 4v12H7z" />
+        <path {...common} d="M15 4v4h4" />
+        <path {...common} d="M10 12h6M10 16h6" />
       </svg>
     );
   }
@@ -126,6 +135,14 @@ export default function MenuPage() {
             </div>
             <h2 className="menu-track-title">ログイン管理</h2>
             <p>承認、履歴、バックアップ、ユーザー管理を行います。</p>
+          </Link>
+          <Link href="/notice" className="menu-link-card">
+            <div className="menu-link-head">
+              <span className="menu-link-icon" aria-hidden="true"><MenuCardIcon type="notice" /></span>
+              <span className="menu-link-tag">案内文作成</span>
+            </div>
+            <h2>停電案内文</h2>
+            <p>停電案内文の作成、事前工事日の整理、案内文PDF出力を行います。</p>
           </Link>
         </div>
       </section>
