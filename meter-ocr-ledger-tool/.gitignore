@@ -1,0 +1,8 @@
+.next
+node_modules
+.env
+.env.local
+storage/runs
+storage/uploads
+storage/*.json
+*.log

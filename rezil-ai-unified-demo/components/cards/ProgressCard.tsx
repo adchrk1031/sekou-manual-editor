@@ -1,4 +1,3 @@
-import { ProgressBar } from "@/components/cards/ProgressBar";
 import { Project } from "@/types/demo";
 
 type ProgressCardProps = {
@@ -13,6 +12,8 @@ const statusStyle: Record<Project["status"], string> = {
 };
 
 export function ProgressCard({ project }: ProgressCardProps) {
+  const steps = Array.from({ length: project.progressTotal }, (_, index) => index + 1);
+
   return (
     <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="mb-4 flex items-center justify-between gap-2">
@@ -24,7 +25,35 @@ export function ProgressCard({ project }: ProgressCardProps) {
         </span>
       </div>
 
-      <ProgressBar current={project.progressCurrent} total={project.progressTotal} />
+      <div>
+        <p className="text-sm font-semibold text-[#0F7F93]">
+          現在位置: {project.progressCurrent} / {project.progressTotal}
+        </p>
+        <div
+          className="mt-3 grid gap-1.5"
+          style={{ gridTemplateColumns: `repeat(${project.progressTotal}, minmax(0, 1fr))` }}
+          aria-label={`${project.projectName} 進捗フロー`}
+        >
+          {steps.map((step) => {
+            const isDone = step <= project.progressCurrent;
+            const isCurrent = step === project.progressCurrent;
+            return (
+              <div
+                key={step}
+                className={`grid h-8 place-items-center rounded-md border text-xs font-semibold ${
+                  isCurrent
+                    ? "border-[#1FADC3] bg-[#1FADC3] text-white"
+                    : isDone
+                      ? "border-[#9ADAE4] bg-[#EAF8FB] text-[#0F7F93]"
+                      : "border-[#D9E1EB] bg-white text-[#7A8698]"
+                }`}
+              >
+                {step}
+              </div>
+            );
+          })}
+        </div>
+      </div>
 
       <dl className="mt-4 grid grid-cols-1 gap-3 text-sm text-slate-700 md:grid-cols-2">
         <div>

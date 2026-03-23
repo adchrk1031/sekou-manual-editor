@@ -6,7 +6,9 @@
     "dev": "next dev -p 4310",
     "build": "next build",
     "start": "next start -p 4310",
-    "lint": "next lint"
+    "lint": "next lint",
+    "open:presentation": "bash ./scripts/start-presentation.sh",
+    "stop:presentation": "bash ./scripts/stop-presentation.sh"
   },
   "dependencies": {
     "next": "^16.1.6",

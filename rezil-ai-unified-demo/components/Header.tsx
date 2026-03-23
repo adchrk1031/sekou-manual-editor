@@ -7,10 +7,10 @@ export function Header() {
         <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">
-              社長説明用ローカルデモ
+              非公開打ち合わせ
             </p>
             <p className="text-lg font-semibold text-slate-900">
-              レジル業務改善デモ
+              AI業務改善資料
             </p>
           </div>
           <Navigation />

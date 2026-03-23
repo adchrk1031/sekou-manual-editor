@@ -2,13 +2,14 @@ import { AIAction, InsightCard, Project, Tool } from "@/types/demo";
 
 export const tools: Tool[] = [
   { id: "tool-1", name: "Salesforce", category: "営業管理" },
+  { id: "tool-9", name: "freee", category: "会計・原価管理" },
   { id: "tool-2", name: "Kickflow", category: "申請・承認" },
   { id: "tool-3", name: "ハブル", category: "契約・法務" },
   { id: "tool-4", name: "Kintone", category: "業務管理" },
   { id: "tool-5", name: "Notion", category: "情報共有" },
   { id: "tool-6", name: "Google Workspace", category: "文書・連携" },
   { id: "tool-7", name: "Slack", category: "コミュニケーション" },
-  { id: "tool-8", name: "顔ナビ", category: "現場運用" }
+  { id: "tool-8", name: "カオナビ", category: "現場運用" }
 ];
 
 export const currentIssues: InsightCard[] = [
@@ -19,13 +20,13 @@ export const currentIssues: InsightCard[] = [
   },
   {
     id: "issue-2",
-    title: "抜け漏れがある",
-    description: "必要な情報が別ツールにあり、確認タイミングを逃しやすい。"
+    title: "抜け漏れ・タスク漏れが起きる",
+    description: "必要情報と依頼が分散し、確認タイミングや引き継ぎ時に漏れが発生しやすい。"
   },
   {
     id: "issue-3",
-    title: "タスク漏れがある",
-    description: "依頼がチャットと表計算に分散し、担当の引き継ぎで欠落しやすい。"
+    title: "操作方法が分からず困る人が出る",
+    description: "ツールが多く画面ごとの作法が異なるため、何をどう操作すべきか迷いやすい。"
   },
   {
     id: "issue-4",

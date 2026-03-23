@@ -1,12 +1,13 @@
 @import "tailwindcss";
 
 :root {
-  --bg: #f8fafc;
-  --surface: #ffffff;
-  --text: #0f172a;
-  --muted: #475569;
-  --border: #e2e8f0;
-  --accent: #2563eb;
+  --primary: #1FADC3;
+  --accent: #e6ff00;
+  --base: #ffffff;
+  --section-base: #f5f7fa;
+  --text: #333333;
+  --muted: #556070;
+  --border: #d9e1eb;
 }
 
 html,
@@ -16,7 +17,11 @@ body {
 }
 
 body {
-  background: radial-gradient(circle at top right, #f1f5f9 0%, #ffffff 40%, #ffffff 100%);
+  font-family: var(--font-noto-sans-jp), "Noto Sans JP", "Hiragino Kaku Gothic ProN",
+    "Yu Gothic", sans-serif;
+  background:
+    radial-gradient(circle at 90% 4%, rgba(31, 173, 195, 0.14) 0%, transparent 26%),
+    linear-gradient(180deg, var(--base) 0%, var(--section-base) 100%);
   color: var(--text);
 }
 
@@ -28,22 +33,55 @@ a {
   color: inherit;
 }
 
+.presentation-mode {
+  overflow: hidden;
+}
+
+.presentation-grid-overlay {
+  background-image:
+    linear-gradient(rgba(31, 173, 195, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(31, 173, 195, 0.08) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: radial-gradient(circle at 50% 45%, black 42%, transparent 88%);
+}
+
+.animate-slide-enter {
+  animation: slide-enter 420ms ease-out both;
+}
+
+@keyframes slide-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(18px) scale(0.988);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 .page-shell {
   margin-inline: auto;
   width: min(1200px, calc(100% - 2rem));
-  padding-top: 2rem;
-  padding-bottom: 4rem;
+  padding-top: 2.5rem;
+  padding-bottom: 4.5rem;
 }
 
-.focus-ring:focus-visible {
-  outline: 3px solid var(--accent);
+.heading-en {
+  font-family: var(--font-montserrat), "Montserrat", "Roboto", sans-serif;
+}
+
+.focus-ring:focus-visible,
+button:focus-visible,
+a:focus-visible {
+  outline: 3px solid var(--primary);
   outline-offset: 2px;
 }
 
 @media (min-width: 768px) {
   .page-shell {
     width: min(1200px, calc(100% - 3rem));
-    padding-top: 3rem;
+    padding-top: 3.5rem;
   }
 }
 

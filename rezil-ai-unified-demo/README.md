@@ -10,9 +10,9 @@
 
 ## 画面一覧
 
-- `/` トップ画面（現状課題と改善後の対比）
-- `/progress` 進捗管理画面（3案件の可視化）
-- `/assistant` AI業務アシスタント画面（ボタン押下でダミー結果表示）
+- `/` トップ導線ページ（プレゼン開始リンク）
+- `/presentation` プレゼン本体（全11スライド）
+- `/progress` 補足の進捗管理画面
 
 ## 起動手順
 
@@ -25,6 +25,26 @@ npm run dev
 ブラウザで以下を開いてください。
 
 - [http://localhost:4310](http://localhost:4310)
+- [http://localhost:4310/presentation](http://localhost:4310/presentation)
+
+## すぐ見せる用（ワンクリック起動）
+
+- Finder から [Start_Presentation.command](/Users/adachih/Documents/New project/rezil-ai-unified-demo/Start_Presentation.command) をダブルクリック  
+- サーバーが停止していても自動起動し、`/presentation` を開きます
+- 停止したい場合は [Stop_Presentation.command](/Users/adachih/Documents/New project/rezil-ai-unified-demo/Stop_Presentation.command) を実行
+
+CLIから実行する場合:
+
+```bash
+npm run open:presentation
+npm run stop:presentation
+```
+
+## プレゼン操作方法（/presentation）
+
+- 右下の `戻る` / `次へ` ボタンでスライド移動
+- キーボードの `←` / `→` キーでも移動
+- 右上に現在スライド番号を表示（例: `1 / 11`）
 
 ## 補足
 

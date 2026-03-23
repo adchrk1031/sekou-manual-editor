@@ -1,69 +1,29 @@
-import { SectionTitle } from "@/components/SectionTitle";
-import { FutureStateCard } from "@/components/cards/FutureStateCard";
-import { IssueCard } from "@/components/cards/IssueCard";
-import { ToolListCard } from "@/components/cards/ToolListCard";
-import { currentIssues, futureStateItems, tools } from "@/data/demoData";
+import Link from "next/link";
 
 export default function HomePage() {
   return (
-    <main className="page-shell space-y-10">
-      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
-        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-          Top Message
+    <main className="page-shell">
+      <section className="mx-auto max-w-4xl rounded-2xl border border-[#D9E1EB] bg-white p-8 md:p-12">
+        <p className="heading-en text-xs font-semibold uppercase tracking-[0.14em] text-[#1FADC3]">
+          Executive Demo
         </p>
-        <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-900 md:text-4xl">
-          レジル業務改善デモ
+        <h1 className="mt-3 text-3xl font-bold leading-tight text-[#333333] md:text-5xl">
+          AI業務改善資料
         </h1>
-        <p className="mt-3 max-w-3xl text-base leading-7 text-slate-600 md:text-lg">
-          ツール乱立による業務分断を、AI＋自社ツールで改善する構想
+        <p className="mt-4 max-w-3xl text-base leading-7 text-[#556070] md:text-lg">
+          ツール乱立による業務分断を、AI＋自社開発ツールで改善する構想を
+          11枚のプレゼン形式で説明します。
         </p>
-        <p className="mt-4 max-w-4xl rounded-xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700">
-          現状の課題は個人の能力ではなく、仕組みが分断されていることが原因です。社内データと業務フローを一元管理し、
-          AIで検索・作成・次タスク提案を行うことで、将来的な社内基盤整備とAI事業部の価値創出につなげます。
+        <p className="mt-4 rounded-md bg-[#F5F7FA] px-4 py-3 text-sm leading-6 text-[#556070]">
+          操作方法: 右下の「次へ / 戻る」ボタン、またはキーボード左右キー
         </p>
-      </section>
-
-      <ToolListCard tools={tools} />
-
-      <section className="space-y-5">
-        <SectionTitle
-          eyebrow="Current vs Future"
-          title="現状と改善後の対比"
-          description="複数ツール分断の状態と、AI＋自社開発ツールによる統合後の状態を同じ画面で比較します。"
-        />
-
-        <div className="grid gap-4 lg:grid-cols-2">
-          <article className="rounded-2xl border border-rose-200 bg-white p-5 shadow-sm">
-            <h3 className="text-xl font-bold text-rose-900">現状（分断）</h3>
-            <p className="mt-2 text-sm text-rose-800">
-              情報が散在し、確認工数と意思決定の遅れが発生しやすい状態。
-            </p>
-            <div className="mt-4 grid gap-3">
-              {currentIssues.map((issue) => (
-                <IssueCard
-                  key={issue.id}
-                  title={issue.title}
-                  description={issue.description}
-                />
-              ))}
-            </div>
-          </article>
-
-          <article className="rounded-2xl border border-emerald-200 bg-white p-5 shadow-sm">
-            <h3 className="text-xl font-bold text-emerald-900">改善後（統合）</h3>
-            <p className="mt-2 text-sm text-emerald-800">
-              データとタスクを統合し、AI支援で業務速度と品質を同時に向上。
-            </p>
-            <div className="mt-4 grid gap-3">
-              {futureStateItems.map((item) => (
-                <FutureStateCard
-                  key={item.id}
-                  title={item.title}
-                  description={item.description}
-                />
-              ))}
-            </div>
-          </article>
+        <div className="mt-8 flex flex-wrap gap-3">
+          <Link
+            href="/presentation"
+            className="focus-ring rounded-md border border-[#1FADC3] bg-[#1FADC3] px-5 py-3 text-sm font-semibold text-white"
+          >
+            プレゼンを開始する
+          </Link>
         </div>
       </section>
     </main>

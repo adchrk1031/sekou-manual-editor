@@ -8,7 +8,7 @@ export default function ProgressPage() {
       <SectionTitle
         eyebrow="Progress Overview"
         title="案件進捗管理"
-        description="複数ツールに分散していると進捗が見えないが、統合後は一画面で把握できることを示すデモ画面です。"
+        description="1〜10の共通フローで現在位置を表示し、どこまで完了したかを一目で把握できる進捗管理イメージです。"
       />
 
       <section className="grid gap-4 lg:grid-cols-3">
