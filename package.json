@@ -1,10 +1,11 @@
 {
-  "name": "new-project",
+  "name": "sekou-manual-editor",
   "version": "1.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "safety:check": "node scripts/safety/verify-repo-safety.mjs",
     "start": "next start",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev"
