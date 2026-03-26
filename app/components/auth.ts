@@ -55,15 +55,6 @@ const SESSION_INACTIVITY_TIMEOUT_MS = 1000 * 60 * 60;
 const SESSION_ACTIVITY_WRITE_THROTTLE_MS = 15000;
 const LOGIN_LOCK_WINDOW_MS = 1000 * 60 * 15;
 const MAX_FAILED_ATTEMPTS = 5;
-const SYSTEM_ADMIN_NAME = "System Administrator";
-const SYSTEM_ADMIN_EMAIL = "system-admin@example.invalid";
-const SYSTEM_ADMIN_EMAIL_ALIASES = [SYSTEM_ADMIN_EMAIL, "system-admin@example.invalid"] as const;
-const SYSTEM_ADMIN_PASSWORD = "change-me-in-initial-setup";
-
-function isSystemAdminEmail(value: string): boolean {
-  const normalized = value.trim().toLowerCase();
-  return (SYSTEM_ADMIN_EMAIL_ALIASES as readonly string[]).includes(normalized);
-}
 
 function isApproverRole(role: AuthRole): boolean {
   return role === "system_admin" || role === "admin";
@@ -156,14 +147,7 @@ function nowMs(): number {
 }
 
 function normalizeEmail(value: string): string {
-  const normalized = value.trim().toLowerCase();
-  if (!normalized) {
-    return "";
-  }
-  if (isSystemAdminEmail(normalized)) {
-    return SYSTEM_ADMIN_EMAIL;
-  }
-  return normalized;
+  return value.trim().toLowerCase();
 }
 
 function loadLoginGuardMap(): LoginGuardMap {
@@ -317,13 +301,12 @@ function sanitizeUsers(users: AuthUser[]): AuthUser[] {
   }
   const sanitized = users.map((user) => {
     const normalizedEmail = normalizeEmail(typeof user.email === "string" ? user.email : "");
-    const isSystemAdmin = isSystemAdminEmail(normalizedEmail);
-    const normalizedRole: AuthRole = isSystemAdmin
-      ? "system_admin"
-      : (user.role === "system_admin" || user.role === "admin" || user.role === "editor" || user.role === "viewer"
+    const normalizedRole: AuthRole =
+      user.role === "system_admin" || user.role === "admin" || user.role === "editor" || user.role === "viewer"
         ? user.role
-        : "editor");
-    const normalizedApprovalStatus: UserApprovalStatus = isSystemAdmin ? "approved" : normalizeApprovalStatus(user.approvalStatus);
+        : "editor";
+    const normalizedApprovalStatus: UserApprovalStatus =
+      normalizedRole === "system_admin" ? "approved" : normalizeApprovalStatus(user.approvalStatus);
     const createdAt =
       typeof user.createdAt === "string" && user.createdAt
         ? user.createdAt
@@ -332,13 +315,10 @@ function sanitizeUsers(users: AuthUser[]): AuthUser[] {
           : (typeof user.lastLoginAt === "string" && user.lastLoginAt ? user.lastLoginAt : new Date().toISOString()));
     return {
       ...user,
-      name: isSystemAdmin ? (typeof user.name === "string" && user.name.trim() ? user.name.trim() : SYSTEM_ADMIN_NAME) : user.name,
+      name: typeof user.name === "string" ? user.name : "",
       email: normalizedEmail || user.email,
-      password:
-        isSystemAdmin && (!user.password || !String(user.password).trim())
-          ? SYSTEM_ADMIN_PASSWORD
-          : user.password,
-      active: isSystemAdmin ? true : (typeof user.active === "boolean" ? user.active : true),
+      password: typeof user.password === "string" ? user.password : "",
+      active: normalizedRole === "system_admin" ? true : (typeof user.active === "boolean" ? user.active : true),
       role: normalizedRole,
       approvalStatus: normalizedApprovalStatus,
       createdAt,
@@ -355,7 +335,7 @@ function sanitizeUsers(users: AuthUser[]): AuthUser[] {
       approvedByName:
         normalizedApprovalStatus === "approved"
           ? (() => {
-              if (isSystemAdmin) {
+              if (normalizedRole === "system_admin") {
                 return "システム管理者";
               }
               const label = typeof user.approvedByName === "string" ? user.approvedByName.trim() : "";
@@ -371,29 +351,8 @@ function sanitizeUsers(users: AuthUser[]): AuthUser[] {
     };
   });
 
-  const withSystemAdmin = sanitized.some((user) => user.role === "system_admin" && isSystemAdminEmail(user.email))
-    ? sanitized
-    : [
-        {
-          id: uid("user"),
-          name: SYSTEM_ADMIN_NAME,
-          email: SYSTEM_ADMIN_EMAIL,
-          password: SYSTEM_ADMIN_PASSWORD,
-          role: "system_admin" as const,
-          active: true,
-          approvalStatus: "approved" as const,
-          approvedAt: new Date().toISOString(),
-          approvedById: "system",
-          approvedByName: "システム管理者",
-          createdAt: new Date().toISOString(),
-          createdById: "system",
-          createdByName: "システム登録",
-        },
-        ...sanitized,
-      ];
-
   const dedupedByEmail = new Map<string, AuthUser>();
-  withSystemAdmin.forEach((user) => {
+  sanitized.forEach((user) => {
     const key = normalizeEmail(user.email);
     if (!key) {
       return;
@@ -460,15 +419,21 @@ export function registerInitialAdmin(_name: string, _email: string, _password: s
   if (typeof window === "undefined") {
     return null;
   }
+  const name = _name.trim();
+  const email = normalizeEmail(_email);
+  const password = _password.trim();
+  if (!name || !email || !password) {
+    return null;
+  }
   const users = ensureUsers();
   if (users.length > 0) {
     return null;
   }
   const next: AuthUser = {
     id: uid("user"),
-    name: _name.trim() || SYSTEM_ADMIN_NAME,
-    email: normalizeEmail(_email) || SYSTEM_ADMIN_EMAIL,
-    password: _password.trim() || SYSTEM_ADMIN_PASSWORD,
+    name,
+    email,
+    password,
     role: "system_admin",
     active: true,
     approvalStatus: "approved",
@@ -493,9 +458,6 @@ export function registerSelfUser(name: string, email: string, password: string):
   const trimmedPassword = password.trim();
   if (!trimmedName || !trimmedEmail || !trimmedPassword) {
     return { user: null, error: "missing" };
-  }
-  if (isSystemAdminEmail(trimmedEmail)) {
-    return { user: null, error: "reserved_email" };
   }
   const users = ensureUsers();
   if (users.some((user) => normalizeEmail(user.email) === trimmedEmail)) {
