@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { APPROVAL_STATUS_LABELS } from "../../planner/constants";
 import { formatDateRange } from "../../planner/utils/dateTime";
 import type { PlannerWorkspaceProject } from "./project-storage";
@@ -29,6 +30,25 @@ export default function ProjectListPanel({
   selectedProjectId: string;
   onSelect: (projectId: string) => void;
 }) {
+  const [searchText, setSearchText] = useState("");
+
+  const filteredProjects = useMemo(() => {
+    const keyword = searchText.trim().toLowerCase();
+    if (!keyword) {
+      return projects;
+    }
+
+    return projects.filter((project) => {
+      const haystacks = [
+        project.projectId,
+        project.propertyName,
+        project.titleSubject,
+        project.propertyAddress,
+      ];
+      return haystacks.some((value) => value.toLowerCase().includes(keyword));
+    });
+  }, [projects, searchText]);
+
   if (!projects.length) {
     return (
       <section style={panelStyle} aria-labelledby="workspace-projects-title">
@@ -51,8 +71,27 @@ export default function ProjectListPanel({
         </p>
       </div>
 
+      <label style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+        <span style={{ fontSize: "0.8rem", fontWeight: 700, color: "#5f6f82" }}>案件ID・物件名で検索</span>
+        <input
+          type="search"
+          value={searchText}
+          onChange={(event) => setSearchText(event.target.value)}
+          placeholder="案件ID・物件名・件名・住所で検索"
+          style={{
+            width: "100%",
+            borderRadius: "12px",
+            border: "1px solid #d7dee6",
+            background: "#ffffff",
+            padding: "10px 12px",
+            font: "inherit",
+            color: "#0f172a",
+          }}
+        />
+      </label>
+
       <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-        {projects.map((project) => {
+        {filteredProjects.map((project) => {
           const active = project.projectId === selectedProjectId;
           return (
             <button
@@ -99,6 +138,20 @@ export default function ProjectListPanel({
             </button>
           );
         })}
+        {!filteredProjects.length ? (
+          <div
+            style={{
+              borderRadius: "16px",
+              border: "1px dashed #cbd5e1",
+              background: "#ffffff",
+              padding: "16px",
+              color: "#5f6f82",
+              lineHeight: 1.6,
+            }}
+          >
+            該当する案件がありません。検索語を変えるか、空欄にして一覧全体を確認してください。
+          </div>
+        ) : null}
       </div>
     </section>
   );
