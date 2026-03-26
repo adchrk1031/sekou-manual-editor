@@ -135,8 +135,11 @@ npm run dev
   - 本番 deploy workflow
 - まだ手動対応が必要なもの:
   - GitHub branch protection の有効化
-  - PR build を required check に設定
+  - `safety-full` を required check に設定
   - preview 環境での受け入れチェック
+- GitHub 側の制約:
+  - 現在の private repo + GitHub プランでは branch protection / rulesets API が 403 になる
+  - 本当に GitHub 上で強制したい場合は GitHub Pro 以上へ上げるか、repo を public 化する必要がある
 
 ## 説明会3分デモ手順
 1. ログイン（管理者アカウント）

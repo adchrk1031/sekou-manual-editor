@@ -9,24 +9,36 @@ echo "Checking GitHub authentication..."
 gh auth status >/dev/null
 
 echo "Applying branch protection for ${REPO_OWNER}/${REPO_NAME}:${BRANCH}..."
-gh api \
-  --method PUT \
-  -H "Accept: application/vnd.github+json" \
-  "/repos/${REPO_OWNER}/${REPO_NAME}/branches/${BRANCH}/protection" \
-  -f required_status_checks.strict=true \
-  -F required_status_checks.contexts[]="safety-full" \
-  -f enforce_admins=true \
-  -f required_pull_request_reviews.dismiss_stale_reviews=true \
-  -f required_pull_request_reviews.require_code_owner_reviews=false \
-  -f required_pull_request_reviews.required_approving_review_count=0 \
-  -f required_pull_request_reviews.require_last_push_approval=false \
-  -f restrictions= \
-  -f required_linear_history=true \
-  -f allow_force_pushes=false \
-  -f allow_deletions=false \
-  -f block_creations=false \
-  -f required_conversation_resolution=true \
-  -f lock_branch=false
+if protection_output=$(
+  gh api \
+    --method PUT \
+    -H "Accept: application/vnd.github+json" \
+    "/repos/${REPO_OWNER}/${REPO_NAME}/branches/${BRANCH}/protection" \
+    -f required_status_checks.strict=true \
+    -F 'required_status_checks.contexts[]=safety-full' \
+    -f enforce_admins=true \
+    -f required_pull_request_reviews.dismiss_stale_reviews=true \
+    -f required_pull_request_reviews.require_code_owner_reviews=false \
+    -f required_pull_request_reviews.required_approving_review_count=0 \
+    -f required_pull_request_reviews.require_last_push_approval=false \
+    -f restrictions= \
+    -f required_linear_history=true \
+    -f allow_force_pushes=false \
+    -f allow_deletions=false \
+    -f block_creations=false \
+    -f required_conversation_resolution=true \
+    -f lock_branch=false 2>&1
+); then
+  echo "Branch protection applied."
+else
+  if [[ "${protection_output}" == *"Upgrade to GitHub Pro or make this repository public"* ]]; then
+    echo "Branch protection is unavailable on the current GitHub plan for this private repository."
+    echo "To enforce required checks on GitHub itself, upgrade to GitHub Pro or make the repository public."
+  else
+    echo "${protection_output}"
+    exit 1
+  fi
+fi
 
 echo "Enabling delete branch on merge..."
 gh api \

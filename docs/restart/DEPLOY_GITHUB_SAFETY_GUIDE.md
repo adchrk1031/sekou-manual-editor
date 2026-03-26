@@ -43,6 +43,10 @@
   - branch protection を `main` に設定
   - `safety-full` を required check に設定
   - 直接 push 制限を有効化
+- GitHub プラン制約:
+  - 現在の private repo では branch protection API / rulesets API が 403 になる
+  - そのため GitHub 上での強制保護を有効にするには GitHub Pro 以上へ上げるか、repo を public 化する必要がある
+  - 現時点では local hook + CI + deploy 前 safety gate で事故を減らしている
 
 ## PR で最低限見るべき項目
 
