@@ -85,7 +85,7 @@ assertFileIncludes("scripts/safety/verify-change-scope.mjs", [
 ]);
 
 assertFileIncludes("scripts/github/apply-repo-safety.sh", [
-  "required_status_checks.contexts[]=\"safety-full\"",
+  "required_status_checks.contexts[]=safety-full",
   "required_conversation_resolution=true",
 ]);
 
