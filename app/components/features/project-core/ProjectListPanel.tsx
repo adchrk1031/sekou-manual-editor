@@ -1,7 +1,8 @@
 "use client";
 
+import { APPROVAL_STATUS_LABELS } from "../../planner/constants";
 import { formatDateRange } from "../../planner/utils/dateTime";
-import type { PlannerWorkspaceProject } from "./useProjectWorkspace";
+import type { PlannerWorkspaceProject } from "./project-storage";
 
 const panelStyle = {
   display: "flex",
@@ -46,7 +47,7 @@ export default function ProjectListPanel({
       <div>
         <h2 id="workspace-projects-title" style={{ margin: 0, fontSize: "1.1rem" }}>案件一覧</h2>
         <p style={{ margin: "8px 0 0", color: "#5f6f82" }}>
-          {projects.length} 件の案件を読み込みました。ここでは安全に read-only で確認できます。
+          {projects.length} 件の案件を読み込みました。ここでは基本情報だけを新 UI から安全に編集できます。
         </p>
       </div>
 
@@ -86,7 +87,7 @@ export default function ProjectListPanel({
                     whiteSpace: "nowrap",
                   }}
                 >
-                  {project.approvalStatus}
+                  {APPROVAL_STATUS_LABELS[project.approvalStatus]}
                 </span>
               </div>
               <p style={{ margin: "10px 0 0", color: "#334155", lineHeight: 1.5 }}>

@@ -1,164 +1,154 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { STORAGE_KEY } from "../../planner/constants";
-import type { PdfTemplateId, Project, WorkCode } from "../../planner/types";
-import { parseStorageJson } from "../../planner/utils/storage";
-import { normalizeDate, normalizeTime } from "../../planner/utils/dateTime";
-import { SHARED_STORAGE_UPDATED_EVENT, pullSharedStorageSnapshot } from "../../sharedStorage";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { PROJECT_SAVE_DEBOUNCE_MS } from "../../planner/constants";
+import { pullSharedStorageSnapshot, pushSharedStorageSnapshot, SHARED_STORAGE_UPDATED_EVENT } from "../../sharedStorage";
+import {
+  loadProjectRecordsFromStorage,
+  persistProjectRecordsToStorage,
+  toggleProjectWorkCode,
+  type EditableProjectTextField,
+  type PlannerWorkspaceProject,
+  type PlannerWorkspaceProjectRecord,
+  updateProjectOutageDateEnd,
+  updateProjectOutageDateStart,
+  updateProjectOutageEnabled,
+  updateProjectOutageTime,
+  updateProjectPdfTemplate,
+  updateProjectTextField,
+  updateProjectWorkDateEnd,
+  updateProjectWorkDateStart,
+} from "./project-storage";
 
-const VALID_WORK_CODES: WorkCode[] = [
-  "KOUATSU_CABLE",
-  "UGS",
-  "PAS",
-  "GROUND_A",
-  "GROUND_B",
-  "GROUND_C",
-];
-
-const VALID_PDF_TEMPLATE_IDS: PdfTemplateId[] = ["standard", "kansai", "night"];
-const VALID_APPROVAL_STATUSES: Project["approvalStatus"][] = ["draft", "submitted", "approved", "rejected"];
-
-export type PlannerWorkspaceProject = {
-  projectId: string;
-  propertyName: string;
-  propertyAddress: string;
-  titleSubject: string;
-  workDateStart: string;
-  workDateEnd: string;
-  outageDateStart: string;
-  outageDateEnd: string;
-  outageTimeStart: string;
-  outageTimeEnd: string;
-  approvalStatus: Project["approvalStatus"];
-  pdfTemplateId: PdfTemplateId;
-  pdfExportCount: number;
-  selectedWorkCodes: WorkCode[];
-  noteSpecial: string;
-};
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function toText(value: unknown): string {
-  return typeof value === "string" ? value : "";
-}
-
-function normalizeWorkCodes(value: unknown): WorkCode[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value.filter((item): item is WorkCode => typeof item === "string" && VALID_WORK_CODES.includes(item as WorkCode));
-}
-
-function normalizePdfTemplateId(value: unknown): PdfTemplateId {
-  return typeof value === "string" && VALID_PDF_TEMPLATE_IDS.includes(value as PdfTemplateId)
-    ? (value as PdfTemplateId)
-    : "standard";
-}
-
-function normalizeApprovalStatus(value: unknown): Project["approvalStatus"] {
-  return typeof value === "string" && VALID_APPROVAL_STATUSES.includes(value as Project["approvalStatus"])
-    ? (value as Project["approvalStatus"])
-    : "draft";
-}
-
-function toProjectPreview(value: unknown, index: number): PlannerWorkspaceProject | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-
-  return {
-    projectId: toText(value.projectId) || `TEMP-${String(index + 1).padStart(3, "0")}`,
-    propertyName: toText(value.propertyName),
-    propertyAddress: toText(value.propertyAddress),
-    titleSubject: toText(value.titleSubject),
-    workDateStart: normalizeDate(toText(value.workDateStart)),
-    workDateEnd: normalizeDate(toText(value.workDateEnd)),
-    outageDateStart: normalizeDate(toText(value.outageDateStart)),
-    outageDateEnd: normalizeDate(toText(value.outageDateEnd)),
-    outageTimeStart: normalizeTime(toText(value.outageTimeStart), ""),
-    outageTimeEnd: normalizeTime(toText(value.outageTimeEnd), ""),
-    approvalStatus: normalizeApprovalStatus(value.approvalStatus),
-    pdfTemplateId: normalizePdfTemplateId(value.pdfTemplateId),
-    pdfExportCount: Number.isFinite(value.pdfExportCount) ? Number(value.pdfExportCount) : 0,
-    selectedWorkCodes: normalizeWorkCodes(value.selectedWorkCodes),
-    noteSpecial: toText(value.noteSpecial),
-  };
-}
-
-function loadProjectsFromStorage(): PlannerWorkspaceProject[] {
-  const parsed = parseStorageJson<unknown>(window.localStorage.getItem(STORAGE_KEY));
-  if (!Array.isArray(parsed)) {
-    return [];
-  }
-  return parsed
-    .map((item, index) => toProjectPreview(item, index))
-    .filter((item): item is PlannerWorkspaceProject => item !== null);
-}
+type SaveState = "idle" | "saving" | "saved" | "error";
 
 export function useProjectWorkspace() {
-  const [projects, setProjects] = useState<PlannerWorkspaceProject[]>([]);
+  const [records, setRecords] = useState<PlannerWorkspaceProjectRecord[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [loading, setLoading] = useState(true);
   const [sharedReady, setSharedReady] = useState(false);
   const [error, setError] = useState("");
+  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [lastSavedAt, setLastSavedAt] = useState("");
+  const saveTimerRef = useRef<number | null>(null);
+  const dirtyRef = useRef(false);
+
+  const reload = async (preserveSelection: boolean): Promise<void> => {
+    setLoading(true);
+    const synced = await pullSharedStorageSnapshot();
+    setSharedReady(synced);
+
+    if (dirtyRef.current) {
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const nextRecords = loadProjectRecordsFromStorage();
+      setRecords(nextRecords);
+      setSelectedProjectId((current) => {
+        if (preserveSelection && current && nextRecords.some((record) => record.project.projectId === current)) {
+          return current;
+        }
+        return nextRecords[0]?.project.projectId ?? "";
+      });
+      setError("");
+      setSaveState("idle");
+    } catch {
+      setError("案件データの読み込みに失敗しました。既存保存形式との互換を確認してください。");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    let disposed = false;
+    void reload(false);
+  }, []);
 
-    const reload = async (): Promise<void> => {
-      setLoading(true);
-      const synced = await pullSharedStorageSnapshot();
-      if (disposed) {
-        return;
-      }
-      setSharedReady(synced);
-      try {
-        const nextProjects = loadProjectsFromStorage();
-        setProjects(nextProjects);
-        setSelectedProjectId((current) => {
-          if (current && nextProjects.some((project) => project.projectId === current)) {
-            return current;
-          }
-          return nextProjects[0]?.projectId ?? "";
-        });
-        setError("");
-      } catch {
-        setError("案件データの読み込みに失敗しました。既存保存形式との互換を確認してください。");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    void reload();
-
+  useEffect(() => {
     const onStorage = (event: StorageEvent): void => {
-      if (event.key && event.key !== STORAGE_KEY) {
+      if (dirtyRef.current) {
         return;
       }
-      void reload();
+      if (event.key && !event.key.startsWith("sekou-")) {
+        return;
+      }
+      void reload(true);
     };
 
     const onSharedUpdated = (): void => {
-      void reload();
+      if (dirtyRef.current) {
+        return;
+      }
+      void reload(true);
     };
 
     window.addEventListener("storage", onStorage);
     window.addEventListener(SHARED_STORAGE_UPDATED_EVENT, onSharedUpdated as EventListener);
 
     return () => {
-      disposed = true;
       window.removeEventListener("storage", onStorage);
       window.removeEventListener(SHARED_STORAGE_UPDATED_EVENT, onSharedUpdated as EventListener);
     };
   }, []);
 
-  const selectedProject = useMemo(
-    () => projects.find((project) => project.projectId === selectedProjectId) ?? null,
-    [projects, selectedProjectId],
+  const projects = useMemo(() => records.map((record) => record.project), [records]);
+  const selectedRecord = useMemo(
+    () => records.find((record) => record.project.projectId === selectedProjectId) ?? null,
+    [records, selectedProjectId],
   );
+  const selectedProject = selectedRecord?.project ?? null;
+
+  const updateSelectedRecord = (updater: (record: PlannerWorkspaceProjectRecord) => PlannerWorkspaceProjectRecord): void => {
+    if (!selectedProjectId) {
+      return;
+    }
+    setRecords((prev) => prev.map((record) => (
+      record.project.projectId === selectedProjectId ? updater(record) : record
+    )));
+    dirtyRef.current = true;
+    setSaveState("saving");
+    setError("");
+  };
+
+  useEffect(() => {
+    if (!dirtyRef.current) {
+      return;
+    }
+
+    if (saveTimerRef.current) {
+      window.clearTimeout(saveTimerRef.current);
+    }
+
+    saveTimerRef.current = window.setTimeout(() => {
+      const savedAt = persistProjectRecordsToStorage(records);
+      if (!savedAt) {
+        setSaveState("error");
+        setError("案件データの保存に失敗しました。ブラウザの容量と保存形式を確認してください。");
+        return;
+      }
+
+      setLastSavedAt(savedAt);
+      setSaveState("saved");
+      dirtyRef.current = false;
+      void pushSharedStorageSnapshot().then((ok) => {
+        if (ok) {
+          setSharedReady(true);
+        }
+      });
+    }, PROJECT_SAVE_DEBOUNCE_MS);
+
+    return () => {
+      if (saveTimerRef.current) {
+        window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+    };
+  }, [records]);
+
+  const updateTextField = (field: EditableProjectTextField, value: string): void => {
+    updateSelectedRecord((record) => updateProjectTextField(record, field, value));
+  };
 
   return {
     projects,
@@ -168,5 +158,38 @@ export function useProjectWorkspace() {
     loading,
     sharedReady,
     error,
+    saveState,
+    lastSavedAt,
+    updateTextField,
+    updatePdfTemplate: (value: string) => updateSelectedRecord((record) => updateProjectPdfTemplate(record, value)),
+    updateOutageEnabled: (checked: boolean) => updateSelectedRecord((record) => updateProjectOutageEnabled(record, checked)),
+    toggleWorkCode: (workCode: Parameters<typeof toggleProjectWorkCode>[1]) =>
+      updateSelectedRecord((record) => toggleProjectWorkCode(record, workCode)),
+    updateWorkDateStart: (value: string) => updateSelectedRecord((record) => updateProjectWorkDateStart(record, value)),
+    updateWorkDateEnd: (value: string) => updateSelectedRecord((record) => updateProjectWorkDateEnd(record, value)),
+    updateOutageDateStart: (value: string) => updateSelectedRecord((record) => updateProjectOutageDateStart(record, value)),
+    updateOutageDateEnd: (value: string) => updateSelectedRecord((record) => updateProjectOutageDateEnd(record, value)),
+    updateOutageTimeStart: (value: string) => updateSelectedRecord((record) => updateProjectOutageTime(record, "outageTimeStart", value)),
+    updateOutageTimeEnd: (value: string) => updateSelectedRecord((record) => updateProjectOutageTime(record, "outageTimeEnd", value)),
+  } satisfies {
+    projects: PlannerWorkspaceProject[];
+    selectedProject: PlannerWorkspaceProject | null;
+    selectedProjectId: string;
+    setSelectedProjectId: (projectId: string) => void;
+    loading: boolean;
+    sharedReady: boolean;
+    error: string;
+    saveState: SaveState;
+    lastSavedAt: string;
+    updateTextField: (field: EditableProjectTextField, value: string) => void;
+    updatePdfTemplate: (value: string) => void;
+    updateOutageEnabled: (checked: boolean) => void;
+    toggleWorkCode: (workCode: Parameters<typeof toggleProjectWorkCode>[1]) => void;
+    updateWorkDateStart: (value: string) => void;
+    updateWorkDateEnd: (value: string) => void;
+    updateOutageDateStart: (value: string) => void;
+    updateOutageDateEnd: (value: string) => void;
+    updateOutageTimeStart: (value: string) => void;
+    updateOutageTimeEnd: (value: string) => void;
   };
 }

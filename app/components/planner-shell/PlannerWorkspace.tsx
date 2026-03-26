@@ -2,6 +2,7 @@
 
 import { APPROVAL_STATUS_LABELS, PDF_TEMPLATE_PRESET_MAP, WORK_MASTER } from "../planner/constants";
 import { formatDateRange, formatDateTimeRange } from "../planner/utils/dateTime";
+import ProjectBasicsForm from "../features/project-core/ProjectBasicsForm";
 import ProjectListPanel from "../features/project-core/ProjectListPanel";
 import { useProjectWorkspace } from "../features/project-core/useProjectWorkspace";
 
@@ -31,6 +32,18 @@ export default function PlannerWorkspace() {
     loading,
     sharedReady,
     error,
+    saveState,
+    lastSavedAt,
+    updateTextField,
+    updatePdfTemplate,
+    updateOutageEnabled,
+    toggleWorkCode,
+    updateWorkDateStart,
+    updateWorkDateEnd,
+    updateOutageDateStart,
+    updateOutageDateEnd,
+    updateOutageTimeStart,
+    updateOutageTimeEnd,
   } = useProjectWorkspace();
 
   const selectedWorkLabels = selectedProject
@@ -69,20 +82,20 @@ export default function PlannerWorkspace() {
             Planner Workspace Preview
           </p>
           <h1 style={{ margin: 0, fontSize: "clamp(1.8rem, 4vw, 2.6rem)", lineHeight: 1.15 }}>
-            既存 `/editor` を壊さずに、新しい骨組みへ移すための read-only preview
+            既存 `/editor` を壊さずに、新しい骨組みへ移すための安全な移行ワークスペース
           </h1>
           <p style={{ margin: 0, maxWidth: "760px", lineHeight: 1.7, color: "#d6e3f5" }}>
-            ここでは保存済み案件を安全に読み込み、新しい UI 構造で表示します。書き込みはまだ行わないので、分割初期段階の事故を減らせます。
+            ここでは保存済み案件を安全に読み込み、新しい UI 構造で表示し、基本情報だけを既存保存契約のまま編集できます。分割初期段階の事故を減らしながら、移行先の本体を育てていくための入口です。
           </p>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
             <span style={{ borderRadius: "999px", background: "rgba(147, 197, 253, 0.16)", padding: "8px 12px", fontSize: "0.85rem" }}>
               既存 `/editor` は現役のまま
             </span>
             <span style={{ borderRadius: "999px", background: "rgba(147, 197, 253, 0.16)", padding: "8px 12px", fontSize: "0.85rem" }}>
-              localStorage を read-only で確認
+              indexed storage / legacy storage 両対応
             </span>
             <span style={{ borderRadius: "999px", background: "rgba(147, 197, 253, 0.16)", padding: "8px 12px", fontSize: "0.85rem" }}>
-              次段階で編集と保存を移植
+              基本情報だけ新 UI から編集可能
             </span>
           </div>
         </section>
@@ -123,15 +136,51 @@ export default function PlannerWorkspace() {
                   {selectedProject?.propertyName || selectedProject?.titleSubject || (loading ? "読み込み中..." : "案件を選択してください")}
                 </h2>
               </div>
-              {selectedProject ? (
-                <span style={{ borderRadius: "999px", background: "#e2e8f0", color: "#1e293b", padding: "8px 12px", fontWeight: 700 }}>
-                  {APPROVAL_STATUS_LABELS[selectedProject.approvalStatus]}
+              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                {selectedProject ? (
+                  <span style={{ borderRadius: "999px", background: "#e2e8f0", color: "#1e293b", padding: "8px 12px", fontWeight: 700 }}>
+                    {APPROVAL_STATUS_LABELS[selectedProject.approvalStatus]}
+                  </span>
+                ) : null}
+                <span
+                  style={{
+                    borderRadius: "999px",
+                    background: saveState === "error" ? "#fee2e2" : "#e0f2fe",
+                    color: saveState === "error" ? "#991b1b" : "#0f172a",
+                    padding: "8px 12px",
+                    fontWeight: 700,
+                    fontSize: "0.82rem",
+                  }}
+                >
+                  {saveState === "saving"
+                    ? "保存中..."
+                    : saveState === "saved"
+                      ? `保存済み${lastSavedAt ? ` ${lastSavedAt}` : ""}`
+                      : saveState === "error"
+                        ? "保存エラー"
+                        : "編集待機中"}
                 </span>
-              ) : null}
+              </div>
             </div>
 
             {selectedProject ? (
               <>
+                <ProjectBasicsForm
+                  project={selectedProject}
+                  saveState={saveState}
+                  lastSavedAt={lastSavedAt}
+                  onTextChange={updateTextField}
+                  onPdfTemplateChange={updatePdfTemplate}
+                  onWorkDateStartChange={updateWorkDateStart}
+                  onWorkDateEndChange={updateWorkDateEnd}
+                  onOutageDateStartChange={updateOutageDateStart}
+                  onOutageDateEndChange={updateOutageDateEnd}
+                  onOutageTimeStartChange={updateOutageTimeStart}
+                  onOutageTimeEndChange={updateOutageTimeEnd}
+                  onOutageEnabledChange={updateOutageEnabled}
+                  onToggleWorkCode={toggleWorkCode}
+                />
+
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px" }}>
                   <Field label="案件ID" value={selectedProject.projectId} />
                   <Field label="件名" value={selectedProject.titleSubject} />
@@ -169,6 +218,9 @@ export default function PlannerWorkspace() {
                     <p style={{ margin: "10px 0 0", lineHeight: 1.7, color: "#334155" }}>
                       特記事項: {selectedProject.noteSpecial || "未入力"}
                     </p>
+                    <p style={{ margin: "10px 0 0", lineHeight: 1.7, color: "#334155" }}>
+                      表紙宛名: {selectedProject.coverRecipientSuffix || "未入力"}
+                    </p>
                   </section>
                 </div>
               </>
@@ -176,7 +228,7 @@ export default function PlannerWorkspace() {
               <section style={{ borderRadius: "18px", background: "#ffffff", border: "1px solid #d7dee6", padding: "24px", color: "#5f6f82", lineHeight: 1.7 }}>
                 {loading
                   ? "案件データを読み込んでいます..."
-                  : "左側の案件一覧から選択すると、基本情報の read-only preview を確認できます。"}
+                  : "左側の案件一覧から選択すると、基本情報の編集と保存状態をこの新ワークスペースで確認できます。"}
               </section>
             )}
           </section>
