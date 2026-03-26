@@ -51,30 +51,49 @@ function resolveDiffBase() {
   return "";
 }
 
-function listChangedFiles(baseRef) {
-  if (!baseRef) {
-    return runGit(["diff", "--name-only"]).split("\n").map((line) => line.trim()).filter(Boolean);
+function listChangedEntries(baseRef) {
+  const args = ["diff", "--name-status", "--find-renames"];
+  if (baseRef) {
+    args.push(`${baseRef}..HEAD`);
   }
-  return runGit(["diff", "--name-only", `${baseRef}..HEAD`]).split("\n").map((line) => line.trim()).filter(Boolean);
+
+  return runGit(args)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [status, ...pathParts] = line.split("\t");
+      const file = pathParts[pathParts.length - 1]?.trim() ?? "";
+      return { status, file };
+    })
+    .filter((entry) => entry.file);
 }
 
 const baseRef = resolveDiffBase();
-const changedFiles = listChangedFiles(baseRef);
-const blockedFiles = changedFiles.filter((file) => BLOCKED_PREFIXES.some((prefix) => file.startsWith(prefix)));
+const changedEntries = listChangedEntries(baseRef);
+const blockedEntries = changedEntries.filter(({ file }) =>
+  BLOCKED_PREFIXES.some((prefix) => file.startsWith(prefix)),
+);
+const blockedNonDeletionEntries = blockedEntries.filter(({ status }) => !status.startsWith("D"));
 
-if (blockedFiles.length > 0 && process.env.ALLOW_CROSS_PROJECT_CHANGES !== "1") {
+if (blockedNonDeletionEntries.length > 0 && process.env.ALLOW_CROSS_PROJECT_CHANGES !== "1") {
   console.error("Repository boundary check failed.");
   console.error("This branch includes changes from a sibling project that must not be deployed with sekou-manual-editor.");
+  console.error("Deleting a blocked sibling directory is allowed, but adding or editing files there is not.");
   console.error("Blocked files:");
-  for (const file of blockedFiles) {
-    console.error(`- ${file}`);
+  for (const { status, file } of blockedNonDeletionEntries) {
+    console.error(`- [${status}] ${file}`);
   }
   console.error("If this cross-project change is truly intentional, rerun with ALLOW_CROSS_PROJECT_CHANGES=1.");
   process.exit(1);
 }
 
-if (blockedFiles.length > 0) {
+if (blockedNonDeletionEntries.length > 0) {
   console.log("Repository boundary check bypassed via ALLOW_CROSS_PROJECT_CHANGES=1.");
+} else if (blockedEntries.length > 0) {
+  console.log(
+    `Repository boundary check passed.${baseRef ? ` Diff base: ${baseRef}` : ""} Allowed deletions: ${blockedEntries.length}`,
+  );
 } else {
   console.log(`Repository boundary check passed.${baseRef ? ` Diff base: ${baseRef}` : ""}`);
 }

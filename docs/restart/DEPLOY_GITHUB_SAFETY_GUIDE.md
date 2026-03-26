@@ -106,6 +106,11 @@
 11. `/tracking` のログイン管理画面が開く
 12. JSON エクスポート/インポート契約を壊していない
 
+## Repository Boundary Check の扱い
+- `safety:scope` は別案件ディレクトリの追加・編集を失敗させる
+- 既存の別案件ディレクトリを repo から削除する cleanup は許可する
+- つまり、施工計画書ツールを単独 repo に近づける方向の整理は安全側として通せる
+
 ## 分割中の推奨 PR 粒度
 - PR 1: `PlannerWorkspace` 骨組み
 - PR 2: 案件一覧

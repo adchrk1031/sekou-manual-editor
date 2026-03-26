@@ -140,6 +140,7 @@ app/components/features/notice/
 - public repo 側では branch protection と required check `safety-full` を前提に運用する
 - ローカルでも pre-push hook と `npm run safety:full` で二重に止める
 - `safety:scope` により別案件ディレクトリ混入を止める
+  - 既存の別案件ディレクトリを削除する cleanup は許可し、追加や編集は止める
 - PR には必ず変更範囲とリスクを明記する
 - デプロイ前に最低限次を確認する
   - `npm run safety:full`

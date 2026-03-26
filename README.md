@@ -99,6 +99,7 @@ npm run dev
   - feature branch で作業する
   - push 前に `npm run safety:full` を通す
   - PR 経由で `safety-full` check を通してから反映する
+  - `safety:scope` は別案件ディレクトリの追加・編集を止め、削除 cleanup だけは許可する
 
 ## ローカル push ガード
 - `.githooks/pre-push`
