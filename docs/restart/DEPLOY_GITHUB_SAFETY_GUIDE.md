@@ -10,7 +10,8 @@
   - `.github/workflows/pr-build.yml`
   - `.github/workflows/vercel-production.yml`
 - 現在の挙動:
-  - `pull_request -> main` で PR build check が走る
+  - feature branch への `push` で safety gate が走る
+  - `pull_request -> main` で safety gate が走る
   - `main` への `push` で Vercel Production deploy が走る
   - `workflow_dispatch` でも手動実行可能
 
@@ -29,13 +30,17 @@
   - top-level `AGENTS.md`
   - `CODEOWNERS`
   - PR template
-  - PR build workflow
+  - push / PR safety workflow
   - `npm run safety:check`
+  - `npm run safety:check:deep`
+  - `npm run smoke:routes` による route smoke test
+  - `npm run safety:full`
+  - local pre-push hook
   - production deploy workflow
   - restart guide / split map / implementation brief
 - まだ GitHub 管理画面で必要:
   - branch protection を `main` に設定
-  - PR build workflow を required check に設定
+  - `safety-full` を required check に設定
   - 直接 push 制限を有効化
 
 ## PR で最低限見るべき項目
@@ -76,15 +81,16 @@
 最低限、次を実施してから `main` へマージします。
 
 1. `npm run build`
-2. ログイン画面が開く
-3. `/menu` へ遷移できる
-4. `/editor` が開く
-5. 既存案件を読める
-6. 1項目編集して保存できる
-7. 再読込で値が残る
-8. 日付がズレない
-9. `/tracking` のログイン管理画面が開く
-10. JSON エクスポート/インポート契約を壊していない
+2. `npm run smoke:routes`
+3. ログイン画面が開く
+4. `/menu` へ遷移できる
+5. `/editor` が開く
+6. 既存案件を読める
+7. 1項目編集して保存できる
+8. 再読込で値が残る
+9. 日付がズレない
+10. `/tracking` のログイン管理画面が開く
+11. JSON エクスポート/インポート契約を壊していない
 
 ## 分割中の推奨 PR 粒度
 - PR 1: `PlannerWorkspace` 骨組み
@@ -104,6 +110,5 @@
 - implementation briefs
 
 ## 将来追加したいもの
-- smoke test workflow
 - PR ごとの preview チェック手順
 - route ごとの簡易受け入れテスト

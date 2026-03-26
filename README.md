@@ -86,10 +86,24 @@ npm run dev
   - `.github/workflows/pr-build.yml`
 - safety check script:
   - `npm run safety:check`
+- deep safety check:
+  - `npm run safety:check:deep`
+- route smoke test:
+  - `npm run smoke:routes`
+- full local safety gate:
+  - `npm run safety:full`
 - 推奨運用:
   - `main` へ直接 push しない
   - feature branch で作業する
-  - PR 経由で `npm run safety:check` と `npm run build` を通してから反映する
+  - push 前に `npm run safety:full` を通す
+  - PR 経由で `safety-full` check を通してから反映する
+
+## ローカル push ガード
+- `.githooks/pre-push`
+  - `npm run safety:full` を push 前に自動実行
+- 有効化コマンド:
+  - `npm run hooks:install`
+- この環境では local git hook も使って二重で事故を止める
 
 ## 事故を減らすための重要ルール
 - 業務日付は `YYYY-MM-DD` の文字列で保持する
@@ -110,11 +124,13 @@ npm run dev
   - PR template
   - PR build workflow
   - safety check script
+  - deep safety check script
+  - route smoke test
+  - local pre-push hook
   - 本番 deploy workflow
 - まだ手動対応が必要なもの:
   - GitHub branch protection の有効化
   - PR build を required check に設定
-  - 画面の smoke test 自動化
   - preview 環境での受け入れチェック
 
 ## 説明会3分デモ手順

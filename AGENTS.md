@@ -132,12 +132,14 @@ app/components/features/notice/
 
 ## 9) GitHub And Deploy Rules
 - GitHub の `main` への push は本番 Vercel デプロイを発火する
-- `pull_request -> main` では PR build workflow を通す
+- feature branch への push と `pull_request -> main` では safety gate workflow を通す
 - そのため原則として `main` へ直接 push しない
 - 作業は feature branch で行い、PR 経由で反映する
+- branch protection と required check を前提に運用する
+- ローカルでも pre-push hook と `npm run safety:full` で二重に止める
 - PR には必ず変更範囲とリスクを明記する
 - デプロイ前に最低限次を確認する
-  - `npm run build`
+  - `npm run safety:full`
   - ログイン画面表示
   - `/menu` 遷移
   - `/editor` 読込

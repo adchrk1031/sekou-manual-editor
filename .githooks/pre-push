@@ -1,0 +1,5 @@
+#!/bin/zsh
+set -euo pipefail
+
+echo "Running full safety gate before push..."
+npm run safety:full

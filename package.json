@@ -6,6 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "safety:check": "node scripts/safety/verify-repo-safety.mjs",
+    "safety:check:deep": "node scripts/safety/verify-deep-safety.mjs",
+    "smoke:routes": "node scripts/safety/smoke-routes.mjs",
+    "safety:full": "npm run safety:check && npm run safety:check:deep && npm run build && npm run smoke:routes",
+    "hooks:install": "git config core.hooksPath .githooks",
     "start": "next start",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev"

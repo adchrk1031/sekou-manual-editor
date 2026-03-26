@@ -20,3 +20,7 @@ dist/
 *.zip
 *.tar
 backups/
+artifacts/
+**/__pycache__/
+*.pyc
+scripts/safety/ev_extract_candidates.py

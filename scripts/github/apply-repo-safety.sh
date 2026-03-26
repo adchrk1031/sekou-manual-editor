@@ -14,7 +14,7 @@ gh api \
   -H "Accept: application/vnd.github+json" \
   "/repos/${REPO_OWNER}/${REPO_NAME}/branches/${BRANCH}/protection" \
   -f required_status_checks.strict=true \
-  -F required_status_checks.contexts[]="build" \
+  -F required_status_checks.contexts[]="safety-full" \
   -f enforce_admins=true \
   -f required_pull_request_reviews.dismiss_stale_reviews=true \
   -f required_pull_request_reviews.require_code_owner_reviews=false \
