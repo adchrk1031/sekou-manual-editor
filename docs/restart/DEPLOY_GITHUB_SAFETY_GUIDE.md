@@ -39,14 +39,17 @@
   - local pre-push hook
   - production deploy workflow
   - restart guide / split map / implementation brief
-- まだ GitHub 管理画面で必要:
-  - branch protection を `main` に設定
-  - `safety-full` を required check に設定
-  - 直接 push 制限を有効化
-- GitHub プラン制約:
-  - 現在の private repo では branch protection API / rulesets API が 403 になる
-  - そのため GitHub 上での強制保護を有効にするには GitHub Pro 以上へ上げるか、repo を public 化する必要がある
-  - 現時点では local hook + CI + deploy 前 safety gate で事故を減らしている
+- GitHub 側ですでに有効:
+  - branch protection を `main` に設定済み
+  - required check `safety-full`
+  - 直接 push 制限
+  - conversation resolution
+  - linear history
+  - force push / deletion の禁止
+  - merge 後 branch 自動削除
+- まだ手動で継続確認が必要:
+  - preview 環境での受け入れチェック
+  - 実運用データでの smoke の定期見直し
 
 ## PR で最低限見るべき項目
 
@@ -58,10 +61,10 @@
 - `/tracking`
 - `/notice`
 - 別案件ディレクトリ差分が含まれていないか
-  - `meter-ocr-ledger-tool/`
   - `slack-mention-todo-tool/`
   - `rezil-ai-unified-demo/`
   - `rezil-ai-division-brief/`
+  - `meter-ocr-ledger-tool/` を再導入していないか
 
 ### 2. 保存互換
 - localStorage key を変えていないか

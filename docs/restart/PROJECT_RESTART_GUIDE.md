@@ -5,10 +5,10 @@
 
 ## 現状サマリー
 - 認証、メニュー、編集、CSV、ログイン管理、停電案内文の導線はすでにある
-- 現行の主実装は [PlannerApp.tsx](/Users/adachih/Documents/New%20project/app/components/PlannerApp.tsx) に集中している
+- 現行の主実装は [PlannerApp.tsx](../../app/components/PlannerApp.tsx) に集中している
   - 約 10,293 行
 - グローバル CSS も巨大化している
-  - [app/globals.css](/Users/adachih/Documents/New%20project/app/globals.css)
+  - [app/globals.css](../../app/globals.css)
 - localStorage を中心に運用しつつ、共有同期 API と Prisma API 群が同居している
 - `normalizeProject()` に互換維持ロジックが多く集まっている
 
@@ -99,16 +99,16 @@
 - PDF テンプレート ID を変えない
 
 ## 参照元として使うべきファイル
-- [app/components/PlannerApp.tsx](/Users/adachih/Documents/New%20project/app/components/PlannerApp.tsx)
-- [app/components/planner/types.ts](/Users/adachih/Documents/New%20project/app/components/planner/types.ts)
-- [app/components/planner/constants.ts](/Users/adachih/Documents/New%20project/app/components/planner/constants.ts)
-- [app/components/auth.ts](/Users/adachih/Documents/New%20project/app/components/auth.ts)
-- [app/components/sharedStorage.ts](/Users/adachih/Documents/New%20project/app/components/sharedStorage.ts)
-- [app/components/planner/utils/storage.ts](/Users/adachih/Documents/New%20project/app/components/planner/utils/storage.ts)
-- [docs/date-field-inventory.md](/Users/adachih/Documents/New%20project/docs/date-field-inventory.md)
-- [docs/date-layer-contract.md](/Users/adachih/Documents/New%20project/docs/date-layer-contract.md)
-- [docs/date-validation-spec.md](/Users/adachih/Documents/New%20project/docs/date-validation-spec.md)
-- [docs/layout-annotation-architecture.md](/Users/adachih/Documents/New%20project/docs/layout-annotation-architecture.md)
+- [app/components/PlannerApp.tsx](../../app/components/PlannerApp.tsx)
+- [app/components/planner/types.ts](../../app/components/planner/types.ts)
+- [app/components/planner/constants.ts](../../app/components/planner/constants.ts)
+- [app/components/auth.ts](../../app/components/auth.ts)
+- [app/components/sharedStorage.ts](../../app/components/sharedStorage.ts)
+- [app/components/planner/utils/storage.ts](../../app/components/planner/utils/storage.ts)
+- [docs/date-field-inventory.md](../date-field-inventory.md)
+- [docs/date-layer-contract.md](../date-layer-contract.md)
+- [docs/date-validation-spec.md](../date-validation-spec.md)
+- [docs/layout-annotation-architecture.md](../layout-annotation-architecture.md)
 
 ## 結論
 この案件は「新規でゼロから作り直す」より、「旧実装を仕様書として固定し、新しい受け皿へ責務ごとに移す」のが正解です。
@@ -155,7 +155,7 @@
 
 ## 実装の順番
 1. 新ブランチを切る
-2. [AGENTS.md](/Users/adachih/Documents/New%20project/AGENTS.md) とこのガイドを読む
+2. [AGENTS.md](../../AGENTS.md) とこのガイドを読む
 3. 最初の実装メモを切る
 4. `PlannerWorkspace` の骨組みを作る
 5. 案件一覧だけを移す
@@ -188,4 +188,4 @@
 - CSS 全面整理を先に始める
 
 ## 次にやるべき具体タスク
-最初の一手は `PlannerWorkspace` 骨組みです。以後は [PLANNER_SPLIT_MAP.md](/Users/adachih/Documents/New%20project/docs/restart/PLANNER_SPLIT_MAP.md) と [IMPLEMENTATION_BRIEF_01_PLANNER_WORKSPACE.md](/Users/adachih/Documents/New%20project/docs/restart/IMPLEMENTATION_BRIEF_01_PLANNER_WORKSPACE.md) に従って進めます。
+最初の一手は `PlannerWorkspace` 骨組みです。以後は [PLANNER_SPLIT_MAP.md](PLANNER_SPLIT_MAP.md) と [IMPLEMENTATION_BRIEF_01_PLANNER_WORKSPACE.md](IMPLEMENTATION_BRIEF_01_PLANNER_WORKSPACE.md) に従って進めます。

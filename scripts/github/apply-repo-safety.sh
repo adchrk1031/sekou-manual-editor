@@ -31,9 +31,9 @@ if protection_output=$(
 ); then
   echo "Branch protection applied."
 else
-  if [[ "${protection_output}" == *"Upgrade to GitHub Pro or make this repository public"* ]]; then
-    echo "Branch protection is unavailable on the current GitHub plan for this private repository."
-    echo "To enforce required checks on GitHub itself, upgrade to GitHub Pro or make the repository public."
+  if [[ "${protection_output}" == *"Resource not accessible by integration"* || "${protection_output}" == *"Must have admin rights to Repository."* ]]; then
+    echo "Branch protection could not be applied with the current GitHub token or repository permissions."
+    echo "Use a token with admin access to ${REPO_OWNER}/${REPO_NAME} and rerun this script."
   else
     echo "${protection_output}"
     exit 1

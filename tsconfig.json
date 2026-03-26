@@ -37,7 +37,6 @@
     "node_modules",
     "rezil-ai-unified-demo/**",
     "rezil-ai-division-brief/**",
-    "meter-ocr-ledger-tool/**",
     "slack-mention-todo-tool/**"
   ]
 }

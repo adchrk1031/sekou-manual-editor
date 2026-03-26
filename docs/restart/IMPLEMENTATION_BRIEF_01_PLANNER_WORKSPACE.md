@@ -4,7 +4,7 @@
 - `PlannerWorkspace` 骨組み + Project Core 入口分離
 
 ## Why
-- 現行の [PlannerApp.tsx](/Users/adachih/Documents/New%20project/app/components/PlannerApp.tsx) は大きすぎて再開しにくい
+- 現行の [PlannerApp.tsx](../../app/components/PlannerApp.tsx) は大きすぎて再開しにくい
 - まず画面シェルと案件一覧の受け皿を作らないと、以後の分割で毎回同じ場所に戻ってしまう
 - 注釈エディタより先に、通常編集の骨格を安定させる必要がある
 
@@ -23,17 +23,17 @@
 
 ## Reference
 - 参照元ファイル:
-  - [PlannerApp.tsx](/Users/adachih/Documents/New%20project/app/components/PlannerApp.tsx)
-  - [types.ts](/Users/adachih/Documents/New%20project/app/components/planner/types.ts)
-  - [constants.ts](/Users/adachih/Documents/New%20project/app/components/planner/constants.ts)
-  - [storage.ts](/Users/adachih/Documents/New%20project/app/components/planner/utils/storage.ts)
+  - [PlannerApp.tsx](../../app/components/PlannerApp.tsx)
+  - [types.ts](../../app/components/planner/types.ts)
+  - [constants.ts](../../app/components/planner/constants.ts)
+  - [storage.ts](../../app/components/planner/utils/storage.ts)
 - 参照元画面:
   - `/editor`
   - `/editor-next`（今回追加する preview）
 - 関連ドキュメント:
-  - [PROJECT_RESTART_GUIDE.md](/Users/adachih/Documents/New%20project/docs/restart/PROJECT_RESTART_GUIDE.md)
-  - [PLANNER_SPLIT_MAP.md](/Users/adachih/Documents/New%20project/docs/restart/PLANNER_SPLIT_MAP.md)
-  - [date-layer-contract.md](/Users/adachih/Documents/New%20project/docs/date-layer-contract.md)
+  - [PROJECT_RESTART_GUIDE.md](PROJECT_RESTART_GUIDE.md)
+  - [PLANNER_SPLIT_MAP.md](PLANNER_SPLIT_MAP.md)
+  - [date-layer-contract.md](../date-layer-contract.md)
 
 ## Files To Touch
 - 追加:

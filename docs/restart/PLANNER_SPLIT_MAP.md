@@ -1,7 +1,7 @@
 # PlannerApp 分割マップ
 
 ## 目的
-[PlannerApp.tsx](/Users/adachih/Documents/New%20project/app/components/PlannerApp.tsx) の責務を、事故が少ない順番で新構成へ移すための案件専用マップです。
+[PlannerApp.tsx](../../app/components/PlannerApp.tsx) の責務を、事故が少ない順番で新構成へ移すための案件専用マップです。
 
 ## 現在の実態
 - `PlannerApp` は `mode="editor" | "csv" | "tracking" | "notice"` を切り替える多機能モノリス
@@ -186,11 +186,11 @@ app/components/features/layout-editor/
 10. `LayoutEditorDialog.tsx`
 
 ## 取り出す時に必ず見る参照元
-- [app/components/PlannerApp.tsx](/Users/adachih/Documents/New%20project/app/components/PlannerApp.tsx)
-- [app/components/planner/types.ts](/Users/adachih/Documents/New%20project/app/components/planner/types.ts)
-- [app/components/planner/constants.ts](/Users/adachih/Documents/New%20project/app/components/planner/constants.ts)
-- [app/components/planner/utils/storage.ts](/Users/adachih/Documents/New%20project/app/components/planner/utils/storage.ts)
-- [docs/layout-annotation-architecture.md](/Users/adachih/Documents/New%20project/docs/layout-annotation-architecture.md)
+- [app/components/PlannerApp.tsx](../../app/components/PlannerApp.tsx)
+- [app/components/planner/types.ts](../../app/components/planner/types.ts)
+- [app/components/planner/constants.ts](../../app/components/planner/constants.ts)
+- [app/components/planner/utils/storage.ts](../../app/components/planner/utils/storage.ts)
+- [docs/layout-annotation-architecture.md](../layout-annotation-architecture.md)
 
 ## 完了の目安
 - `/editor` が新しい `PlannerWorkspace` を使って動く

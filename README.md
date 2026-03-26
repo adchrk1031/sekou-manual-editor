@@ -106,7 +106,7 @@ npm run dev
 - 有効化コマンド:
   - `npm run hooks:install`
 - この環境では local git hook も使って二重で事故を止める
-- `meter-ocr-ledger-tool` など別案件ディレクトリの差分が branch に混ざると `safety:scope` で止まる
+- 別案件ディレクトリの差分が branch に混ざると `safety:scope` で止まる
 
 ## 事故を減らすための重要ルール
 - 業務日付は `YYYY-MM-DD` の文字列で保持する
@@ -133,13 +133,16 @@ npm run dev
   - route smoke test
   - local pre-push hook
   - 本番 deploy workflow
+- GitHub 側で有効なもの:
+  - `main` の branch protection
+  - required check `safety-full`
+  - conversation resolution
+  - linear history
+  - force push / deletion の禁止
+  - merge 後 branch 自動削除
 - まだ手動対応が必要なもの:
-  - GitHub branch protection の有効化
-  - `safety-full` を required check に設定
   - preview 環境での受け入れチェック
-- GitHub 側の制約:
-  - 現在の private repo + GitHub プランでは branch protection / rulesets API が 403 になる
-  - 本当に GitHub 上で強制したい場合は GitHub Pro 以上へ上げるか、repo を public 化する必要がある
+  - 実運用データでの smoke の定期見直し
 
 ## 説明会3分デモ手順
 1. ログイン（管理者アカウント）

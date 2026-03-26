@@ -27,13 +27,13 @@
   - `csv`
   - `tracking`
   - `notice`
-- 認証は [app/components/auth.ts](/Users/adachih/Documents/New%20project/app/components/auth.ts)
-- セッション保護は [app/components/ProtectedWorkspace.tsx](/Users/adachih/Documents/New%20project/app/components/ProtectedWorkspace.tsx)
-- 共有保存は [app/components/sharedStorage.ts](/Users/adachih/Documents/New%20project/app/components/sharedStorage.ts) と `/api/manual-editor/state`
-- メインの業務モノリスは [app/components/PlannerApp.tsx](/Users/adachih/Documents/New%20project/app/components/PlannerApp.tsx)
-- 主要な型と保存契約は [app/components/planner/types.ts](/Users/adachih/Documents/New%20project/app/components/planner/types.ts) と [app/components/planner/constants.ts](/Users/adachih/Documents/New%20project/app/components/planner/constants.ts)
+- 認証は [app/components/auth.ts](app/components/auth.ts)
+- セッション保護は [app/components/ProtectedWorkspace.tsx](app/components/ProtectedWorkspace.tsx)
+- 共有保存は [app/components/sharedStorage.ts](app/components/sharedStorage.ts) と `/api/manual-editor/state`
+- メインの業務モノリスは [app/components/PlannerApp.tsx](app/components/PlannerApp.tsx)
+- 主要な型と保存契約は [app/components/planner/types.ts](app/components/planner/types.ts) と [app/components/planner/constants.ts](app/components/planner/constants.ts)
 - localStorage は `lz-string` 圧縮を使う
-  - 実装: [app/components/planner/utils/storage.ts](/Users/adachih/Documents/New%20project/app/components/planner/utils/storage.ts)
+  - 実装: [app/components/planner/utils/storage.ts](app/components/planner/utils/storage.ts)
 
 ## 3) Non-Negotiables
 - 業務日付は常に `YYYY-MM-DD` の文字列で扱う
@@ -77,7 +77,7 @@
 - 停電案内文は `Project` 内の `notice*` フィールド群で保持する
 
 ## 5) Refactor Strategy
-- 旧 [PlannerApp.tsx](/Users/adachih/Documents/New%20project/app/components/PlannerApp.tsx) は参照専用として扱う
+- 旧 [PlannerApp.tsx](app/components/PlannerApp.tsx) は参照専用として扱う
 - 新規実装は旧巨大ファイルへ戻さない
 - 新しい責務は新しいディレクトリへ作る
 - 1回の作業で 1 責務だけ外す
@@ -110,7 +110,7 @@ app/components/features/notice/
 - デザイン調整より、まず互換性と再開しやすさを優先する
 - CSS の全面刷新は最後までやらない
 - 配置図注釈まわりは最後に分離する
-- `meter-ocr-ledger-tool/` など別案件ディレクトリの変更をこの branch に混ぜない
+- 別案件ディレクトリの変更をこの branch に混ぜない
 
 ## 8) Review Guidelines
 - 認証や承認状態を迂回する変更は厳しく見る
@@ -137,7 +137,7 @@ app/components/features/notice/
 - feature branch への push と `pull_request -> main` では safety gate workflow を通す
 - そのため原則として `main` へ直接 push しない
 - 作業は feature branch で行い、PR 経由で反映する
-- branch protection と required check を前提に運用する
+- public repo 側では branch protection と required check `safety-full` を前提に運用する
 - ローカルでも pre-push hook と `npm run safety:full` で二重に止める
 - `safety:scope` により別案件ディレクトリ混入を止める
 - PR には必ず変更範囲とリスクを明記する
@@ -189,12 +189,12 @@ app/components/features/notice/
 - 主要ボタンの状態が揃っている
 
 ## 12) Required References Before Major Edits
-- [app/components/PlannerApp.tsx](/Users/adachih/Documents/New%20project/app/components/PlannerApp.tsx)
-- [app/components/planner/types.ts](/Users/adachih/Documents/New%20project/app/components/planner/types.ts)
-- [app/components/planner/constants.ts](/Users/adachih/Documents/New%20project/app/components/planner/constants.ts)
-- [app/components/planner/utils/storage.ts](/Users/adachih/Documents/New%20project/app/components/planner/utils/storage.ts)
-- [docs/date-field-inventory.md](/Users/adachih/Documents/New%20project/docs/date-field-inventory.md)
-- [docs/date-layer-contract.md](/Users/adachih/Documents/New%20project/docs/date-layer-contract.md)
-- [docs/date-validation-spec.md](/Users/adachih/Documents/New%20project/docs/date-validation-spec.md)
-- [docs/layout-annotation-architecture.md](/Users/adachih/Documents/New%20project/docs/layout-annotation-architecture.md)
-- [docs/restart/DEPLOY_GITHUB_SAFETY_GUIDE.md](/Users/adachih/Documents/New%20project/docs/restart/DEPLOY_GITHUB_SAFETY_GUIDE.md)
+- [app/components/PlannerApp.tsx](app/components/PlannerApp.tsx)
+- [app/components/planner/types.ts](app/components/planner/types.ts)
+- [app/components/planner/constants.ts](app/components/planner/constants.ts)
+- [app/components/planner/utils/storage.ts](app/components/planner/utils/storage.ts)
+- [docs/date-field-inventory.md](docs/date-field-inventory.md)
+- [docs/date-layer-contract.md](docs/date-layer-contract.md)
+- [docs/date-validation-spec.md](docs/date-validation-spec.md)
+- [docs/layout-annotation-architecture.md](docs/layout-annotation-architecture.md)
+- [docs/restart/DEPLOY_GITHUB_SAFETY_GUIDE.md](docs/restart/DEPLOY_GITHUB_SAFETY_GUIDE.md)
