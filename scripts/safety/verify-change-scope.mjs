@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(currentDir, "..", "..");
 
+// Keep removed sibling projects blocked so they cannot be reintroduced into this repo.
 const BLOCKED_PREFIXES = [
   "meter-ocr-ledger-tool/",
   "slack-mention-todo-tool/",

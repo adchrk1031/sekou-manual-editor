@@ -62,9 +62,13 @@
 - `/notice`
 - 別案件ディレクトリ差分が含まれていないか
   - `slack-mention-todo-tool/`
+  - `meter-ocr-ledger-tool/`
   - `rezil-ai-unified-demo/`
   - `rezil-ai-division-brief/`
-  - `meter-ocr-ledger-tool/` を再導入していないか
+- すでに repo から外した別案件を再導入していないか
+  - `meter-ocr-ledger-tool/`
+  - `rezil-ai-unified-demo/`
+  - `rezil-ai-division-brief/`
 
 ### 2. 保存互換
 - localStorage key を変えていないか
@@ -110,6 +114,7 @@
 - `safety:scope` は別案件ディレクトリの追加・編集を失敗させる
 - 既存の別案件ディレクトリを repo から削除する cleanup は許可する
 - つまり、施工計画書ツールを単独 repo に近づける方向の整理は安全側として通せる
+- 削除済みの別案件ディレクトリは `BLOCKED_PREFIXES` で再導入も止める
 
 ## 分割中の推奨 PR 粒度
 - PR 1: `PlannerWorkspace` 骨組み

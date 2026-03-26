@@ -35,8 +35,6 @@
   ],
   "exclude": [
     "node_modules",
-    "rezil-ai-unified-demo/**",
-    "rezil-ai-division-brief/**",
     "slack-mention-todo-tool/**"
   ]
 }
