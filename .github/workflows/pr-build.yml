@@ -24,6 +24,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch main branch ref
+        run: git fetch origin main --depth=1
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -35,4 +40,6 @@ jobs:
         run: npm ci
 
       - name: Run full safety gate
+        env:
+          SAFETY_SCOPE_BASE: ${{ github.event.before || '' }}
         run: npm run safety:full

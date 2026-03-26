@@ -16,6 +16,7 @@ const requiredFiles = [
   "docs/restart/PROJECT_RESTART_GUIDE.md",
   "docs/restart/PLANNER_SPLIT_MAP.md",
   "scripts/safety/verify-deep-safety.mjs",
+  "scripts/safety/verify-change-scope.mjs",
   "scripts/safety/smoke-routes.mjs",
   "docs/templates/SKILL_TEMPLATE/SKILL.md",
 ];
@@ -43,10 +44,13 @@ if (existsSync(packageJsonPath)) {
   if (!packageJson.scripts || packageJson.scripts["safety:check:deep"] !== "node scripts/safety/verify-deep-safety.mjs") {
     errors.push('package.json must define "safety:check:deep": "node scripts/safety/verify-deep-safety.mjs"');
   }
+  if (!packageJson.scripts || packageJson.scripts["safety:scope"] !== "node scripts/safety/verify-change-scope.mjs") {
+    errors.push('package.json must define "safety:scope": "node scripts/safety/verify-change-scope.mjs"');
+  }
   if (!packageJson.scripts || packageJson.scripts["smoke:routes"] !== "node scripts/safety/smoke-routes.mjs") {
     errors.push('package.json must define "smoke:routes": "node scripts/safety/smoke-routes.mjs"');
   }
-  if (!packageJson.scripts || packageJson.scripts["safety:full"] !== "npm run safety:check && npm run safety:check:deep && npm run build && npm run smoke:routes") {
+  if (!packageJson.scripts || packageJson.scripts["safety:full"] !== "npm run safety:check && npm run safety:check:deep && npm run safety:scope && npm run build && npm run smoke:routes") {
     errors.push('package.json must define "safety:full" with the full safety gate command');
   }
 }
@@ -59,6 +63,7 @@ if (existsSync(readmePath)) {
     "PR build workflow",
     "現在の安全対策ステータス",
     "npm run safety:full",
+    "safety:scope",
   ];
   for (const snippet of requiredReadmeSnippets) {
     if (!readme.includes(snippet)) {
@@ -75,6 +80,7 @@ if (existsSync(prWorkflowPath)) {
     "push:",
     "branches-ignore:",
     "npm ci",
+    "fetch-depth: 0",
     "npm run safety:full",
   ];
   for (const snippet of requiredWorkflowSnippets) {
@@ -93,6 +99,7 @@ if (existsSync(deployWorkflowPath)) {
     "- main",
     "npm run safety:check",
     "npm run safety:check:deep",
+    "npm run safety:scope",
     "npm run build",
     "npm run smoke:routes",
     "vercel deploy --prebuilt --prod",

@@ -33,6 +33,7 @@
   - push / PR safety workflow
   - `npm run safety:check`
   - `npm run safety:check:deep`
+  - `npm run safety:scope`
   - `npm run smoke:routes` による route smoke test
   - `npm run safety:full`
   - local pre-push hook
@@ -52,6 +53,11 @@
 - `/csv`
 - `/tracking`
 - `/notice`
+- 別案件ディレクトリ差分が含まれていないか
+  - `meter-ocr-ledger-tool/`
+  - `slack-mention-todo-tool/`
+  - `rezil-ai-unified-demo/`
+  - `rezil-ai-division-brief/`
 
 ### 2. 保存互換
 - localStorage key を変えていないか
@@ -80,17 +86,18 @@
 ## デプロイ前チェック
 最低限、次を実施してから `main` へマージします。
 
-1. `npm run build`
-2. `npm run smoke:routes`
-3. ログイン画面が開く
-4. `/menu` へ遷移できる
-5. `/editor` が開く
-6. 既存案件を読める
-7. 1項目編集して保存できる
-8. 再読込で値が残る
-9. 日付がズレない
-10. `/tracking` のログイン管理画面が開く
-11. JSON エクスポート/インポート契約を壊していない
+1. `npm run safety:scope`
+2. `npm run build`
+3. `npm run smoke:routes`
+4. ログイン画面が開く
+5. `/menu` へ遷移できる
+6. `/editor` が開く
+7. 既存案件を読める
+8. 1項目編集して保存できる
+9. 再読込で値が残る
+10. 日付がズレない
+11. `/tracking` のログイン管理画面が開く
+12. JSON エクスポート/インポート契約を壊していない
 
 ## 分割中の推奨 PR 粒度
 - PR 1: `PlannerWorkspace` 骨組み

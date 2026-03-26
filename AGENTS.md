@@ -110,6 +110,7 @@ app/components/features/notice/
 - デザイン調整より、まず互換性と再開しやすさを優先する
 - CSS の全面刷新は最後までやらない
 - 配置図注釈まわりは最後に分離する
+- `meter-ocr-ledger-tool/` など別案件ディレクトリの変更をこの branch に混ぜない
 
 ## 8) Review Guidelines
 - 認証や承認状態を迂回する変更は厳しく見る
@@ -117,6 +118,7 @@ app/components/features/notice/
 - `normalizeProject()` を通らない保存ロジック追加は要注意
 - 業務日付を `Date` 化する変更は原則 NG
 - `layoutAnnotations` / `layoutAnnotationsV2` の互換を崩す変更は要注意
+- 別案件ディレクトリの差分が PR に含まれていたら高リスクとして止める
 - `/editor` の変更では次を最低限確認する
   - 既存案件読込
   - 保存
@@ -137,6 +139,7 @@ app/components/features/notice/
 - 作業は feature branch で行い、PR 経由で反映する
 - branch protection と required check を前提に運用する
 - ローカルでも pre-push hook と `npm run safety:full` で二重に止める
+- `safety:scope` により別案件ディレクトリ混入を止める
 - PR には必ず変更範囲とリスクを明記する
 - デプロイ前に最低限次を確認する
   - `npm run safety:full`

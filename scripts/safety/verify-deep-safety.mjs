@@ -39,6 +39,7 @@ assertFileIncludes("AGENTS.md", [
 
 assertFileIncludes("README.md", [
   "npm run safety:full",
+  "safety:scope",
   "smoke test",
   "pre-push hook",
 ]);
@@ -47,6 +48,7 @@ assertFileIncludes("docs/restart/DEPLOY_GITHUB_SAFETY_GUIDE.md", [
   "branch protection",
   "required check",
   "safety:full",
+  "safety:scope",
   "smoke test",
 ]);
 
@@ -56,20 +58,30 @@ assertFileIncludes("app/(workspace)/editor-next/page.tsx", [
 ]);
 
 assertFileIncludes(".github/workflows/pr-build.yml", [
+  "fetch-depth: 0",
   "branches-ignore:",
   "npm run safety:full",
   "timeout-minutes:",
 ]);
 
 assertFileIncludes(".github/workflows/vercel-production.yml", [
+  "fetch-depth: 0",
   "npm run safety:check",
   "npm run safety:check:deep",
+  "npm run safety:scope",
   "npm run build",
   "npm run smoke:routes",
 ]);
 
 assertFileIncludes(".githooks/pre-push", [
   "npm run safety:full",
+]);
+
+assertFileIncludes("scripts/safety/verify-change-scope.mjs", [
+  "meter-ocr-ledger-tool/",
+  "slack-mention-todo-tool/",
+  "rezil-ai-unified-demo/",
+  "rezil-ai-division-brief/",
 ]);
 
 assertFileIncludes("scripts/github/apply-repo-safety.sh", [

@@ -88,6 +88,8 @@ npm run dev
   - `npm run safety:check`
 - deep safety check:
   - `npm run safety:check:deep`
+- repository boundary check:
+  - `npm run safety:scope`
 - route smoke test:
   - `npm run smoke:routes`
 - full local safety gate:
@@ -104,6 +106,7 @@ npm run dev
 - 有効化コマンド:
   - `npm run hooks:install`
 - この環境では local git hook も使って二重で事故を止める
+- `meter-ocr-ledger-tool` など別案件ディレクトリの差分が branch に混ざると `safety:scope` で止まる
 
 ## 事故を減らすための重要ルール
 - 業務日付は `YYYY-MM-DD` の文字列で保持する
@@ -113,6 +116,7 @@ npm run dev
 - `normalizeProject()` を通らない保存変更を入れない
 - `layoutAnnotations` / `layoutAnnotationsV2` の互換を壊さない
 - 大きな分割は `1 PR = 1責務` で進める
+- 別案件ディレクトリの変更を同じ branch / PR に混ぜない
 
 ## 現在の安全対策ステータス
 - あるもの:
@@ -125,6 +129,7 @@ npm run dev
   - PR build workflow
   - safety check script
   - deep safety check script
+  - repository boundary check
   - route smoke test
   - local pre-push hook
   - 本番 deploy workflow
