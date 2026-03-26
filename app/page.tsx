@@ -208,10 +208,6 @@ export default function Page() {
         setMessage({ type: "error", text: "このメールアドレスはすでに登録済みです。" });
         return;
       }
-      if (created.error === "reserved_email") {
-        setMessage({ type: "error", text: "このメールアドレスはシステム管理者専用です。管理者としてログインしてください。" });
-        return;
-      }
       setMessage({ type: "error", text: "登録に失敗しました。入力内容を確認して再試行してください。" });
       return;
     }
