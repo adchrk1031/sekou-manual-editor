@@ -148,6 +148,20 @@ import { CsvEditorSection } from "./planner/ui/CsvEditorSection";
 import { TrackingSection } from "./planner/ui/TrackingSection";
 import { PdfCoverAndTocSection } from "./planner/ui/PdfCoverAndTocSection";
 import { PdfWorkOverviewPreview } from "./planner/ui/PdfWorkOverviewPreview";
+import { CollapsiblePageCard, type PageCardStatusTone } from "./planner/ui/CollapsiblePageCard";
+
+type PageCardKey = "pdf1" | "pdf2" | "pdf3" | "pdf4" | "pdf5" | "pdf6" | "pdf7";
+
+const PAGE_CARD_KEYS: PageCardKey[] = ["pdf1", "pdf2", "pdf3", "pdf4", "pdf5", "pdf6", "pdf7"];
+const PAGE_CARD_HASH_TO_KEY: Record<string, PageCardKey> = {
+  "#card-pdf1": "pdf1",
+  "#card-pdf2": "pdf2",
+  "#card-pdf3": "pdf3",
+  "#card-pdf4": "pdf4",
+  "#card-pdf5": "pdf5",
+  "#card-pdf6": "pdf6",
+  "#card-pdf7": "pdf7",
+};
 
 function LayoutAnnotatedImage({
   imageUrl,
@@ -7351,9 +7365,37 @@ useEffect(() => {
       pdf7: { done: pdf7Missing.length === 0, missing: pdf7Missing },
     };
   }, [selectedProject, detailPhotosFilled.length, layoutPhotosFilled.length]);
-  const cardOrder: Array<keyof typeof cardStatus> = ["pdf1", "pdf2", "pdf3", "pdf4", "pdf5", "pdf6", "pdf7"];
-  const incompleteCards = cardOrder.filter((key) => !cardStatus[key].done);
-  const completionRate = Math.round(((cardOrder.length - incompleteCards.length) / cardOrder.length) * 100);
+  const [openPageCards, setOpenPageCards] = useState<Record<PageCardKey, boolean>>({
+    pdf1: true,
+    pdf2: true,
+    pdf3: true,
+    pdf4: true,
+    pdf5: true,
+    pdf6: true,
+    pdf7: true,
+  });
+  const togglePageCard = useCallback((key: PageCardKey) => {
+    setOpenPageCards((current) => ({ ...current, [key]: !current[key] }));
+  }, []);
+  useEffect(() => {
+    const syncPageCardFromHash = () => {
+      const targetKey = PAGE_CARD_HASH_TO_KEY[window.location.hash];
+      if (!targetKey) {
+        return;
+      }
+      setOpenPageCards((current) => (current[targetKey] ? current : { ...current, [targetKey]: true }));
+    };
+
+    syncPageCardFromHash();
+    window.addEventListener("hashchange", syncPageCardFromHash);
+    return () => window.removeEventListener("hashchange", syncPageCardFromHash);
+  }, []);
+
+  const getPageCardStatusLabel = useCallback((done: boolean) => (done ? "完了" : "未完了"), []);
+  const getPageCardStatusTone = useCallback((done: boolean): PageCardStatusTone => (done ? "done" : "todo"), []);
+
+  const incompleteCards = PAGE_CARD_KEYS.filter((key) => !cardStatus[key].done);
+  const completionRate = Math.round(((PAGE_CARD_KEYS.length - incompleteCards.length) / PAGE_CARD_KEYS.length) * 100);
   const enabledPartyKeys = useMemo(
     () => partyEntries.filter((key) => selectedProject.relatedParties[key].enabled),
     [partyEntries, selectedProject.relatedParties],
@@ -8004,16 +8046,30 @@ useEffect(() => {
           onPropertyNameChange={(value) => handleProjectField("propertyName", value)}
           onCoverRecipientSuffixChange={(value) => handleProjectField("coverRecipientSuffix", value)}
           onTitleSubjectChange={(value) => handleProjectField("titleSubject", value)}
+          pdf1Card={{
+            isOpen: openPageCards.pdf1,
+            onToggle: () => togglePageCard("pdf1"),
+            statusLabel: getPageCardStatusLabel(cardStatus.pdf1.done),
+            statusTone: getPageCardStatusTone(cardStatus.pdf1.done),
+          }}
+          pdf2Card={{
+            isOpen: openPageCards.pdf2,
+            onToggle: () => togglePageCard("pdf2"),
+            statusLabel: getPageCardStatusLabel(cardStatus.pdf2.done),
+            statusTone: getPageCardStatusTone(cardStatus.pdf2.done),
+          }}
         />
 
-        <section className="panel page-card" id="card-pdf3">
-          <div className="page-card-head">
-            <p className="page-card-index">PDF 3</p>
-            <div>
-              <h2>工事概要・工程表</h2>
-              <p className="mini">このカードの入力がPDF3ページ（工事概要）に反映されます</p>
-            </div>
-          </div>
+        <CollapsiblePageCard
+          id="card-pdf3"
+          indexLabel="PDF 3"
+          title="工事概要・工程表"
+          description="このカードの入力がPDF3ページ（工事概要）に反映されます"
+          statusLabel={getPageCardStatusLabel(cardStatus.pdf3.done)}
+          statusTone={getPageCardStatusTone(cardStatus.pdf3.done)}
+          isOpen={openPageCards.pdf3}
+          onToggle={() => togglePageCard("pdf3")}
+        >
           <PdfWorkOverviewPreview
             selectedProject={selectedProject}
             dateRangeLabel={dateRangeLabel}
@@ -8307,16 +8363,18 @@ useEffect(() => {
               </tbody>
             </table>
           </div>
-        </section>
+        </CollapsiblePageCard>
 
-        <section className="panel page-card" id="card-pdf4">
-          <div className="page-card-head">
-            <p className="page-card-index">PDF 4</p>
-            <div>
-              <h2>工事詳細説明</h2>
-              <p className="mini">工程表の各行 + 参考写真（PDF4専用）が反映されます</p>
-            </div>
-          </div>
+        <CollapsiblePageCard
+          id="card-pdf4"
+          indexLabel="PDF 4"
+          title="工事詳細説明"
+          description="工程表の各行 + 参考写真（PDF4専用）が反映されます"
+          statusLabel={getPageCardStatusLabel(cardStatus.pdf4.done)}
+          statusTone={getPageCardStatusTone(cardStatus.pdf4.done)}
+          isOpen={openPageCards.pdf4}
+          onToggle={() => togglePageCard("pdf4")}
+        >
           <CardPreview title="PDF4 工事詳細説明">
             <article className="preview-page">
               <h3>2．工事詳細説明</h3>
@@ -8423,16 +8481,18 @@ useEffect(() => {
               ))}
             </div>
           </div>
-        </section>
+        </CollapsiblePageCard>
 
-        <section className="panel page-card" id="card-pdf5">
-          <div className="page-card-head">
-            <p className="page-card-index">PDF 5</p>
-            <div>
-              <h2>ご承認いただきたい事項</h2>
-              <p className="mini">工程表の内容 + 追記メモがPDF5ページに反映されます</p>
-            </div>
-          </div>
+        <CollapsiblePageCard
+          id="card-pdf5"
+          indexLabel="PDF 5"
+          title="ご承認いただきたい事項"
+          description="工程表の内容 + 追記メモがPDF5ページに反映されます"
+          statusLabel={getPageCardStatusLabel(cardStatus.pdf5.done)}
+          statusTone={getPageCardStatusTone(cardStatus.pdf5.done)}
+          isOpen={openPageCards.pdf5}
+          onToggle={() => togglePageCard("pdf5")}
+        >
           <CardPreview title="PDF5 ご承認いただきたい事項">
             <article className="preview-page">
               <h3>3．ご承認いただきたい事項</h3>
@@ -8468,16 +8528,18 @@ useEffect(() => {
             <span>承認事項 追記</span>
             <textarea className="control textarea" value={selectedProject.noteApprovalExtra} onChange={(event) => handleProjectField("noteApprovalExtra", event.target.value)} />
           </label>
-        </section>
+        </CollapsiblePageCard>
 
-        <section className="panel page-card" id="card-pdf6">
-          <div className="page-card-head">
-            <p className="page-card-index">PDF 6</p>
-            <div>
-              <h2>{activePdfTemplate.sectionOrganization}・{activePdfTemplate.sectionEmergency}</h2>
-              <p className="mini">関係各社カードの「反映する」をONにしたものだけPDF6ページへ反映されます</p>
-            </div>
-          </div>
+        <CollapsiblePageCard
+          id="card-pdf6"
+          indexLabel="PDF 6"
+          title={`${activePdfTemplate.sectionOrganization}・${activePdfTemplate.sectionEmergency}`}
+          description="関係各社カードの「反映する」をONにしたものだけPDF6ページへ反映されます"
+          statusLabel={getPageCardStatusLabel(cardStatus.pdf6.done)}
+          statusTone={getPageCardStatusTone(cardStatus.pdf6.done)}
+          isOpen={openPageCards.pdf6}
+          onToggle={() => togglePageCard("pdf6")}
+        >
           <CardPreview title={`PDF6 ${activePdfTemplate.sectionOrganization}・${activePdfTemplate.sectionEmergency}`}>
             <article className="preview-page">
               <h3>4．{activePdfTemplate.sectionOrganization}</h3>
@@ -8650,16 +8712,18 @@ useEffect(() => {
               </div>
             </div>
           </div>
-        </section>
+        </CollapsiblePageCard>
 
-        <section className="panel page-card" id="card-pdf7">
-          <div className="page-card-head">
-            <p className="page-card-index">PDF 7</p>
-            <div>
-              <h2>配置図・写真アップロード</h2>
-              <p className="mini">配置図上段 + 写真A〜D（PDF7専用）が反映されます</p>
-            </div>
-          </div>
+        <CollapsiblePageCard
+          id="card-pdf7"
+          indexLabel="PDF 7"
+          title="配置図・写真アップロード"
+          description="配置図上段 + 写真A〜D（PDF7専用）が反映されます"
+          statusLabel={getPageCardStatusLabel(cardStatus.pdf7.done)}
+          statusTone={getPageCardStatusTone(cardStatus.pdf7.done)}
+          isOpen={openPageCards.pdf7}
+          onToggle={() => togglePageCard("pdf7")}
+        >
           <CardPreview title="PDF7 配置図・写真">
             <article className="preview-page">
               <h3>【工事車両、作業場所等の配置図】</h3>
@@ -8799,7 +8863,7 @@ useEffect(() => {
               ))}
             </div>
           </div>
-        </section>
+        </CollapsiblePageCard>
         </>
         ) : null}
 
