@@ -2,7 +2,15 @@ import type { ChangeEvent } from "react";
 import { PDF_LOGO_FALLBACK_SRC } from "../constants";
 import type { PdfTemplatePreset, Project, RelatedParty } from "../types";
 import { CardPreview } from "./CardPreview";
+import { CollapsiblePageCard, type PageCardStatusTone } from "./CollapsiblePageCard";
 import { UiIcon } from "./UiIcon";
+
+type CardToggleState = {
+  isOpen: boolean;
+  onToggle: () => void;
+  statusLabel: string;
+  statusTone: PageCardStatusTone;
+};
 
 type PdfCoverAndTocSectionProps = {
   canExportPdf: boolean;
@@ -20,6 +28,8 @@ type PdfCoverAndTocSectionProps = {
   onPropertyNameChange: (value: string) => void;
   onCoverRecipientSuffixChange: (value: string) => void;
   onTitleSubjectChange: (value: string) => void;
+  pdf1Card: CardToggleState;
+  pdf2Card: CardToggleState;
 };
 
 export function PdfCoverAndTocSection({
@@ -38,6 +48,8 @@ export function PdfCoverAndTocSection({
   onPropertyNameChange,
   onCoverRecipientSuffixChange,
   onTitleSubjectChange,
+  pdf1Card,
+  pdf2Card,
 }: PdfCoverAndTocSectionProps) {
   return (
     <>
@@ -63,14 +75,16 @@ export function PdfCoverAndTocSection({
         {requiredHint ? <p className="error-text">{requiredHint}</p> : null}
       </section>
 
-      <section className="panel page-card" id="card-pdf1">
-        <div className="page-card-head">
-          <p className="page-card-index">PDF 1</p>
-          <div>
-            <h2>表紙</h2>
-            <p className="mini">このカードの入力がPDF1ページ目に反映されます</p>
-          </div>
-        </div>
+      <CollapsiblePageCard
+        id="card-pdf1"
+        indexLabel="PDF 1"
+        title="表紙"
+        description="このカードの入力がPDF1ページ目に反映されます"
+        statusLabel={pdf1Card.statusLabel}
+        statusTone={pdf1Card.statusTone}
+        isOpen={pdf1Card.isOpen}
+        onToggle={pdf1Card.onToggle}
+      >
         <CardPreview title="PDF1 表紙">
           <article className="preview-page">
             <div className="preview-cover-top">
@@ -133,19 +147,18 @@ export function PdfCoverAndTocSection({
             <label className="field span-2"><span>件名</span><input data-required-key="titleSubject" className={`control ${requiredMissingMap.titleSubject ? "control-missing" : ""}`} value={selectedProject.titleSubject} onChange={(event) => onTitleSubjectChange(event.target.value)} /></label>
           </div>
         </article>
-      </section>
+      </CollapsiblePageCard>
 
-      <section className="panel page-card" id="card-pdf2">
-        <div className="page-card-head">
-          <p className="page-card-index">PDF 2</p>
-          <div>
-            <h2>目次</h2>
-            <p className="mini">
-              目次は選択したPDFフォーマットに連動します
-              （1:{activePdfTemplate.tocItems[0]} / 2:{activePdfTemplate.tocItems[1]} / 3:{activePdfTemplate.tocItems[2]} / 4:{activePdfTemplate.tocItems[3]} / 5:{activePdfTemplate.tocItems[4]}）
-            </p>
-          </div>
-        </div>
+      <CollapsiblePageCard
+        id="card-pdf2"
+        indexLabel="PDF 2"
+        title="目次"
+        description={`目次は選択したPDFフォーマットに連動します（1:${activePdfTemplate.tocItems[0]} / 2:${activePdfTemplate.tocItems[1]} / 3:${activePdfTemplate.tocItems[2]} / 4:${activePdfTemplate.tocItems[3]} / 5:${activePdfTemplate.tocItems[4]}）`}
+        statusLabel={pdf2Card.statusLabel}
+        statusTone={pdf2Card.statusTone}
+        isOpen={pdf2Card.isOpen}
+        onToggle={pdf2Card.onToggle}
+      >
         <CardPreview title="PDF2 目次">
           <article className="preview-page">
             <h3>目次</h3>
@@ -156,7 +169,7 @@ export function PdfCoverAndTocSection({
             </ol>
           </article>
         </CardPreview>
-      </section>
+      </CollapsiblePageCard>
     </>
   );
 }
