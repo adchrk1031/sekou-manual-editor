@@ -110,7 +110,7 @@ app/components/features/notice/
 - デザイン調整より、まず互換性と再開しやすさを優先する
 - CSS の全面刷新は最後までやらない
 - 配置図注釈まわりは最後に分離する
-- 別案件ディレクトリの変更をこの branch に混ぜない
+- `meter-ocr-ledger-tool/` や `sales-ledger-gas/` など別案件ディレクトリの変更をこの branch に混ぜない
 
 ## 8) Review Guidelines
 - 認証や承認状態を迂回する変更は厳しく見る

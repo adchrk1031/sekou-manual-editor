@@ -107,7 +107,8 @@ npm run dev
 - 有効化コマンド:
   - `npm run hooks:install`
 - この環境では local git hook も使って二重で事故を止める
-- 別案件ディレクトリの差分が branch に混ざると `safety:scope` で止まる
+- `meter-ocr-ledger-tool` / `sales-ledger-gas` など sibling project の差分が branch に混ざると `safety:scope` で止まる
+- sibling project はこの repo の外に独立 Git として置く
 
 ## 事故を減らすための重要ルール
 - 業務日付は `YYYY-MM-DD` の文字列で保持する

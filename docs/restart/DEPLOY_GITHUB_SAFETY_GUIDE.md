@@ -65,10 +65,12 @@
   - `meter-ocr-ledger-tool/`
   - `rezil-ai-unified-demo/`
   - `rezil-ai-division-brief/`
+  - `sales-ledger-gas/`
 - すでに repo から外した別案件を再導入していないか
   - `meter-ocr-ledger-tool/`
   - `rezil-ai-unified-demo/`
   - `rezil-ai-division-brief/`
+  - `sales-ledger-gas/`
 
 ### 2. 保存互換
 - localStorage key を変えていないか
