@@ -7,8 +7,8 @@
 1. Googleアカウント
 2. 施工計画書用のGoogleスプレッドシート（新規でも既存でも可）
 3. この2ファイル
-`/Users/adachih/Documents/New project/docs/sekou-plan-automation/gas/Code.gs`
-`/Users/adachih/Documents/New project/docs/sekou-plan-automation/gas/Editor.html`
+`docs/sekou-plan-automation/gas/Code.gs`
+`docs/sekou-plan-automation/gas/Editor.html`
 
 ## 全体像（まず理解）
 1. `案件一覧` に案件データ（Salesforce連携先）
@@ -29,14 +29,14 @@
 ## Step 3. Code.gs を貼る
 1. `Code.gs` の中身を全削除
 2. 下記ファイルの中身を全部貼り付け
-`/Users/adachih/Documents/New project/docs/sekou-plan-automation/gas/Code.gs`
+`docs/sekou-plan-automation/gas/Code.gs`
 3. 保存（Ctrl+S or Cmd+S）
 
 ## Step 4. Editor.html を作る
 1. Apps Script 左の `+` ボタン > `HTML`
 2. ファイル名を `Editor` にする（拡張子は自動で `.html`）
 3. 下記ファイルを貼り付け
-`/Users/adachih/Documents/New project/docs/sekou-plan-automation/gas/Editor.html`
+`docs/sekou-plan-automation/gas/Editor.html`
 4. 保存
 
 ## Step 5. 権限を許可
