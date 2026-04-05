@@ -27,7 +27,7 @@ function Field({
 export default function PlannerWorkspace() {
   const {
     currentUser,
-    canEdit,
+    canEditSelectedProject,
     projects,
     selectedProject,
     selectedProjectId,
@@ -38,6 +38,8 @@ export default function PlannerWorkspace() {
     loading,
     sharedReady,
     error,
+    projectEditLockMessage,
+    projectEditLockStatus,
     revisionNotice,
     saveState,
     lastSavedAt,
@@ -115,6 +117,12 @@ export default function PlannerWorkspace() {
           </section>
         ) : null}
 
+        {projectEditLockStatus === "locked_by_other" && projectEditLockMessage ? (
+          <section style={{ borderRadius: "16px", background: "#fff7ed", color: "#9a3412", padding: "16px 18px", border: "1px solid #fed7aa" }}>
+            {projectEditLockMessage}
+          </section>
+        ) : null}
+
         {!sharedReady ? (
           <section style={{ borderRadius: "16px", background: "#fff7ed", color: "#9a3412", padding: "16px 18px", border: "1px solid #fed7aa" }}>
             共有データとの同期に失敗しました。この端末の localStorage を基準に preview を表示しています。
@@ -176,7 +184,7 @@ export default function PlannerWorkspace() {
               <>
                 <ProjectBasicsForm
                   project={selectedProject}
-                  canEdit={canEdit}
+                  canEdit={canEditSelectedProject}
                   saveState={saveState}
                   lastSavedAt={lastSavedAt}
                   onTextChange={updateTextField}
@@ -236,7 +244,7 @@ export default function PlannerWorkspace() {
 
                 <RevisionPanel
                   currentUserName={currentUser?.name || "不明"}
-                  canEdit={canEdit}
+                  canEdit={canEditSelectedProject}
                   projectName={selectedProject.propertyName || selectedProject.titleSubject}
                   revisions={projectRevisions}
                   selectedRevisionId={selectedRevisionId}

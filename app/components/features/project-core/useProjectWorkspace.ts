@@ -5,6 +5,16 @@ import { getSessionUser, type AuthUser } from "../../auth";
 import { PROJECT_SAVE_DEBOUNCE_MS } from "../../planner/constants";
 import { pullSharedStorageSnapshot, pushSharedStorageSnapshot, SHARED_STORAGE_UPDATED_EVENT } from "../../sharedStorage";
 import {
+  formatProjectEditLockNotice,
+  getProjectEditLockOwner,
+  getProjectEditLockKey,
+  PROJECT_EDIT_LOCK_HEARTBEAT_MS,
+  releaseProjectEditLock,
+  syncProjectEditLock,
+  type ProjectEditLock,
+  type ProjectEditLockSyncResult,
+} from "./project-edit-lock";
+import {
   materializeProjectRecord,
   loadProjectRecordsFromStorage,
   persistProjectRecordsToStorage,
@@ -36,6 +46,8 @@ type RevisionNotice = { type: "ok" | "error"; text: string } | null;
 export function useProjectWorkspace() {
   const [records, setRecords] = useState<PlannerWorkspaceProjectRecord[]>([]);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [projectEditLock, setProjectEditLock] = useState<ProjectEditLock | null>(null);
+  const [projectEditLockStatus, setProjectEditLockStatus] = useState<ProjectEditLockSyncResult["status"]>("idle");
   const [revisions, setRevisions] = useState<ReturnType<typeof loadRevisionsFromStorage>>([]);
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [selectedRevisionId, setSelectedRevisionId] = useState("");
@@ -113,6 +125,10 @@ export function useProjectWorkspace() {
 
   const projects = useMemo(() => records.map((record) => record.project), [records]);
   const canEdit = currentUser?.role === "system_admin" || currentUser?.role === "admin" || currentUser?.role === "editor";
+  const projectEditOwner = useMemo(
+    () => (currentUser ? getProjectEditLockOwner(currentUser) : null),
+    [currentUser],
+  );
   const selectedRecord = useMemo(
     () => records.find((record) => record.project.projectId === selectedProjectId) ?? null,
     [records, selectedProjectId],
@@ -130,6 +146,11 @@ export function useProjectWorkspace() {
     () => projectRevisions.find((revision) => revision.id === selectedRevisionId) ?? null,
     [projectRevisions, selectedRevisionId],
   );
+  const projectEditLockMessage = useMemo(
+    () => formatProjectEditLockNotice(projectEditLock, currentUser?.id),
+    [currentUser?.id, projectEditLock],
+  );
+  const canEditSelectedProject = canEdit && projectEditLockStatus !== "locked_by_other";
 
   useEffect(() => {
     if (!projectRevisions.length) {
@@ -141,8 +162,61 @@ export function useProjectWorkspace() {
     }
   }, [projectRevisions, selectedRevisionId]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const applyLockResult = (result: ProjectEditLockSyncResult): void => {
+      if (cancelled) {
+        return;
+      }
+      setProjectEditLock(result.lock);
+      setProjectEditLockStatus(result.status);
+    };
+
+    if (!selectedProjectId || !currentUser) {
+      applyLockResult({ status: "idle", lock: null });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const refreshLock = async (acquire: boolean): Promise<void> => {
+      const result = await syncProjectEditLock(selectedProjectId, projectEditOwner, { acquire });
+      applyLockResult(result);
+    };
+
+    void refreshLock(canEdit);
+
+    const heartbeat = window.setInterval(() => {
+      void refreshLock(canEdit);
+    }, PROJECT_EDIT_LOCK_HEARTBEAT_MS);
+
+    const onStorage = (event: StorageEvent): void => {
+      if (event.key && event.key !== getProjectEditLockKey(selectedProjectId)) {
+        return;
+      }
+      void refreshLock(false);
+    };
+
+    window.addEventListener("storage", onStorage);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(heartbeat);
+      window.removeEventListener("storage", onStorage);
+      if (canEdit) {
+        void releaseProjectEditLock(selectedProjectId, projectEditOwner);
+      }
+    };
+  }, [canEdit, currentUser, projectEditOwner, selectedProjectId]);
+
   const updateSelectedRecord = (updater: (record: PlannerWorkspaceProjectRecord) => PlannerWorkspaceProjectRecord): void => {
     if (!selectedProjectId || !canEdit) {
+      return;
+    }
+    if (!canEditSelectedProject) {
+      setError(projectEditLockMessage || "この案件は現在ほかのユーザーが編集中です。");
+      setSaveState("error");
       return;
     }
     setRecords((prev) => prev.map((record) => (
@@ -178,21 +252,35 @@ export function useProjectWorkspace() {
     }
 
     saveTimerRef.current = window.setTimeout(() => {
-      const savedAt = persistProjectRecordsToStorage(records);
-      if (!savedAt) {
-        setSaveState("error");
-        setError("案件データの保存に失敗しました。ブラウザの容量と保存形式を確認してください。");
-        return;
-      }
-
-      setLastSavedAt(savedAt);
-      setSaveState("saved");
-      dirtyRef.current = false;
-      void pushSharedStorageSnapshot().then((ok) => {
-        if (ok) {
-          setSharedReady(true);
+      void (async () => {
+        if (selectedProjectId && projectEditOwner && canEdit) {
+          const lockResult = await syncProjectEditLock(selectedProjectId, projectEditOwner, { acquire: true });
+          setProjectEditLock(lockResult.lock);
+          setProjectEditLockStatus(lockResult.status);
+          if (lockResult.status !== "owned") {
+            setSaveState("error");
+            setError(formatProjectEditLockNotice(lockResult.lock, currentUser?.id) || "この案件は現在ほかのユーザーが編集中です。");
+            dirtyRef.current = false;
+            return;
+          }
         }
-      });
+
+        const savedAt = persistProjectRecordsToStorage(records);
+        if (!savedAt) {
+          setSaveState("error");
+          setError("案件データの保存に失敗しました。ブラウザの容量と保存形式を確認してください。");
+          return;
+        }
+
+        setLastSavedAt(savedAt);
+        setSaveState("saved");
+        dirtyRef.current = false;
+        void pushSharedStorageSnapshot().then((ok) => {
+          if (ok) {
+            setSharedReady(true);
+          }
+        });
+      })();
     }, PROJECT_SAVE_DEBOUNCE_MS);
 
     return () => {
@@ -208,7 +296,7 @@ export function useProjectWorkspace() {
   };
 
   const saveManualRevision = (): void => {
-    if (!selectedProjectFull || !currentUser || !canEdit) {
+    if (!selectedProjectFull || !currentUser || !canEditSelectedProject) {
       return;
     }
     const revision = createProjectRevision(
@@ -225,7 +313,7 @@ export function useProjectWorkspace() {
   };
 
   const restoreSelectedRevision = (): void => {
-    if (!selectedRecord || !selectedProjectFull || !selectedRevision || !currentUser || !canEdit) {
+    if (!selectedRecord || !selectedProjectFull || !selectedRevision || !currentUser || !canEditSelectedProject) {
       return;
     }
 
@@ -248,6 +336,7 @@ export function useProjectWorkspace() {
   return {
     currentUser,
     canEdit,
+    canEditSelectedProject,
     projects,
     selectedProject,
     selectedProjectId,
@@ -260,6 +349,8 @@ export function useProjectWorkspace() {
     loading,
     sharedReady,
     error,
+    projectEditLockMessage,
+    projectEditLockStatus,
     revisionNotice,
     saveState,
     lastSavedAt,
@@ -279,6 +370,7 @@ export function useProjectWorkspace() {
   } satisfies {
     currentUser: AuthUser | null;
     canEdit: boolean;
+    canEditSelectedProject: boolean;
     projects: PlannerWorkspaceProject[];
     selectedProject: PlannerWorkspaceProject | null;
     selectedProjectFull: ReturnType<typeof materializeProjectRecord> | null;
@@ -291,6 +383,8 @@ export function useProjectWorkspace() {
     loading: boolean;
     sharedReady: boolean;
     error: string;
+    projectEditLockMessage: string;
+    projectEditLockStatus: ProjectEditLockSyncResult["status"];
     revisionNotice: RevisionNotice;
     saveState: SaveState;
     lastSavedAt: string;

@@ -83,6 +83,16 @@ import {
   normalizePdfTemplateId,
   normalizeProject,
 } from "./features/project-core/project-normalize";
+import {
+  formatProjectEditLockNotice,
+  getProjectEditLockKey,
+  getProjectEditLockOwner,
+  PROJECT_EDIT_LOCK_HEARTBEAT_MS,
+  releaseProjectEditLock,
+  syncProjectEditLock,
+  type ProjectEditLock,
+  type ProjectEditLockSyncResult,
+} from "./features/project-core/project-edit-lock";
 import type {
   AuditLog,
   CropSelectionDragState,
@@ -1581,6 +1591,9 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   const [hydrated, setHydrated] = useState(false);
   const [sharedStorageReady, setSharedStorageReady] = useState(false);
   const [sharedSyncState, setSharedSyncState] = useState<"idle" | "pending" | "syncing" | "synced" | "error">("idle");
+  const [projectEditLock, setProjectEditLock] = useState<ProjectEditLock | null>(null);
+  const [projectEditLockStatus, setProjectEditLockStatus] = useState<ProjectEditLockSyncResult["status"]>("idle");
+  const [projectEditLockNotice, setProjectEditLockNotice] = useState("");
   const [lastSavedAt, setLastSavedAt] = useState("-");
   const [importStatus, setImportStatus] = useState("CSV未取込");
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
@@ -1934,6 +1947,62 @@ useEffect(() => {
   }, [hydrated, loadWorkspaceStateFromStorage]);
 
   useEffect(() => {
+    let cancelled = false;
+    const currentUserCurrent = users.find((user) => user.id === currentUserId && user.active && user.approvalStatus === "approved") ?? null;
+    const canEditCurrent = Boolean(currentUserCurrent && currentUserCurrent.role !== "viewer");
+    const projectEditOwnerCurrent = currentUserCurrent ? getProjectEditLockOwner(currentUserCurrent) : null;
+
+    const applyLockResult = (result: ProjectEditLockSyncResult): void => {
+      if (cancelled) {
+        return;
+      }
+      setProjectEditLock(result.lock);
+      setProjectEditLockStatus(result.status);
+      if (result.status === "locked_by_other") {
+        setProjectEditLockNotice(formatProjectEditLockNotice(result.lock, currentUserCurrent?.id));
+      } else {
+        setProjectEditLockNotice("");
+      }
+    };
+
+    if (!selectedId || !currentUserCurrent || mode === "csv") {
+      applyLockResult({ status: "idle", lock: null });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const refreshLock = async (acquire: boolean): Promise<void> => {
+      const result = await syncProjectEditLock(selectedId, projectEditOwnerCurrent, { acquire });
+      applyLockResult(result);
+    };
+
+    void refreshLock(canEditCurrent);
+
+    const heartbeat = window.setInterval(() => {
+      void refreshLock(canEditCurrent);
+    }, PROJECT_EDIT_LOCK_HEARTBEAT_MS);
+
+    const onStorage = (event: StorageEvent): void => {
+      if (event.key && event.key !== getProjectEditLockKey(selectedId)) {
+        return;
+      }
+      void refreshLock(false);
+    };
+
+    window.addEventListener("storage", onStorage);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(heartbeat);
+      window.removeEventListener("storage", onStorage);
+      if (canEditCurrent) {
+        void releaseProjectEditLock(selectedId, projectEditOwnerCurrent);
+      }
+    };
+  }, [currentUserId, mode, selectedId, users]);
+
+  useEffect(() => {
     if (!hydrated) {
       return;
     }
@@ -1941,8 +2010,26 @@ useEffect(() => {
       window.clearTimeout(saveTimerRef.current);
     }
     saveTimerRef.current = window.setTimeout(() => {
-      persistProjectsToStorage(projects);
-      saveTimerRef.current = null;
+      void (async () => {
+        const currentUserCurrent = users.find((user) => user.id === currentUserId && user.active && user.approvalStatus === "approved") ?? null;
+        const canEditCurrent = Boolean(currentUserCurrent && currentUserCurrent.role !== "viewer");
+        const projectEditOwnerCurrent = currentUserCurrent ? getProjectEditLockOwner(currentUserCurrent) : null;
+
+        if (selectedId && projectEditOwnerCurrent && canEditCurrent && mode !== "csv") {
+          const lockResult = await syncProjectEditLock(selectedId, projectEditOwnerCurrent, { acquire: true });
+          setProjectEditLock(lockResult.lock);
+          setProjectEditLockStatus(lockResult.status);
+          if (lockResult.status !== "owned") {
+            setProjectEditLockNotice(formatProjectEditLockNotice(lockResult.lock, currentUserCurrent?.id) || "この案件は現在ほかのユーザーが編集中です。");
+            setSharedSyncState("error");
+            saveTimerRef.current = null;
+            return;
+          }
+          setProjectEditLockNotice("");
+        }
+        persistProjectsToStorage(projects);
+        saveTimerRef.current = null;
+      })();
     }, PROJECT_SAVE_DEBOUNCE_MS);
 
     return () => {
@@ -1951,7 +2038,7 @@ useEffect(() => {
         saveTimerRef.current = null;
       }
     };
-  }, [projects, hydrated, persistProjectsToStorage]);
+  }, [currentUserId, hydrated, mode, persistProjectsToStorage, projects, selectedId, users]);
 
 useEffect(() => {
   if (!hydrated) {
@@ -2299,6 +2386,11 @@ useEffect(() => {
   const canEdit = !!currentUser && currentUser.role !== "viewer";
   const canAdmin = !!currentUser && isAdminLikeRole(currentUser.role);
   const canApprove = !!currentUser && (isAdminLikeRole(currentUser.role) || currentUser.role === "editor");
+  const projectEditLockMessage = useMemo(
+    () => formatProjectEditLockNotice(projectEditLock, currentUser?.id),
+    [currentUser?.id, projectEditLock],
+  );
+  const canEditSelectedProject = canEdit && (!hasSelectedProject || projectEditLockStatus !== "locked_by_other");
   const cropEditorFrameAspectRatio = useMemo(() => {
     if (!cropEditorImageSize || !cropEditorImageSize.width || !cropEditorImageSize.height) {
       return 4 / 3;
@@ -3071,6 +3163,10 @@ useEffect(() => {
     updater: (project: Project) => Project,
     meta?: { action?: string; detail?: string; snapshotLabel?: string },
   ): void {
+    if (hasSelectedProject && !canEditSelectedProject) {
+      setProjectEditLockNotice(projectEditLockMessage || "この案件は現在ほかのユーザーが編集中です。");
+      return;
+    }
     if (!hasSelectedProject || !selectedId) {
       if (!canEdit) {
         return;
@@ -3389,7 +3485,8 @@ useEffect(() => {
   }
 
   function saveManualRevision(): void {
-    if (!canEdit) {
+    if (!canEditSelectedProject) {
+      setProjectEditLockNotice(projectEditLockMessage || "この案件は現在ほかのユーザーが編集中です。");
       return;
     }
     createRevision(selectedProject, `手動履歴保存 ${new Date().toLocaleString("ja-JP")}`);
@@ -3489,6 +3586,10 @@ useEffect(() => {
   }
 
   function restoreRevision(): void {
+    if (!canEditSelectedProject) {
+      setProjectEditLockNotice(projectEditLockMessage || "この案件は現在ほかのユーザーが編集中です。");
+      return;
+    }
     if (!canEdit || !selectedRevision) {
       return;
     }
@@ -3697,7 +3798,8 @@ useEffect(() => {
   }
 
   function deleteSelectedProject(): void {
-    if (!canEdit) {
+    if (!canEditSelectedProject) {
+      setProjectEditLockNotice(projectEditLockMessage || "この案件は現在ほかのユーザーが編集中です。");
       return;
     }
     if (!hasSelectedProject) {
@@ -6892,7 +6994,7 @@ useEffect(() => {
                 type="button"
                 className="btn top-btn top-btn-delete top-btn-inline top-action-btn"
                 onClick={deleteSelectedProject}
-                disabled={!canEdit || !hasSelectedProject || projects.length <= 1}
+                disabled={!canEditSelectedProject || !hasSelectedProject || projects.length <= 1}
               >
               <span className="btn-icon"><UiIcon name="delete" /></span>
               案件削除
@@ -6968,7 +7070,7 @@ useEffect(() => {
                     deleteSelectedProject();
                     setMobileMenuOpen(false);
                   }}
-                  disabled={!canEdit || !hasSelectedProject || projects.length <= 1}
+                  disabled={!canEditSelectedProject || !hasSelectedProject || projects.length <= 1}
                 >
                   <span className="btn-icon"><UiIcon name="delete" /></span>
                   案件削除
@@ -7005,6 +7107,12 @@ useEffect(() => {
             <span className="btn-icon"><UiIcon name="down" /></span>
             ミニ入力へ移動
           </button>
+        ) : null}
+
+        {projectEditLockNotice ? (
+          <section className="panel">
+            <p className="mini error-text">{projectEditLockNotice}</p>
+          </section>
         ) : null}
 
         <CsvEditorSection
@@ -7089,6 +7197,7 @@ useEffect(() => {
           login={login}
           loginError={loginError}
           canEdit={canEdit}
+          canEditSelectedProject={canEditSelectedProject}
           canAdmin={canAdmin}
           userStats={userStats}
           newUserName={newUserName}
