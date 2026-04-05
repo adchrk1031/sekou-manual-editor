@@ -5,6 +5,7 @@ import { formatDateRange, formatDateTimeRange } from "../planner/utils/dateTime"
 import ProjectBasicsForm from "../features/project-core/ProjectBasicsForm";
 import ProjectListPanel from "../features/project-core/ProjectListPanel";
 import { useProjectWorkspace } from "../features/project-core/useProjectWorkspace";
+import RevisionPanel from "../features/revisions/RevisionPanel";
 
 function Field({
   label,
@@ -25,15 +26,23 @@ function Field({
 
 export default function PlannerWorkspace() {
   const {
+    currentUser,
+    canEdit,
     projects,
     selectedProject,
     selectedProjectId,
     setSelectedProjectId,
+    projectRevisions,
+    selectedRevisionId,
+    setSelectedRevisionId,
     loading,
     sharedReady,
     error,
+    revisionNotice,
     saveState,
     lastSavedAt,
+    saveManualRevision,
+    restoreSelectedRevision,
     updateTextField,
     updatePdfTemplate,
     updateOutageEnabled,
@@ -167,6 +176,7 @@ export default function PlannerWorkspace() {
               <>
                 <ProjectBasicsForm
                   project={selectedProject}
+                  canEdit={canEdit}
                   saveState={saveState}
                   lastSavedAt={lastSavedAt}
                   onTextChange={updateTextField}
@@ -223,6 +233,18 @@ export default function PlannerWorkspace() {
                     </p>
                   </section>
                 </div>
+
+                <RevisionPanel
+                  currentUserName={currentUser?.name || "不明"}
+                  canEdit={canEdit}
+                  projectName={selectedProject.propertyName || selectedProject.titleSubject}
+                  revisions={projectRevisions}
+                  selectedRevisionId={selectedRevisionId}
+                  onSelectRevision={setSelectedRevisionId}
+                  onSaveRevision={saveManualRevision}
+                  onRestoreRevision={restoreSelectedRevision}
+                  notice={revisionNotice}
+                />
               </>
             ) : (
               <section style={{ borderRadius: "18px", background: "#ffffff", border: "1px solid #d7dee6", padding: "24px", color: "#5f6f82", lineHeight: 1.7 }}>

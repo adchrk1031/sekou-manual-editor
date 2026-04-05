@@ -74,6 +74,24 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+function cloneForStorage<T>(value: T): T {
+  if (typeof structuredClone === "function") {
+    return structuredClone(value);
+  }
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function buildWorkCodeFlags(selectedWorkCodes: WorkCode[]): Record<WorkCode, boolean> {
+  return {
+    KOUATSU_CABLE: selectedWorkCodes.includes("KOUATSU_CABLE"),
+    UGS: selectedWorkCodes.includes("UGS"),
+    PAS: selectedWorkCodes.includes("PAS"),
+    GROUND_A: selectedWorkCodes.includes("GROUND_A"),
+    GROUND_B: selectedWorkCodes.includes("GROUND_B"),
+    GROUND_C: selectedWorkCodes.includes("GROUND_C"),
+  };
+}
+
 function normalizeWorkCodes(value: unknown): WorkCode[] {
   if (!Array.isArray(value)) {
     return [];
@@ -141,6 +159,17 @@ function toWorkspaceProject(project: Project): PlannerWorkspaceProject {
   };
 }
 
+function mergeProjectIntoRawProject(rawProject: Record<string, unknown>, project: Project): Record<string, unknown> {
+  const clonedProject = cloneForStorage(project);
+  return {
+    ...rawProject,
+    ...clonedProject,
+    workDateMain: clonedProject.workDateStart,
+    flags: buildWorkCodeFlags(clonedProject.selectedWorkCodes),
+    selectedWorkCodes: [...clonedProject.selectedWorkCodes],
+  } as Record<string, unknown>;
+}
+
 function toProjectRecord(value: unknown, index: number): PlannerWorkspaceProjectRecord | null {
   if (!isRecord(value)) {
     return null;
@@ -156,6 +185,21 @@ function toProjectRecord(value: unknown, index: number): PlannerWorkspaceProject
       projectId: normalizedProject.projectId || fallbackProjectId,
     },
     rawProject,
+  };
+}
+
+export function materializeProjectRecord(record: PlannerWorkspaceProjectRecord): Project {
+  return normalizeProject(record.rawProject as ProjectNormalizationInput);
+}
+
+export function replaceProjectRecord(
+  record: PlannerWorkspaceProjectRecord,
+  project: Project,
+): PlannerWorkspaceProjectRecord {
+  const normalizedProject = normalizeProject(project as ProjectNormalizationInput);
+  return {
+    project: toWorkspaceProject(normalizedProject),
+    rawProject: mergeProjectIntoRawProject(record.rawProject, normalizedProject),
   };
 }
 
