@@ -7128,15 +7128,16 @@ useEffect(() => {
             <Link href="/menu" className="workspace-link subtle mobile-menu-back-link" onClick={() => setMobileMenuOpen(false)}>メニューへ戻る</Link>
           </div>
         </aside>
-        {isEditorMode && hasSelectedProject ? (
+        {isEditorMode && hasSelectedProject && totalMissingRequiredCount > 0 ? (
           <button
             type="button"
-            className="btn mobile-fab-missing"
-            onClick={scrollToMiniInput}
-            title="未入力項目へ移動"
+            className="btn missing-jump-fab"
+            onClick={() => scrollToMissingField()}
+            title={`未入力項目 ${totalMissingRequiredCount} 件の先頭へ移動`}
           >
             <span className="btn-icon"><UiIcon name="down" /></span>
-            ミニ入力へ移動
+            <span>未入力へ移動</span>
+            <span className="missing-jump-fab-count">{totalMissingRequiredCount}件</span>
           </button>
         ) : null}
 
