@@ -174,6 +174,7 @@ import { CsvEditorSection } from "./planner/ui/CsvEditorSection";
 import { TrackingSection } from "./planner/ui/TrackingSection";
 import { PdfCoverAndTocSection } from "./planner/ui/PdfCoverAndTocSection";
 import { PdfWorkOverviewPreview } from "./planner/ui/PdfWorkOverviewPreview";
+import { NoticePrintDocument, NoticeWorkspace } from "./features/notice/NoticeWorkspace";
 
 function LayoutAnnotatedImage({
   imageUrl,
@@ -1619,6 +1620,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   const [detailPhotoSlide, setDetailPhotoSlide] = useState(0);
   const [layoutPhotoSlide, setLayoutPhotoSlide] = useState(0);
   const [printMode, setPrintMode] = useState(false);
+  const [noticePrintMode, setNoticePrintMode] = useState(false);
   const [scheduleTemplates, setScheduleTemplates] = useState<Array<SimpleTemplate<ScheduleRow[]>>>([]);
   const [scheduleProcedureTemplates, setScheduleProcedureTemplates] = useState<ScheduleProcedureTemplate[]>(
     cloneScheduleProcedureTemplates(DEFAULT_SCHEDULE_PROCEDURE_TEMPLATES),
@@ -4683,6 +4685,27 @@ useEffect(() => {
     setTimeout(restore, 1500);
   }
 
+  function exportNoticePdf(): void {
+    if (canEditSelectedProject && hasSelectedProject) {
+      appendAudit("notice_print", "停電案内文を印刷", selectedProject.projectId);
+    }
+    const originalTitle = document.title;
+    setNoticePrintMode(true);
+    document.title = "";
+    const restore = () => {
+      document.title = originalTitle;
+      setNoticePrintMode(false);
+      window.removeEventListener("afterprint", restore);
+    };
+    window.addEventListener("afterprint", restore);
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        window.print();
+      });
+    });
+    setTimeout(restore, 1500);
+  }
+
   function updateRelatedParty(
     key: RelatedPartyKey,
     patch: Partial<RelatedParty>,
@@ -7194,29 +7217,14 @@ useEffect(() => {
         />
 
         {isNoticeMode ? (
-        <section className="panel">
-          <div className="panel-head">
-            <div>
-              <h3 className="section-title">
-                <span className="section-icon" aria-hidden="true">
-                  <UiIcon name="template" />
-                </span>
-                停電案内文
-              </h3>
-              <p className="mini">
-                停電案内文の作成、事前工事日の整理、専用PDF出力を行うための独立ワークスペースです。
-              </p>
-            </div>
-          </div>
-
-          <section className="sub-panel">
-            <h4>新しい停電案内文ページを追加しました</h4>
-            <p className="mini">
-              このページは施工計画書PDFの中へ差し込む用途ではなく、停電案内文を別ページとして作成するための専用ページです。
-              今後ここに、停電日・停電時間・事前工事日・注意事項・案内文テンプレートの生成機能を順番に実装していけます。
-            </p>
-          </section>
-        </section>
+        <NoticeWorkspace
+          hasSelectedProject={hasSelectedProject}
+          selectedProject={selectedProject}
+          canEdit={canEdit}
+          canEditSelectedProject={canEditSelectedProject}
+          updateSelectedProject={updateSelectedProject}
+          onPrint={exportNoticePdf}
+        />
         ) : null}
 
         <TrackingSection
@@ -9721,6 +9729,11 @@ useEffect(() => {
             </article>
           ))}
         </div>
+      </section>
+      ) : null}
+      {isNoticeMode && noticePrintMode ? (
+      <section className="print-only">
+        <NoticePrintDocument project={selectedProject} />
       </section>
       ) : null}
     </>

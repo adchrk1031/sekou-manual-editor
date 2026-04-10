@@ -107,7 +107,7 @@ export function CsvEditorSection({
       <section className="panel csv-editor-panel">
         <div className="panel-head">
           <h3 className="section-title"><span className="section-icon"><UiIcon name="template" /></span>CSV編集スペース</h3>
-          <p className="mini">取込後にこの画面で修正し、案件データへ再反映できます</p>
+          <p className="mini">取込後にこの画面で修正し、案件データへ再反映できます。反映後は `/notice` で停電案内文も起こせます。</p>
         </div>
         <details className="csv-mapping-guide">
           <summary>CSVカラム対応表（ここだけ埋めれば、ほぼ自動でPDF化）</summary>
