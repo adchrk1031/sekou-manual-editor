@@ -91,7 +91,18 @@ export default function Page() {
 
   useEffect(() => {
     let cancelled = false;
-    const bootstrap = async () => {
+    const localUsers = ensureUsers();
+    setHasUsers(localUsers.length > 0);
+    setAuthTab(localUsers.length === 0 ? "register" : "login");
+    if (getSessionUser()) {
+      router.replace("/menu");
+      return () => {
+        cancelled = true;
+      };
+    }
+    setHydrated(true);
+
+    const syncShared = async () => {
       const synced = await pullSharedStorageSnapshot();
       if (cancelled) {
         return;
@@ -99,7 +110,7 @@ export default function Page() {
       setSharedSyncReady(synced);
       const users = ensureUsers();
       setHasUsers(users.length > 0);
-      setAuthTab(synced && users.length === 0 ? "register" : "login");
+      setAuthTab(users.length === 0 ? "register" : "login");
       if (getSessionUser()) {
         router.replace("/menu");
         return;
@@ -110,9 +121,8 @@ export default function Page() {
           text: "共有データへの接続に失敗しました。この端末の保存データでログインを継続します。新規登録は共有接続時のみ可能です。",
         });
       }
-      setHydrated(true);
     };
-    void bootstrap();
+    void syncShared();
     return () => {
       cancelled = true;
     };
@@ -124,6 +134,9 @@ export default function Page() {
   }
 
   async function ensureSharedReadyOrFail(mode: "login" | "register"): Promise<boolean> {
+    if (sharedSyncReady) {
+      return true;
+    }
     const synced = await pullSharedStorageSnapshot();
     setSharedSyncReady(synced);
     if (!synced) {

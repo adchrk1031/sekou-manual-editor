@@ -15,6 +15,7 @@ const SHARED_STATE_ID = "global";
 const MAX_SHARED_ITEMS = 3000;
 const MAX_SHARED_VALUE_LENGTH = 2_000_000;
 const MAX_SHARED_KEY_LENGTH = 256;
+let ensureSharedStateTablePromise: Promise<void> | null = null;
 
 function normalizeTimestamp(value: unknown): string | null {
   if (typeof value !== "string") {
@@ -46,14 +47,20 @@ function isSharedStatePayload(value: unknown): value is SharedStatePayload {
 }
 
 async function ensureSharedStateTable(): Promise<void> {
-  await prisma.$executeRawUnsafe(`
-    CREATE TABLE IF NOT EXISTS manual_editor_states (
-      id TEXT PRIMARY KEY,
-      payload TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
+  if (!ensureSharedStateTablePromise) {
+    ensureSharedStateTablePromise = prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS manual_editor_states (
+        id TEXT PRIMARY KEY,
+        payload TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `).then(() => undefined).catch((error) => {
+      ensureSharedStateTablePromise = null;
+      throw error;
+    });
+  }
+  await ensureSharedStateTablePromise;
 }
 
 export async function GET() {

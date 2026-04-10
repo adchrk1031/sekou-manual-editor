@@ -61,6 +61,7 @@ function isSharedStatePayload(value: unknown): value is SharedStatePayload {
 let lastPulledUpdatedAt: string | null = null;
 let lastKnownSharedSnapshot: SharedStatePayload = EMPTY_SHARED_STATE_PAYLOAD;
 let pushLoopPromise: Promise<boolean> | null = null;
+let pullLoopPromise: Promise<boolean> | null = null;
 let pushRequested = false;
 
 function normalizeSharedStatePayload(payload: SharedStatePayload): SharedStatePayload {
@@ -332,7 +333,7 @@ function dispatchSharedStorageUpdated(updatedAt?: string): void {
   );
 }
 
-export async function pullSharedStorageSnapshot(): Promise<boolean> {
+async function pullSharedStorageSnapshotOnce(): Promise<boolean> {
   if (typeof window === "undefined") {
     return false;
   }
@@ -376,6 +377,18 @@ export async function pullSharedStorageSnapshot(): Promise<boolean> {
   } finally {
     window.clearTimeout(timer);
   }
+}
+
+export async function pullSharedStorageSnapshot(): Promise<boolean> {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  if (!pullLoopPromise) {
+    pullLoopPromise = pullSharedStorageSnapshotOnce().finally(() => {
+      pullLoopPromise = null;
+    });
+  }
+  return pullLoopPromise;
 }
 
 export async function pushSharedStorageSnapshot(options?: SharedStatePushOptions): Promise<boolean> {

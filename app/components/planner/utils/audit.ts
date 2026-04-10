@@ -17,6 +17,7 @@ const AUDIT_ACTION_LABELS: Record<string, string> = {
   layout_annotation_save: "配置図注釈保存",
   photo_crop: "写真トリミング",
   pdf_export: "PDF出力",
+  notice_print: "案内文出力",
   project_create: "案件作成",
   project_delete: "案件削除",
   copy_from_project: "他案件引用",
@@ -52,6 +53,9 @@ export function formatAuditAction(action: string): string {
 export function formatAuditScreen(action: string): string {
   if (action.startsWith("csv_")) {
     return "CSV編集スペース";
+  }
+  if (action === "notice_print") {
+    return "停電案内文";
   }
   if (["login", "logout", "login_failed", "user_create", "user_update_email", "user_approval_update", "user_delete", "user_role_update"].includes(action)) {
     return "ログイン管理";

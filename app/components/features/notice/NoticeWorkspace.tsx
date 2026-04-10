@@ -327,6 +327,19 @@ export function NoticeWorkspace({
     updateSelectedProject((project) => ({ ...project, [field]: value }));
   }
 
+  function updateManagementCompany(value: string) {
+    updateSelectedProject((project) => ({
+      ...project,
+      relatedParties: {
+        ...project.relatedParties,
+        management: {
+          ...project.relatedParties.management,
+          company: value,
+        },
+      },
+    }));
+  }
+
   function updateNoticeScheduleRow(rowId: string, patch: Partial<NoticeScheduleRow>) {
     updateSelectedProject((project) => ({
       ...project,
@@ -651,6 +664,16 @@ export function NoticeWorkspace({
           <label className="field">
             <span>問い合わせ会社</span>
             <input className="control" value={selectedProject.noticeContactCompany} onChange={(event) => updateNoticeField("noticeContactCompany", event.target.value)} disabled={!canEditSelectedProject} />
+          </label>
+          <label className="field">
+            <span>管理会社名（ログ用）</span>
+            <input
+              className="control"
+              value={selectedProject.relatedParties.management.company}
+              onChange={(event) => updateManagementCompany(event.target.value)}
+              disabled={!canEditSelectedProject}
+              placeholder="管理会社名"
+            />
           </label>
           <label className="field">
             <span>部署名</span>

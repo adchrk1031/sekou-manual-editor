@@ -4687,7 +4687,14 @@ useEffect(() => {
 
   function exportNoticePdf(): void {
     if (canEditSelectedProject && hasSelectedProject) {
-      appendAudit("notice_print", "停電案内文を印刷", selectedProject.projectId);
+      const noticeDate = selectedProject.noticeOutageDate || selectedProject.noticeMainWorkDate || "-";
+      const managementCompany = selectedProject.relatedParties.management.company.trim() || "-";
+      const propertyName = selectedProject.noticePropertyName.trim() || selectedProject.propertyName.trim() || "-";
+      appendAudit(
+        "notice_print",
+        `日付: ${noticeDate} / 管理会社: ${managementCompany} / 物件名: ${propertyName}`,
+        selectedProject.projectId,
+      );
     }
     const originalTitle = document.title;
     setNoticePrintMode(true);
