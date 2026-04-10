@@ -17,6 +17,7 @@ import {
   toTimelineOffset,
 } from "../../planner/utils/dateTime";
 import { parseStorageJson, stringifyForStorage } from "../../planner/utils/storage";
+import { normalizePdfTemplateId, normalizeProject, type ProjectNormalizationInput } from "./project-normalize";
 
 const VALID_WORK_CODES: WorkCode[] = [
   "KOUATSU_CABLE",
@@ -27,7 +28,6 @@ const VALID_WORK_CODES: WorkCode[] = [
   "GROUND_C",
 ];
 
-const VALID_PDF_TEMPLATE_IDS: PdfTemplateId[] = ["standard", "kansai", "night"];
 const VALID_APPROVAL_STATUSES: Project["approvalStatus"][] = ["draft", "submitted", "approved", "rejected"];
 
 export type PlannerWorkspaceProject = {
@@ -74,6 +74,24 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+function cloneForStorage<T>(value: T): T {
+  if (typeof structuredClone === "function") {
+    return structuredClone(value);
+  }
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function buildWorkCodeFlags(selectedWorkCodes: WorkCode[]): Record<WorkCode, boolean> {
+  return {
+    KOUATSU_CABLE: selectedWorkCodes.includes("KOUATSU_CABLE"),
+    UGS: selectedWorkCodes.includes("UGS"),
+    PAS: selectedWorkCodes.includes("PAS"),
+    GROUND_A: selectedWorkCodes.includes("GROUND_A"),
+    GROUND_B: selectedWorkCodes.includes("GROUND_B"),
+    GROUND_C: selectedWorkCodes.includes("GROUND_C"),
+  };
+}
+
 function normalizeWorkCodes(value: unknown): WorkCode[] {
   if (!Array.isArray(value)) {
     return [];
@@ -82,12 +100,6 @@ function normalizeWorkCodes(value: unknown): WorkCode[] {
     (item): item is WorkCode => typeof item === "string" && VALID_WORK_CODES.includes(item as WorkCode),
   );
   return VALID_WORK_CODES.filter((code) => codes.includes(code));
-}
-
-function normalizePdfTemplateId(value: unknown): PdfTemplateId {
-  return typeof value === "string" && VALID_PDF_TEMPLATE_IDS.includes(value as PdfTemplateId)
-    ? (value as PdfTemplateId)
-    : "standard";
 }
 
 function normalizeApprovalStatus(value: unknown): Project["approvalStatus"] {
@@ -125,38 +137,69 @@ function normalizeScheduleRows(value: unknown, fallbackDate: string): ScheduleRo
     .filter((row): row is ScheduleRow => row !== null);
 }
 
+function toWorkspaceProject(project: Project): PlannerWorkspaceProject {
+  return {
+    projectId: project.projectId,
+    propertyName: project.propertyName,
+    propertyAddress: project.propertyAddress,
+    titleSubject: project.titleSubject,
+    coverRecipientSuffix: project.coverRecipientSuffix,
+    workDateStart: project.workDateStart,
+    workDateEnd: project.workDateEnd,
+    outageDateStart: project.outageDateStart,
+    outageDateEnd: project.outageDateEnd,
+    outageTimeStart: project.outageTimeStart,
+    outageTimeEnd: project.outageTimeEnd,
+    outageEnabled: project.outageEnabled,
+    approvalStatus: normalizeApprovalStatus(project.approvalStatus),
+    pdfTemplateId: normalizePdfTemplateId(project.pdfTemplateId),
+    pdfExportCount: Number.isFinite(project.pdfExportCount) ? Number(project.pdfExportCount) : 0,
+    selectedWorkCodes: VALID_WORK_CODES.filter((code) => project.selectedWorkCodes.includes(code)),
+    noteSpecial: project.noteSpecial,
+  };
+}
+
+function mergeProjectIntoRawProject(rawProject: Record<string, unknown>, project: Project): Record<string, unknown> {
+  const clonedProject = cloneForStorage(project);
+  return {
+    ...rawProject,
+    ...clonedProject,
+    workDateMain: clonedProject.workDateStart,
+    flags: buildWorkCodeFlags(clonedProject.selectedWorkCodes),
+    selectedWorkCodes: [...clonedProject.selectedWorkCodes],
+  } as Record<string, unknown>;
+}
+
 function toProjectRecord(value: unknown, index: number): PlannerWorkspaceProjectRecord | null {
   if (!isRecord(value)) {
     return null;
   }
 
-  const projectId = toText(value.projectId) || `TEMP-${String(index + 1).padStart(3, "0")}`;
-  const workDateStart = normalizeDate(toText(value.workDateStart) || toText(value.workDateMain));
-  const workDateEnd = normalizeDate(toText(value.workDateEnd)) || workDateStart;
-  const outageDateStart = normalizeDate(toText(value.outageDateStart)) || workDateStart;
-  const outageDateEnd = normalizeDate(toText(value.outageDateEnd)) || outageDateStart || workDateEnd;
+  const rawProject = { ...value };
+  const normalizedProject = normalizeProject(rawProject as ProjectNormalizationInput);
+  const fallbackProjectId = toText(value.projectId) || `TEMP-${String(index + 1).padStart(3, "0")}`;
 
   return {
     project: {
-      projectId,
-      propertyName: toText(value.propertyName),
-      propertyAddress: toText(value.propertyAddress),
-      titleSubject: toText(value.titleSubject),
-      coverRecipientSuffix: toText(value.coverRecipientSuffix),
-      workDateStart,
-      workDateEnd,
-      outageDateStart,
-      outageDateEnd,
-      outageTimeStart: normalizeTime(toText(value.outageTimeStart), ""),
-      outageTimeEnd: normalizeTime(toText(value.outageTimeEnd), ""),
-      outageEnabled: typeof value.outageEnabled === "boolean" ? value.outageEnabled : false,
-      approvalStatus: normalizeApprovalStatus(value.approvalStatus),
-      pdfTemplateId: normalizePdfTemplateId(value.pdfTemplateId),
-      pdfExportCount: Number.isFinite(Number(value.pdfExportCount)) ? Number(value.pdfExportCount) : 0,
-      selectedWorkCodes: normalizeWorkCodes(value.selectedWorkCodes),
-      noteSpecial: toText(value.noteSpecial),
+      ...toWorkspaceProject(normalizedProject),
+      projectId: normalizedProject.projectId || fallbackProjectId,
     },
-    rawProject: { ...value },
+    rawProject,
+  };
+}
+
+export function materializeProjectRecord(record: PlannerWorkspaceProjectRecord): Project {
+  return normalizeProject(record.rawProject as ProjectNormalizationInput);
+}
+
+export function replaceProjectRecord(
+  record: PlannerWorkspaceProjectRecord,
+  project: Project,
+): PlannerWorkspaceProjectRecord {
+  const normalizedProject = normalizeProject(project as ProjectNormalizationInput);
+  return {
+    project: toWorkspaceProject(normalizedProject),
+    rawProject: mergeProjectIntoRawProject(record.rawProject, normalizedProject),
   };
 }
 

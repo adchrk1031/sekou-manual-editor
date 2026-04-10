@@ -5,6 +5,7 @@ import { formatDateRange, formatDateTimeRange } from "../planner/utils/dateTime"
 import ProjectBasicsForm from "../features/project-core/ProjectBasicsForm";
 import ProjectListPanel from "../features/project-core/ProjectListPanel";
 import { useProjectWorkspace } from "../features/project-core/useProjectWorkspace";
+import RevisionPanel from "../features/revisions/RevisionPanel";
 
 function Field({
   label,
@@ -25,15 +26,25 @@ function Field({
 
 export default function PlannerWorkspace() {
   const {
+    currentUser,
+    canEditSelectedProject,
     projects,
     selectedProject,
     selectedProjectId,
     setSelectedProjectId,
+    projectRevisions,
+    selectedRevisionId,
+    setSelectedRevisionId,
     loading,
     sharedReady,
     error,
+    projectEditLockMessage,
+    projectEditLockStatus,
+    revisionNotice,
     saveState,
     lastSavedAt,
+    saveManualRevision,
+    restoreSelectedRevision,
     updateTextField,
     updatePdfTemplate,
     updateOutageEnabled,
@@ -106,6 +117,12 @@ export default function PlannerWorkspace() {
           </section>
         ) : null}
 
+        {projectEditLockStatus === "locked_by_other" && projectEditLockMessage ? (
+          <section style={{ borderRadius: "16px", background: "#fff7ed", color: "#9a3412", padding: "16px 18px", border: "1px solid #fed7aa" }}>
+            {projectEditLockMessage}
+          </section>
+        ) : null}
+
         {!sharedReady ? (
           <section style={{ borderRadius: "16px", background: "#fff7ed", color: "#9a3412", padding: "16px 18px", border: "1px solid #fed7aa" }}>
             共有データとの同期に失敗しました。この端末の localStorage を基準に preview を表示しています。
@@ -167,6 +184,7 @@ export default function PlannerWorkspace() {
               <>
                 <ProjectBasicsForm
                   project={selectedProject}
+                  canEdit={canEditSelectedProject}
                   saveState={saveState}
                   lastSavedAt={lastSavedAt}
                   onTextChange={updateTextField}
@@ -223,6 +241,18 @@ export default function PlannerWorkspace() {
                     </p>
                   </section>
                 </div>
+
+                <RevisionPanel
+                  currentUserName={currentUser?.name || "不明"}
+                  canEdit={canEditSelectedProject}
+                  projectName={selectedProject.propertyName || selectedProject.titleSubject}
+                  revisions={projectRevisions}
+                  selectedRevisionId={selectedRevisionId}
+                  onSelectRevision={setSelectedRevisionId}
+                  onSaveRevision={saveManualRevision}
+                  onRestoreRevision={restoreSelectedRevision}
+                  notice={revisionNotice}
+                />
               </>
             ) : (
               <section style={{ borderRadius: "18px", background: "#ffffff", border: "1px solid #d7dee6", padding: "24px", color: "#5f6f82", lineHeight: 1.7 }}>

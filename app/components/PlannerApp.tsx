@@ -4,7 +4,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { CSSProperties, ChangeEvent, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { clearSession, ensureUsers, getLoginAttempts, getLoginFailureMessage, getSessionUser, loginWithCredentials, type LoginAttemptLog } from "./auth";
-import { SHARED_STORAGE_UPDATED_EVENT, pullSharedStorageSnapshot, pushSharedStorageSnapshot } from "./sharedStorage";
+import {
+  SHARED_STORAGE_RESYNC_INTERVAL_MS,
+  SHARED_STORAGE_UPDATED_EVENT,
+  pullSharedStorageSnapshot,
+  pushSharedStorageSnapshot,
+} from "./sharedStorage";
 import { isAdminLikeRole, formatAuditAction, formatAuditScreen, formatAuditDetail, formatAuditDetailForNonAdmin, formatUserCreatedByLabel, formatUserApprovedByLabel } from "./planner/utils/audit";
 import {
   APPROVAL_STATUS_LABELS,
@@ -72,6 +77,27 @@ import {
   createEmptyPartyCompanyTemplates,
   normalizePartyCompanyTemplateMap,
 } from "./planner/utils/partyCompanyTemplates";
+import {
+  createBlankProject,
+  createDefaultRelatedParties,
+  createPhotoSlots,
+  layoutAnnotationsV2ToLegacy,
+  legacyLayoutAnnotationsToV2,
+  normalizeLayoutAnnotations,
+  normalizeLayoutAnnotationsV2,
+  normalizePdfTemplateId,
+  normalizeProject,
+} from "./features/project-core/project-normalize";
+import {
+  formatProjectEditLockNotice,
+  getProjectEditLockKey,
+  getProjectEditLockOwner,
+  PROJECT_EDIT_LOCK_HEARTBEAT_MS,
+  releaseProjectEditLock,
+  syncProjectEditLock,
+  type ProjectEditLock,
+  type ProjectEditLockSyncResult,
+} from "./features/project-core/project-edit-lock";
 import type {
   AuditLog,
   CropSelectionDragState,
@@ -148,6 +174,7 @@ import { CsvEditorSection } from "./planner/ui/CsvEditorSection";
 import { TrackingSection } from "./planner/ui/TrackingSection";
 import { PdfCoverAndTocSection } from "./planner/ui/PdfCoverAndTocSection";
 import { PdfWorkOverviewPreview } from "./planner/ui/PdfWorkOverviewPreview";
+import { NoticePrintDocument, NoticeWorkspace } from "./features/notice/NoticeWorkspace";
 
 function LayoutAnnotatedImage({
   imageUrl,
@@ -343,40 +370,6 @@ function UploadDropZone({
       {dragActive ? <p className="upload-dropzone-drag-hint">ここにドロップ</p> : null}
     </div>
   );
-}
-
-function isPdfTemplateId(value: unknown): value is PdfTemplateId {
-  return value === "standard" || value === "kansai" || value === "night";
-}
-
-function normalizePdfTemplateId(value: unknown): PdfTemplateId {
-  if (typeof value !== "string") {
-    return "standard";
-  }
-  const token = value.trim().toLowerCase();
-  if (isPdfTemplateId(token)) {
-    return token;
-  }
-  if (token.includes("kansai") || token.includes("関西")) {
-    return "kansai";
-  }
-  if (token.includes("night") || token.includes("深夜")) {
-    return "night";
-  }
-  return "standard";
-}
-
-function createPhotoSlots(labels?: string[]): PhotoSlots {
-  const defaults = labels?.length
-    ? labels
-    : ["写真A（着工前）", "写真B（施工中）", "写真C（施工後）", "写真D（その他）"];
-  return defaults.map((label, idx) => ({
-    id: uid(`photo_${idx + 1}`),
-    label,
-    dataUrl: "",
-    layoutAnnotations: [],
-    layoutAnnotationsV2: [],
-  }));
 }
 
 function cloneScheduleRows(rows: ScheduleRow[]): ScheduleRow[] {
@@ -608,53 +601,6 @@ function createDefaultNoticeAdviceItems(): NoticeAdviceItem[] {
       body: "停電復旧後に濁り水が出る場合があります。その際は濁った水が出なくなるまで水を出してください。",
     },
   ];
-}
-
-function createDefaultRelatedParties(
-  seed?: { [K in keyof Project["relatedParties"]]?: Partial<RelatedParty> },
-): Project["relatedParties"] {
-  return {
-    owner: {
-      enabled: seed?.owner?.enabled ?? true,
-      title: seed?.owner?.title ?? "発注者",
-      company: seed?.owner?.company ?? "",
-      person: seed?.owner?.person ?? "",
-      office: seed?.owner?.office ?? "",
-      tel: seed?.owner?.tel ?? "",
-    },
-    utility: {
-      enabled: seed?.utility?.enabled ?? true,
-      title: seed?.utility?.title ?? "電力会社",
-      company: seed?.utility?.company ?? "",
-      person: seed?.utility?.person ?? "",
-      office: seed?.utility?.office ?? "",
-      tel: seed?.utility?.tel ?? "",
-    },
-    contractor: {
-      enabled: seed?.contractor?.enabled ?? true,
-      title: seed?.contractor?.title ?? "施工者",
-      company: seed?.contractor?.company ?? "",
-      person: seed?.contractor?.person ?? "",
-      office: seed?.contractor?.office ?? "",
-      tel: seed?.contractor?.tel ?? "",
-    },
-    management: {
-      enabled: seed?.management?.enabled ?? true,
-      title: seed?.management?.title ?? "管理組合・管理会社",
-      company: seed?.management?.company ?? "管理組合さま / 管理会社さま",
-      person: seed?.management?.person ?? "",
-      office: seed?.management?.office ?? "",
-      tel: seed?.management?.tel ?? "",
-    },
-    residents: {
-      enabled: seed?.residents?.enabled ?? true,
-      title: seed?.residents?.title ?? "居住者",
-      company: seed?.residents?.company ?? "居住者さま",
-      person: seed?.residents?.person ?? "",
-      office: seed?.residents?.office ?? "",
-      tel: seed?.residents?.tel ?? "",
-    },
-  };
 }
 
 function seedTestEditorUsers(existingUsers: UserAccount[]): { nextUsers: UserAccount[]; addedCount: number } {
@@ -912,402 +858,6 @@ function applyV2TransformToPoint(
     x: clampCanvasCoord(rotatedX + transform.x),
     y: clampCanvasCoord(rotatedY + transform.y),
   };
-}
-
-function normalizeLayoutAnnotations(value: unknown): LayoutAnnotation[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  const normalized: LayoutAnnotation[] = [];
-  value.forEach((raw, index) => {
-    if (!raw || typeof raw !== "object") {
-      return;
-    }
-    const item = raw as Partial<LayoutAnnotation> & Record<string, unknown>;
-    const id = item.id && String(item.id).trim() ? String(item.id) : uid(`anno_${index + 1}`);
-    const color = normalizeAnnotationColor(item.color);
-    const groupId = item.groupId && String(item.groupId).trim() ? String(item.groupId).trim() : undefined;
-    const rotation = normalizeRotation(item.rotation);
-    const name = item.name && String(item.name).trim() ? String(item.name).trim() : undefined;
-    const visible = normalizeAnnotationVisible(item.visible);
-    const locked = normalizeAnnotationLocked(item.locked);
-    if (item.type === "arrow") {
-      normalized.push({
-        id,
-        type: "arrow",
-        color,
-        groupId,
-        rotation,
-        name,
-        visible,
-        locked,
-        fromX: clampCanvasCoord(Number(item.fromX ?? 0)),
-        fromY: clampCanvasCoord(Number(item.fromY ?? 0)),
-        toX: clampCanvasCoord(Number(item.toX ?? 0)),
-        toY: clampCanvasCoord(Number(item.toY ?? 0)),
-        strokeWidth: normalizeStrokeWidth(item.strokeWidth, DEFAULT_ANNOTATION_STROKE_WIDTH),
-        arrowHead: item.arrowHead === undefined ? true : normalizeAnnotationVisible(item.arrowHead),
-      });
-      return;
-    }
-    if (item.type === "rect") {
-      const x = clampCanvasCoord(Number(item.x ?? 0));
-      const y = clampCanvasCoord(Number(item.y ?? 0));
-      const width = clamp(Number(item.width ?? 0), 1, LAYOUT_CANVAS_SIZE);
-      const height = clamp(Number(item.height ?? 0), 1, LAYOUT_CANVAS_SIZE);
-      normalized.push({
-        id,
-        type: "rect",
-        color,
-        groupId,
-        rotation,
-        name,
-        visible,
-        locked,
-        fillColor: normalizeAnnotationColor(item.fillColor || DEFAULT_ANNOTATION_FILL_COLOR),
-        fillOpacity: normalizeFillOpacity(item.fillOpacity, 0),
-        x,
-        y,
-        width,
-        height,
-        strokeWidth: normalizeStrokeWidth(item.strokeWidth, DEFAULT_ANNOTATION_STROKE_WIDTH),
-      });
-      return;
-    }
-    if (item.type === "polygon") {
-      const x = clampCanvasCoord(Number(item.x ?? 0));
-      const y = clampCanvasCoord(Number(item.y ?? 0));
-      const width = clamp(Number(item.width ?? 0), 1, LAYOUT_CANVAS_SIZE);
-      const height = clamp(Number(item.height ?? 0), 1, LAYOUT_CANVAS_SIZE);
-      normalized.push({
-        id,
-        type: "polygon",
-        color,
-        groupId,
-        rotation,
-        name,
-        visible,
-        locked,
-        fillColor: normalizeAnnotationColor(item.fillColor || DEFAULT_ANNOTATION_FILL_COLOR),
-        fillOpacity: normalizeFillOpacity(item.fillOpacity, 0),
-        x,
-        y,
-        width,
-        height,
-        sides: normalizePolygonSides(item.sides, 6),
-        strokeWidth: normalizeStrokeWidth(item.strokeWidth, DEFAULT_ANNOTATION_STROKE_WIDTH),
-      });
-      return;
-    }
-    if (item.type === "text") {
-      normalized.push({
-        id,
-        type: "text",
-        color,
-        groupId,
-        rotation,
-        name,
-        visible,
-        locked,
-        x: clampCanvasCoord(Number(item.x ?? 0)),
-        y: clampCanvasCoord(Number(item.y ?? 0)),
-        text: String(item.text ?? "注記"),
-        fontSize: normalizeFontSize(item.fontSize, 26),
-        fontWeight: normalizeFontWeight(item.fontWeight, 700),
-        fontFamily: normalizeFontFamily(item.fontFamily),
-        textStrokeColor: normalizeAnnotationColor(item.textStrokeColor || DEFAULT_TEXT_STROKE_COLOR),
-        textStrokeWidth: normalizeTextStrokeWidth(item.textStrokeWidth, DEFAULT_TEXT_STROKE_WIDTH),
-        textAlign: normalizeTextAlign(item.textAlign),
-      });
-    }
-  });
-  return normalized;
-}
-
-function legacyLayoutAnnotationsToV2(annotations: LayoutAnnotation[]): LayoutAnnotationV2[] {
-  return annotations.map((annotation) => {
-    const rotation = normalizeRotation(annotation.rotation);
-    if (annotation.type === "arrow") {
-      return {
-        id: annotation.id,
-        type: "arrow",
-        groupId: annotation.groupId,
-        name: annotation.name,
-        visible: normalizeAnnotationVisible(annotation.visible),
-        locked: normalizeAnnotationLocked(annotation.locked),
-        points: [annotation.fromX, annotation.fromY, annotation.toX, annotation.toY],
-        arrowHead: annotation.arrowHead !== false,
-        transform: createDefaultLayoutAnnotationV2Transform({ rotation }),
-        style: createDefaultLayoutAnnotationV2Style({
-          stroke: annotation.color,
-          strokeWidth: annotation.strokeWidth,
-          textColor: annotation.color,
-        }),
-      };
-    }
-    if (annotation.type === "rect") {
-      return {
-        id: annotation.id,
-        type: "rect",
-        groupId: annotation.groupId,
-        name: annotation.name,
-        visible: normalizeAnnotationVisible(annotation.visible),
-        locked: normalizeAnnotationLocked(annotation.locked),
-        x: annotation.x,
-        y: annotation.y,
-        width: annotation.width,
-        height: annotation.height,
-        transform: createDefaultLayoutAnnotationV2Transform({ rotation }),
-        style: createDefaultLayoutAnnotationV2Style({
-          stroke: annotation.color,
-          strokeWidth: annotation.strokeWidth,
-          fill: annotation.fillColor,
-          fillOpacity: annotation.fillOpacity,
-          textColor: annotation.color,
-        }),
-      };
-    }
-    if (annotation.type === "polygon") {
-      return {
-        id: annotation.id,
-        type: "polygon",
-        groupId: annotation.groupId,
-        name: annotation.name,
-        visible: normalizeAnnotationVisible(annotation.visible),
-        locked: normalizeAnnotationLocked(annotation.locked),
-        x: annotation.x,
-        y: annotation.y,
-        width: annotation.width,
-        height: annotation.height,
-        sides: normalizePolygonSides(annotation.sides, 6),
-        transform: createDefaultLayoutAnnotationV2Transform({ rotation }),
-        style: createDefaultLayoutAnnotationV2Style({
-          stroke: annotation.color,
-          strokeWidth: annotation.strokeWidth,
-          fill: annotation.fillColor,
-          fillOpacity: annotation.fillOpacity,
-          textColor: annotation.color,
-        }),
-      };
-    }
-    return {
-      id: annotation.id,
-      type: "text",
-      groupId: annotation.groupId,
-      name: annotation.name,
-      visible: normalizeAnnotationVisible(annotation.visible),
-      locked: normalizeAnnotationLocked(annotation.locked),
-      x: annotation.x,
-      y: annotation.y,
-      text: annotation.text,
-      transform: createDefaultLayoutAnnotationV2Transform({ rotation }),
-      style: createDefaultLayoutAnnotationV2Style({
-        stroke: annotation.color,
-        textColor: annotation.color,
-        fontSize: annotation.fontSize,
-        fontWeight: annotation.fontWeight,
-        fontFamily: annotation.fontFamily,
-        textStrokeColor: annotation.textStrokeColor,
-        textStrokeWidth: annotation.textStrokeWidth,
-        textAlign: annotation.textAlign,
-      }),
-    };
-  });
-}
-
-function layoutAnnotationsV2ToLegacy(annotations: LayoutAnnotationV2[]): LayoutAnnotation[] {
-  return annotations.map((annotation) => {
-    if (annotation.type === "arrow") {
-      const p1 = applyV2TransformToPoint(annotation.points[0], annotation.points[1], annotation.transform);
-      const p2 = applyV2TransformToPoint(annotation.points[2], annotation.points[3], annotation.transform);
-      return {
-        id: annotation.id,
-        type: "arrow",
-        groupId: annotation.groupId,
-        name: annotation.name,
-        visible: normalizeAnnotationVisible(annotation.visible),
-        locked: normalizeAnnotationLocked(annotation.locked),
-        color: normalizeAnnotationColor(annotation.style.stroke),
-        rotation: normalizeRotation(annotation.transform.rotation),
-        fromX: p1.x,
-        fromY: p1.y,
-        toX: p2.x,
-        toY: p2.y,
-        strokeWidth: normalizeStrokeWidth(annotation.style.strokeWidth, DEFAULT_ANNOTATION_STROKE_WIDTH),
-        arrowHead: annotation.arrowHead !== false,
-      };
-    }
-    if (annotation.type === "rect") {
-      const p1 = applyV2TransformToPoint(annotation.x, annotation.y, annotation.transform);
-      const p2 = applyV2TransformToPoint(annotation.x + annotation.width, annotation.y, annotation.transform);
-      const p3 = applyV2TransformToPoint(annotation.x, annotation.y + annotation.height, annotation.transform);
-      const p4 = applyV2TransformToPoint(annotation.x + annotation.width, annotation.y + annotation.height, annotation.transform);
-      const left = Math.min(p1.x, p2.x, p3.x, p4.x);
-      const top = Math.min(p1.y, p2.y, p3.y, p4.y);
-      const right = Math.max(p1.x, p2.x, p3.x, p4.x);
-      const bottom = Math.max(p1.y, p2.y, p3.y, p4.y);
-      return {
-        id: annotation.id,
-        type: "rect",
-        groupId: annotation.groupId,
-        name: annotation.name,
-        visible: normalizeAnnotationVisible(annotation.visible),
-        locked: normalizeAnnotationLocked(annotation.locked),
-        color: normalizeAnnotationColor(annotation.style.stroke),
-        rotation: normalizeRotation(annotation.transform.rotation),
-        fillColor: normalizeAnnotationColor(annotation.style.fill || DEFAULT_ANNOTATION_FILL_COLOR),
-        fillOpacity: normalizeFillOpacity(annotation.style.fillOpacity, 0),
-        x: clampCanvasCoord(left),
-        y: clampCanvasCoord(top),
-        width: clamp(right - left, 1, LAYOUT_CANVAS_SIZE),
-        height: clamp(bottom - top, 1, LAYOUT_CANVAS_SIZE),
-        strokeWidth: normalizeStrokeWidth(annotation.style.strokeWidth, DEFAULT_ANNOTATION_STROKE_WIDTH),
-      };
-    }
-    if (annotation.type === "polygon") {
-      const p1 = applyV2TransformToPoint(annotation.x, annotation.y, annotation.transform);
-      const p2 = applyV2TransformToPoint(annotation.x + annotation.width, annotation.y, annotation.transform);
-      const p3 = applyV2TransformToPoint(annotation.x, annotation.y + annotation.height, annotation.transform);
-      const p4 = applyV2TransformToPoint(annotation.x + annotation.width, annotation.y + annotation.height, annotation.transform);
-      const left = Math.min(p1.x, p2.x, p3.x, p4.x);
-      const top = Math.min(p1.y, p2.y, p3.y, p4.y);
-      const right = Math.max(p1.x, p2.x, p3.x, p4.x);
-      const bottom = Math.max(p1.y, p2.y, p3.y, p4.y);
-      return {
-        id: annotation.id,
-        type: "polygon",
-        groupId: annotation.groupId,
-        name: annotation.name,
-        visible: normalizeAnnotationVisible(annotation.visible),
-        locked: normalizeAnnotationLocked(annotation.locked),
-        color: normalizeAnnotationColor(annotation.style.stroke),
-        rotation: normalizeRotation(annotation.transform.rotation),
-        fillColor: normalizeAnnotationColor(annotation.style.fill || DEFAULT_ANNOTATION_FILL_COLOR),
-        fillOpacity: normalizeFillOpacity(annotation.style.fillOpacity, 0),
-        x: clampCanvasCoord(left),
-        y: clampCanvasCoord(top),
-        width: clamp(right - left, 1, LAYOUT_CANVAS_SIZE),
-        height: clamp(bottom - top, 1, LAYOUT_CANVAS_SIZE),
-        sides: normalizePolygonSides(annotation.sides, 6),
-        strokeWidth: normalizeStrokeWidth(annotation.style.strokeWidth, DEFAULT_ANNOTATION_STROKE_WIDTH),
-      };
-    }
-    const p = applyV2TransformToPoint(annotation.x, annotation.y, annotation.transform);
-    return {
-      id: annotation.id,
-      type: "text",
-      groupId: annotation.groupId,
-      name: annotation.name,
-      visible: normalizeAnnotationVisible(annotation.visible),
-      locked: normalizeAnnotationLocked(annotation.locked),
-      color: normalizeAnnotationColor(annotation.style.textColor || annotation.style.stroke),
-      rotation: normalizeRotation(annotation.transform.rotation),
-      x: p.x,
-      y: p.y,
-      text: annotation.text || "注記",
-      fontSize: normalizeFontSize(annotation.style.fontSize, 26),
-      fontWeight: normalizeFontWeight(annotation.style.fontWeight, 700),
-      fontFamily: normalizeFontFamily(annotation.style.fontFamily),
-      textStrokeColor: normalizeAnnotationColor(annotation.style.textStrokeColor || DEFAULT_TEXT_STROKE_COLOR),
-      textStrokeWidth: normalizeTextStrokeWidth(annotation.style.textStrokeWidth, DEFAULT_TEXT_STROKE_WIDTH),
-      textAlign: normalizeTextAlign(annotation.style.textAlign),
-    };
-  });
-}
-
-function normalizeLayoutAnnotationsV2(value: unknown): LayoutAnnotationV2[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  const normalized: LayoutAnnotationV2[] = [];
-  value.forEach((raw, index) => {
-    if (!raw || typeof raw !== "object") {
-      return;
-    }
-    const item = raw as Partial<LayoutAnnotationV2> & Record<string, unknown>;
-    const id = item.id && String(item.id).trim() ? String(item.id) : uid(`anno_v2_${index + 1}`);
-    const groupId = item.groupId && String(item.groupId).trim() ? String(item.groupId).trim() : undefined;
-    const name = item.name && String(item.name).trim() ? String(item.name).trim() : undefined;
-    const visible = normalizeAnnotationVisible(item.visible);
-    const locked = normalizeAnnotationLocked(item.locked);
-    const transform = createDefaultLayoutAnnotationV2Transform(
-      item.transform && typeof item.transform === "object" ? (item.transform as Partial<LayoutAnnotationV2Transform>) : null,
-    );
-    const style = createDefaultLayoutAnnotationV2Style(
-      item.style && typeof item.style === "object" ? (item.style as Partial<LayoutAnnotationV2Style>) : null,
-    );
-    if (item.type === "arrow") {
-      const points = Array.isArray(item.points) ? item.points : [];
-      const p0 = clampCanvasCoord(Number(points[0] ?? 0));
-      const p1 = clampCanvasCoord(Number(points[1] ?? 0));
-      const p2 = clampCanvasCoord(Number(points[2] ?? 0));
-      const p3 = clampCanvasCoord(Number(points[3] ?? 0));
-      normalized.push({
-        id,
-        type: "arrow",
-        groupId,
-        name,
-        visible,
-        locked,
-        points: [p0, p1, p2, p3],
-        arrowHead: item.arrowHead === undefined ? true : normalizeAnnotationVisible(item.arrowHead),
-        transform,
-        style,
-      });
-      return;
-    }
-    if (item.type === "rect") {
-      normalized.push({
-        id,
-        type: "rect",
-        groupId,
-        name,
-        visible,
-        locked,
-        x: clampCanvasCoord(Number(item.x ?? 0)),
-        y: clampCanvasCoord(Number(item.y ?? 0)),
-        width: clamp(Number(item.width ?? 0), 1, LAYOUT_CANVAS_SIZE),
-        height: clamp(Number(item.height ?? 0), 1, LAYOUT_CANVAS_SIZE),
-        transform,
-        style,
-      });
-      return;
-    }
-    if (item.type === "polygon") {
-      normalized.push({
-        id,
-        type: "polygon",
-        groupId,
-        name,
-        visible,
-        locked,
-        x: clampCanvasCoord(Number(item.x ?? 0)),
-        y: clampCanvasCoord(Number(item.y ?? 0)),
-        width: clamp(Number(item.width ?? 0), 1, LAYOUT_CANVAS_SIZE),
-        height: clamp(Number(item.height ?? 0), 1, LAYOUT_CANVAS_SIZE),
-        sides: normalizePolygonSides(item.sides, 6),
-        transform,
-        style,
-      });
-      return;
-    }
-    if (item.type === "text") {
-      normalized.push({
-        id,
-        type: "text",
-        groupId,
-        name,
-        visible,
-        locked,
-        x: clampCanvasCoord(Number(item.x ?? 0)),
-        y: clampCanvasCoord(Number(item.y ?? 0)),
-        text: String(item.text ?? "注記"),
-        transform,
-        style,
-      });
-    }
-  });
-  return normalized;
 }
 
 function buildArrowHeadPoints(fromX: number, fromY: number, toX: number, toY: number): string {
@@ -1918,246 +1468,6 @@ function buildRowsFromProcedureTemplate(project: Project, template: ScheduleProc
   });
 }
 
-function createBlankProject(seed?: Partial<Project>): Project {
-  const flags: Record<WorkCode, boolean> = {
-    KOUATSU_CABLE: false,
-    UGS: false,
-    PAS: false,
-    GROUND_A: false,
-    GROUND_B: false,
-    GROUND_C: false,
-  };
-
-  const normalizedLegacySeed = normalizeLayoutAnnotations(seed?.layoutAnnotations ?? []);
-  const seededV2 = seed?.layoutAnnotationsV2 ?? legacyLayoutAnnotationsToV2(normalizedLegacySeed);
-  const layoutAnnotationsV2 = normalizeLayoutAnnotationsV2(seededV2);
-  const legacyLayoutAnnotations = seed?.layoutAnnotationsV2 && !seed?.layoutAnnotations
-    ? layoutAnnotationsV2ToLegacy(layoutAnnotationsV2)
-    : normalizedLegacySeed;
-  const noticeMainWorkDate = seed?.noticeMainWorkDate ?? seed?.workDateStart ?? "";
-
-  return {
-    projectId: seed?.projectId ?? `PJ-${new Date().getFullYear()}-${Math.floor(Math.random() * 9000 + 1000)}`,
-    propertyName: seed?.propertyName ?? "",
-    propertyAddress: seed?.propertyAddress ?? "",
-    titleSubject: seed?.titleSubject ?? "",
-    workDateStart: seed?.workDateStart ?? "",
-    workDateEnd: seed?.workDateEnd ?? "",
-    outageDateStart: seed?.outageDateStart ?? "",
-    outageDateEnd: seed?.outageDateEnd ?? "",
-    outageTimeStart: seed?.outageTimeStart ?? "",
-    outageTimeEnd: seed?.outageTimeEnd ?? "",
-    outageEnabled: seed?.outageEnabled ?? false,
-    flags,
-    selectedWorkCodes: seed?.selectedWorkCodes ?? [],
-    noteSpecial: seed?.noteSpecial ?? "",
-    noteApprovalExtra: seed?.noteApprovalExtra ?? "",
-    coverRecipientSuffix: seed?.coverRecipientSuffix ?? "",
-    pdfTemplateId: normalizePdfTemplateId(seed?.pdfTemplateId),
-    pdfCompanyName: seed?.pdfCompanyName ?? "",
-    pdfTeam: seed?.pdfTeam ?? "",
-    pdfContactPerson: seed?.pdfContactPerson ?? "",
-    pdfAddress: seed?.pdfAddress ?? "",
-    pdfEmail: seed?.pdfEmail ?? "",
-    pdfTel: seed?.pdfTel ?? "",
-    pdfFax: seed?.pdfFax ?? "",
-    layoutImageDataUrl: seed?.layoutImageDataUrl ?? "",
-    layoutAnnotations: legacyLayoutAnnotations,
-    layoutAnnotationsV2,
-    scheduleRows: seed?.scheduleRows ?? [],
-    detailPhotos: seed?.detailPhotos ?? createPhotoSlots(),
-    layoutPhotos: seed?.layoutPhotos ?? createPhotoSlots(["写真A（配置図）", "写真B（配置図）", "写真C（配置図）", "写真D（配置図）"]),
-    relatedParties: seed?.relatedParties ?? createDefaultRelatedParties(),
-    approvalStatus: seed?.approvalStatus ?? "draft",
-    approvalComment: seed?.approvalComment ?? "",
-    approvedBy: seed?.approvedBy ?? "",
-    approvedAt: seed?.approvedAt ?? "",
-    pdfExportCount: seed?.pdfExportCount ?? 0,
-    pdfLastExportedAt: seed?.pdfLastExportedAt ?? "",
-    noticePropertyName: seed?.noticePropertyName ?? seed?.propertyName ?? "",
-    noticeRecipientName: seed?.noticeRecipientName ?? "お住まいの皆さまへ",
-    noticeSenderCompany: seed?.noticeSenderCompany ?? seed?.pdfCompanyName ?? "レジル株式会社",
-    noticeHeadline: seed?.noticeHeadline ?? "電気設備点検に伴う全館停電のお知らせ",
-    noticeIntroText:
-      seed?.noticeIntroText ??
-      "平素より弊社サービスをご利用いただき誠にありがとうございます。\nこの度、以下日程にて停電を伴う法定点検を実施いたします。\nお客さまにはご不便をお掛け致しますが、ご理解とご協力のほどよろしくお願い申し上げます。",
-    noticeMainWorkDate,
-    noticeOutageDate: seed?.noticeOutageDate ?? seed?.outageDateStart ?? noticeMainWorkDate,
-    noticeOutageTimeStart: seed?.noticeOutageTimeStart ?? seed?.outageTimeStart ?? "09:00",
-    noticeOutageTimeEnd: seed?.noticeOutageTimeEnd ?? seed?.outageTimeEnd ?? "17:00",
-    noticeScheduleRows: seed?.noticeScheduleRows ? cloneNoticeScheduleRows(seed.noticeScheduleRows) : createDefaultNoticeScheduleRows(noticeMainWorkDate),
-    noticePrivateAreaText:
-      seed?.noticePrivateAreaText ??
-      "【専有部】家電製品（電気で作動するもの全て）、水道\n※専有部についてのご注意は裏面をご覧ください",
-    noticeCommonAreaText:
-      seed?.noticeCommonAreaText ??
-      "【共用部】エレベーター、オートロック式ドア、インターホン、宅配ボックス、機械式駐車場など\n※上記設備は停電中ご利用いただけませんのでご注意ください",
-    noticeCompensationText:
-      seed?.noticeCompensationText ??
-      "電気設備点検時に発生したお客さまの家電製品及び設備の故障は、弊社に過失がない（通常の点検を実施している）場合、補償いたしかねますので、あらかじめご了承ください。",
-    noticeContactCompany: seed?.noticeContactCompany ?? seed?.pdfCompanyName ?? "レジル株式会社",
-    noticeContactDepartment: seed?.noticeContactDepartment ?? "サポートセンター",
-    noticeContactAddress: seed?.noticeContactAddress ?? "大阪府東大阪市瓜生堂1-2-18",
-    noticeContactTel: seed?.noticeContactTel ?? "0120-45-2020",
-    noticeContactHours: seed?.noticeContactHours ?? "9:00〜17:00（土日・祝日・年末年始を除く）",
-    noticeAdviceItems: seed?.noticeAdviceItems ? cloneNoticeAdviceItems(seed.noticeAdviceItems) : createDefaultNoticeAdviceItems(),
-  };
-}
-
-function normalizeProject(
-  project: Partial<Project> & {
-    workDateMain?: string;
-    photos?: Record<string, Partial<PhotoSlot>>;
-    relatedParties?: Partial<Project["relatedParties"]>;
-  },
-): Project {
-  const start = normalizeDate(project.workDateStart ?? project.workDateMain ?? "");
-  const end = normalizeDate(project.workDateEnd ?? "") || start;
-  const normalizedRows = (project.scheduleRows ?? []).map((row) => {
-    const rowStartDate = normalizeDate((row as Partial<Record<"startDate", string>>).startDate ?? project.outageDateStart ?? start) || start;
-    const rowEndDate = normalizeDate((row as Partial<Record<"endDate", string>>).endDate ?? rowStartDate) || rowStartDate;
-    return {
-      ...row,
-      startDate: rowStartDate,
-      start: normalizeTime(row.start ?? "", ""),
-      endDate: rowEndDate,
-      end: normalizeTime(row.end ?? "", ""),
-    };
-  });
-
-  const flags: Record<WorkCode, boolean> = {
-    KOUATSU_CABLE: !!project.flags?.KOUATSU_CABLE,
-    UGS: !!project.flags?.UGS,
-    PAS: !!project.flags?.PAS,
-    GROUND_A: !!project.flags?.GROUND_A,
-    GROUND_B: !!project.flags?.GROUND_B,
-    GROUND_C: !!project.flags?.GROUND_C,
-  };
-
-  const normalizePhotoArray = (value: unknown, fallbackLabels: string[]): PhotoSlots => {
-    if (Array.isArray(value)) {
-      const normalized = value
-        .map((item, idx) => {
-          if (!item || typeof item !== "object") {
-            return null;
-          }
-          const raw = item as Partial<PhotoSlot>;
-          const normalizedLegacy = normalizeLayoutAnnotations(raw.layoutAnnotations);
-          const normalizedV2 = normalizeLayoutAnnotationsV2(raw.layoutAnnotationsV2);
-          const layoutAnnotationsV2 = normalizedV2.length ? normalizedV2 : legacyLayoutAnnotationsToV2(normalizedLegacy);
-          const layoutAnnotations = normalizedV2.length ? layoutAnnotationsV2ToLegacy(layoutAnnotationsV2) : normalizedLegacy;
-          return {
-            id: raw.id || uid(`photo_${idx + 1}`),
-            label: raw.label || fallbackLabels[idx] || `写真${idx + 1}`,
-            dataUrl: raw.dataUrl || "",
-            layoutAnnotations,
-            layoutAnnotationsV2,
-          };
-        })
-        .filter((item): item is PhotoSlot => item !== null);
-      return normalized.length ? normalized : createPhotoSlots(fallbackLabels);
-    }
-    if (value && typeof value === "object") {
-      const entries = Object.entries(value as Record<string, Partial<PhotoSlot>>);
-      const normalized = entries.map(([key, raw], idx) => ({
-        ...(function build() {
-          const normalizedLegacy = normalizeLayoutAnnotations(raw.layoutAnnotations);
-          const normalizedV2 = normalizeLayoutAnnotationsV2(raw.layoutAnnotationsV2);
-          const layoutAnnotationsV2 = normalizedV2.length ? normalizedV2 : legacyLayoutAnnotationsToV2(normalizedLegacy);
-          const layoutAnnotations = normalizedV2.length ? layoutAnnotationsV2ToLegacy(layoutAnnotationsV2) : normalizedLegacy;
-          return {
-            id: raw.id || key || uid(`photo_${idx + 1}`),
-            label: raw.label || fallbackLabels[idx] || `写真${idx + 1}`,
-            dataUrl: raw.dataUrl || "",
-            layoutAnnotations,
-            layoutAnnotationsV2,
-          };
-        })(),
-      }));
-      return normalized.length ? normalized : createPhotoSlots(fallbackLabels);
-    }
-    return createPhotoSlots(fallbackLabels);
-  };
-
-  const detailPhotos = normalizePhotoArray(project.detailPhotos ?? project.photos, ["写真A（着工前）", "写真B（施工中）", "写真C（施工後）", "写真D（その他）"]);
-  const layoutPhotos = normalizePhotoArray(project.layoutPhotos, ["写真A（配置図）", "写真B（配置図）", "写真C（配置図）", "写真D（配置図）"]);
-  const normalizedLegacyAnnotations = normalizeLayoutAnnotations(project.layoutAnnotations);
-  const normalizedV2Annotations = normalizeLayoutAnnotationsV2(project.layoutAnnotationsV2);
-  const layoutAnnotationsV2 = normalizedV2Annotations.length
-    ? normalizedV2Annotations
-    : legacyLayoutAnnotationsToV2(normalizedLegacyAnnotations);
-  const layoutAnnotations = normalizedV2Annotations.length
-    ? layoutAnnotationsV2ToLegacy(layoutAnnotationsV2)
-    : normalizedLegacyAnnotations;
-  const pdfTemplateId = normalizePdfTemplateId(project.pdfTemplateId);
-  const relatedParties = createDefaultRelatedParties(project.relatedParties);
-  relatedParties.owner.company = project.pdfCompanyName || relatedParties.owner.company;
-  relatedParties.owner.office = project.pdfTeam || relatedParties.owner.office;
-  relatedParties.owner.person = project.pdfContactPerson || relatedParties.owner.person;
-  relatedParties.owner.tel = project.pdfTel || relatedParties.owner.tel;
-
-  return {
-    ...createBlankProject({
-      projectId: project.projectId,
-      propertyName: project.propertyName,
-      propertyAddress: project.propertyAddress,
-      titleSubject: project.titleSubject,
-      workDateStart: start,
-      workDateEnd: end,
-      outageDateStart: normalizeDate(project.outageDateStart ?? project.workDateStart ?? "") || start,
-      outageDateEnd: normalizeDate(project.outageDateEnd ?? project.workDateStart ?? project.workDateEnd ?? "") || start,
-      outageTimeStart: normalizeTime(project.outageTimeStart ?? (project as Partial<Record<"workTimeStart", string>>).workTimeStart ?? "", ""),
-      outageTimeEnd: normalizeTime(project.outageTimeEnd ?? (project as Partial<Record<"workTimeEnd", string>>).workTimeEnd ?? "", ""),
-      outageEnabled: typeof project.outageEnabled === "boolean" ? project.outageEnabled : false,
-      selectedWorkCodes: project.selectedWorkCodes,
-      noteSpecial: project.noteSpecial,
-      noteApprovalExtra: project.noteApprovalExtra,
-      coverRecipientSuffix: project.coverRecipientSuffix,
-      pdfTemplateId,
-      pdfCompanyName: project.pdfCompanyName,
-      pdfTeam: project.pdfTeam,
-      pdfContactPerson: project.pdfContactPerson,
-      pdfAddress: project.pdfAddress,
-      pdfEmail: project.pdfEmail,
-      pdfTel: project.pdfTel,
-      pdfFax: project.pdfFax,
-      layoutImageDataUrl: project.layoutImageDataUrl,
-      layoutAnnotations,
-      layoutAnnotationsV2,
-      scheduleRows: normalizedRows,
-      detailPhotos,
-      layoutPhotos,
-      relatedParties,
-      approvalStatus: project.approvalStatus,
-      approvalComment: project.approvalComment,
-      approvedBy: project.approvedBy,
-      approvedAt: project.approvedAt,
-      pdfExportCount: Number.isFinite(project.pdfExportCount) ? Number(project.pdfExportCount) : 0,
-      pdfLastExportedAt: project.pdfLastExportedAt,
-      noticePropertyName: project.noticePropertyName,
-      noticeRecipientName: project.noticeRecipientName,
-      noticeSenderCompany: project.noticeSenderCompany,
-      noticeHeadline: project.noticeHeadline,
-      noticeIntroText: project.noticeIntroText,
-      noticeMainWorkDate: project.noticeMainWorkDate,
-      noticeOutageDate: project.noticeOutageDate,
-      noticeOutageTimeStart: project.noticeOutageTimeStart,
-      noticeOutageTimeEnd: project.noticeOutageTimeEnd,
-      noticeScheduleRows: project.noticeScheduleRows,
-      noticePrivateAreaText: project.noticePrivateAreaText,
-      noticeCommonAreaText: project.noticeCommonAreaText,
-      noticeCompensationText: project.noticeCompensationText,
-      noticeContactCompany: project.noticeContactCompany,
-      noticeContactDepartment: project.noticeContactDepartment,
-      noticeContactAddress: project.noticeContactAddress,
-      noticeContactTel: project.noticeContactTel,
-      noticeContactHours: project.noticeContactHours,
-      noticeAdviceItems: project.noticeAdviceItems,
-    }),
-    flags,
-  };
-}
-
 function normalizeWorkToken(value: string): string {
   return String(value ?? "").trim().toLowerCase().replace(/[ \t　_\-\/]/g, "");
 }
@@ -2287,6 +1597,9 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   const [hydrated, setHydrated] = useState(false);
   const [sharedStorageReady, setSharedStorageReady] = useState(false);
   const [sharedSyncState, setSharedSyncState] = useState<"idle" | "pending" | "syncing" | "synced" | "error">("idle");
+  const [projectEditLock, setProjectEditLock] = useState<ProjectEditLock | null>(null);
+  const [projectEditLockStatus, setProjectEditLockStatus] = useState<ProjectEditLockSyncResult["status"]>("idle");
+  const [projectEditLockNotice, setProjectEditLockNotice] = useState("");
   const [lastSavedAt, setLastSavedAt] = useState("-");
   const [importStatus, setImportStatus] = useState("CSV未取込");
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
@@ -2307,6 +1620,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   const [detailPhotoSlide, setDetailPhotoSlide] = useState(0);
   const [layoutPhotoSlide, setLayoutPhotoSlide] = useState(0);
   const [printMode, setPrintMode] = useState(false);
+  const [noticePrintMode, setNoticePrintMode] = useState(false);
   const [scheduleTemplates, setScheduleTemplates] = useState<Array<SimpleTemplate<ScheduleRow[]>>>([]);
   const [scheduleProcedureTemplates, setScheduleProcedureTemplates] = useState<ScheduleProcedureTemplate[]>(
     cloneScheduleProcedureTemplates(DEFAULT_SCHEDULE_PROCEDURE_TEMPLATES),
@@ -2640,6 +1954,62 @@ useEffect(() => {
   }, [hydrated, loadWorkspaceStateFromStorage]);
 
   useEffect(() => {
+    let cancelled = false;
+    const currentUserCurrent = users.find((user) => user.id === currentUserId && user.active && user.approvalStatus === "approved") ?? null;
+    const canEditCurrent = Boolean(currentUserCurrent && currentUserCurrent.role !== "viewer");
+    const projectEditOwnerCurrent = currentUserCurrent ? getProjectEditLockOwner(currentUserCurrent) : null;
+
+    const applyLockResult = (result: ProjectEditLockSyncResult): void => {
+      if (cancelled) {
+        return;
+      }
+      setProjectEditLock(result.lock);
+      setProjectEditLockStatus(result.status);
+      if (result.status === "locked_by_other") {
+        setProjectEditLockNotice(formatProjectEditLockNotice(result.lock, currentUserCurrent?.id));
+      } else {
+        setProjectEditLockNotice("");
+      }
+    };
+
+    if (!selectedId || !currentUserCurrent || mode === "csv") {
+      applyLockResult({ status: "idle", lock: null });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const refreshLock = async (acquire: boolean): Promise<void> => {
+      const result = await syncProjectEditLock(selectedId, projectEditOwnerCurrent, { acquire });
+      applyLockResult(result);
+    };
+
+    void refreshLock(canEditCurrent);
+
+    const heartbeat = window.setInterval(() => {
+      void refreshLock(canEditCurrent);
+    }, PROJECT_EDIT_LOCK_HEARTBEAT_MS);
+
+    const onStorage = (event: StorageEvent): void => {
+      if (event.key && event.key !== getProjectEditLockKey(selectedId)) {
+        return;
+      }
+      void refreshLock(false);
+    };
+
+    window.addEventListener("storage", onStorage);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(heartbeat);
+      window.removeEventListener("storage", onStorage);
+      if (canEditCurrent) {
+        void releaseProjectEditLock(selectedId, projectEditOwnerCurrent);
+      }
+    };
+  }, [currentUserId, mode, selectedId, users]);
+
+  useEffect(() => {
     if (!hydrated) {
       return;
     }
@@ -2647,8 +2017,26 @@ useEffect(() => {
       window.clearTimeout(saveTimerRef.current);
     }
     saveTimerRef.current = window.setTimeout(() => {
-      persistProjectsToStorage(projects);
-      saveTimerRef.current = null;
+      void (async () => {
+        const currentUserCurrent = users.find((user) => user.id === currentUserId && user.active && user.approvalStatus === "approved") ?? null;
+        const canEditCurrent = Boolean(currentUserCurrent && currentUserCurrent.role !== "viewer");
+        const projectEditOwnerCurrent = currentUserCurrent ? getProjectEditLockOwner(currentUserCurrent) : null;
+
+        if (selectedId && projectEditOwnerCurrent && canEditCurrent && mode !== "csv") {
+          const lockResult = await syncProjectEditLock(selectedId, projectEditOwnerCurrent, { acquire: true });
+          setProjectEditLock(lockResult.lock);
+          setProjectEditLockStatus(lockResult.status);
+          if (lockResult.status !== "owned") {
+            setProjectEditLockNotice(formatProjectEditLockNotice(lockResult.lock, currentUserCurrent?.id) || "この案件は現在ほかのユーザーが編集中です。");
+            setSharedSyncState("error");
+            saveTimerRef.current = null;
+            return;
+          }
+          setProjectEditLockNotice("");
+        }
+        persistProjectsToStorage(projects);
+        saveTimerRef.current = null;
+      })();
     }, PROJECT_SAVE_DEBOUNCE_MS);
 
     return () => {
@@ -2657,7 +2045,7 @@ useEffect(() => {
         saveTimerRef.current = null;
       }
     };
-  }, [projects, hydrated, persistProjectsToStorage]);
+  }, [currentUserId, hydrated, mode, persistProjectsToStorage, projects, selectedId, users]);
 
 useEffect(() => {
   if (!hydrated) {
@@ -2746,7 +2134,24 @@ useEffect(() => {
     return;
   }
 
+  const hasPendingLocalWrites = (): boolean => Boolean(saveTimerRef.current || csvSaveTimerRef.current);
+
+  const pullLatestWorkspace = async (): Promise<void> => {
+    if (hasPendingLocalWrites()) {
+      return;
+    }
+    const pulled = await pullSharedStorageSnapshot();
+    if (!pulled) {
+      return;
+    }
+    loadWorkspaceStateFromStorage(true);
+    setSharedSyncState("synced");
+  };
+
   const resyncWorkspace = async () => {
+    if (hasPendingLocalWrites()) {
+      return;
+    }
     setSharedSyncState("syncing");
     const pulled = await pullSharedStorageSnapshot();
     loadWorkspaceStateFromStorage(true);
@@ -2760,14 +2165,21 @@ useEffect(() => {
 
   const handleVisible = () => {
     if (document.visibilityState === "visible") {
-      void resyncWorkspace();
+      void pullLatestWorkspace();
     }
   };
+
+  const interval = window.setInterval(() => {
+    if (document.visibilityState === "visible") {
+      void pullLatestWorkspace();
+    }
+  }, SHARED_STORAGE_RESYNC_INTERVAL_MS);
 
   window.addEventListener("online", handleOnline);
   document.addEventListener("visibilitychange", handleVisible);
 
   return () => {
+    window.clearInterval(interval);
     window.removeEventListener("online", handleOnline);
     document.removeEventListener("visibilitychange", handleVisible);
   };
@@ -3005,6 +2417,11 @@ useEffect(() => {
   const canEdit = !!currentUser && currentUser.role !== "viewer";
   const canAdmin = !!currentUser && isAdminLikeRole(currentUser.role);
   const canApprove = !!currentUser && (isAdminLikeRole(currentUser.role) || currentUser.role === "editor");
+  const projectEditLockMessage = useMemo(
+    () => formatProjectEditLockNotice(projectEditLock, currentUser?.id),
+    [currentUser?.id, projectEditLock],
+  );
+  const canEditSelectedProject = canEdit && (!hasSelectedProject || projectEditLockStatus !== "locked_by_other");
   const cropEditorFrameAspectRatio = useMemo(() => {
     if (!cropEditorImageSize || !cropEditorImageSize.width || !cropEditorImageSize.height) {
       return 4 / 3;
@@ -3777,6 +3194,10 @@ useEffect(() => {
     updater: (project: Project) => Project,
     meta?: { action?: string; detail?: string; snapshotLabel?: string },
   ): void {
+    if (hasSelectedProject && !canEditSelectedProject) {
+      setProjectEditLockNotice(projectEditLockMessage || "この案件は現在ほかのユーザーが編集中です。");
+      return;
+    }
     if (!hasSelectedProject || !selectedId) {
       if (!canEdit) {
         return;
@@ -4095,7 +3516,8 @@ useEffect(() => {
   }
 
   function saveManualRevision(): void {
-    if (!canEdit) {
+    if (!canEditSelectedProject) {
+      setProjectEditLockNotice(projectEditLockMessage || "この案件は現在ほかのユーザーが編集中です。");
       return;
     }
     createRevision(selectedProject, `手動履歴保存 ${new Date().toLocaleString("ja-JP")}`);
@@ -4195,6 +3617,10 @@ useEffect(() => {
   }
 
   function restoreRevision(): void {
+    if (!canEditSelectedProject) {
+      setProjectEditLockNotice(projectEditLockMessage || "この案件は現在ほかのユーザーが編集中です。");
+      return;
+    }
     if (!canEdit || !selectedRevision) {
       return;
     }
@@ -4403,7 +3829,8 @@ useEffect(() => {
   }
 
   function deleteSelectedProject(): void {
-    if (!canEdit) {
+    if (!canEditSelectedProject) {
+      setProjectEditLockNotice(projectEditLockMessage || "この案件は現在ほかのユーザーが編集中です。");
       return;
     }
     if (!hasSelectedProject) {
@@ -5231,20 +4658,50 @@ useEffect(() => {
       return;
     }
     setRequiredHint("");
-    updateSelectedProject(
-      (project) => ({
-        ...project,
-        pdfExportCount: Math.max(0, project.pdfExportCount || 0) + 1,
-        pdfLastExportedAt: new Date().toISOString(),
-      }),
-      { action: "pdf_export", detail: "PDF出力を実行", snapshotLabel: "PDF出力実行前バックアップ" },
-    );
+    if (canEditSelectedProject) {
+      updateSelectedProject(
+        (project) => ({
+          ...project,
+          pdfExportCount: Math.max(0, project.pdfExportCount || 0) + 1,
+          pdfLastExportedAt: new Date().toISOString(),
+        }),
+        { action: "pdf_export", detail: "PDF出力を実行", snapshotLabel: "PDF出力実行前バックアップ" },
+      );
+    }
     const originalTitle = document.title;
     setPrintMode(true);
     document.title = "";
     const restore = () => {
       document.title = originalTitle;
       setPrintMode(false);
+      window.removeEventListener("afterprint", restore);
+    };
+    window.addEventListener("afterprint", restore);
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        window.print();
+      });
+    });
+    setTimeout(restore, 1500);
+  }
+
+  function exportNoticePdf(): void {
+    if (canEditSelectedProject && hasSelectedProject) {
+      const noticeDate = selectedProject.noticeOutageDate || selectedProject.noticeMainWorkDate || "-";
+      const managementCompany = selectedProject.relatedParties.management.company.trim() || "-";
+      const propertyName = selectedProject.noticePropertyName.trim() || selectedProject.propertyName.trim() || "-";
+      appendAudit(
+        "notice_print",
+        `日付: ${noticeDate} / 管理会社: ${managementCompany} / 物件名: ${propertyName}`,
+        selectedProject.projectId,
+      );
+    }
+    const originalTitle = document.title;
+    setNoticePrintMode(true);
+    document.title = "";
+    const restore = () => {
+      document.title = originalTitle;
+      setNoticePrintMode(false);
       window.removeEventListener("afterprint", restore);
     };
     window.addEventListener("afterprint", restore);
@@ -7598,7 +7055,7 @@ useEffect(() => {
                 type="button"
                 className="btn top-btn top-btn-delete top-btn-inline top-action-btn"
                 onClick={deleteSelectedProject}
-                disabled={!canEdit || !hasSelectedProject || projects.length <= 1}
+                disabled={!canEditSelectedProject || !hasSelectedProject || projects.length <= 1}
               >
               <span className="btn-icon"><UiIcon name="delete" /></span>
               案件削除
@@ -7674,7 +7131,7 @@ useEffect(() => {
                     deleteSelectedProject();
                     setMobileMenuOpen(false);
                   }}
-                  disabled={!canEdit || !hasSelectedProject || projects.length <= 1}
+                  disabled={!canEditSelectedProject || !hasSelectedProject || projects.length <= 1}
                 >
                   <span className="btn-icon"><UiIcon name="delete" /></span>
                   案件削除
@@ -7701,16 +7158,23 @@ useEffect(() => {
             <Link href="/menu" className="workspace-link subtle mobile-menu-back-link" onClick={() => setMobileMenuOpen(false)}>メニューへ戻る</Link>
           </div>
         </aside>
-        {isEditorMode && hasSelectedProject ? (
+        {isEditorMode && hasSelectedProject && totalMissingRequiredCount > 0 ? (
           <button
             type="button"
-            className="btn mobile-fab-missing"
-            onClick={scrollToMiniInput}
-            title="未入力項目へ移動"
+            className="btn missing-jump-fab"
+            onClick={() => scrollToMissingField()}
+            title={`未入力項目 ${totalMissingRequiredCount} 件の先頭へ移動`}
           >
             <span className="btn-icon"><UiIcon name="down" /></span>
-            ミニ入力へ移動
+            <span>未入力へ移動</span>
+            <span className="missing-jump-fab-count">{totalMissingRequiredCount}件</span>
           </button>
+        ) : null}
+
+        {projectEditLockNotice ? (
+          <section className="panel">
+            <p className="mini error-text">{projectEditLockNotice}</p>
+          </section>
         ) : null}
 
         <CsvEditorSection
@@ -7760,29 +7224,14 @@ useEffect(() => {
         />
 
         {isNoticeMode ? (
-        <section className="panel">
-          <div className="panel-head">
-            <div>
-              <h3 className="section-title">
-                <span className="section-icon" aria-hidden="true">
-                  <UiIcon name="template" />
-                </span>
-                停電案内文
-              </h3>
-              <p className="mini">
-                停電案内文の作成、事前工事日の整理、専用PDF出力を行うための独立ワークスペースです。
-              </p>
-            </div>
-          </div>
-
-          <section className="sub-panel">
-            <h4>新しい停電案内文ページを追加しました</h4>
-            <p className="mini">
-              このページは施工計画書PDFの中へ差し込む用途ではなく、停電案内文を別ページとして作成するための専用ページです。
-              今後ここに、停電日・停電時間・事前工事日・注意事項・案内文テンプレートの生成機能を順番に実装していけます。
-            </p>
-          </section>
-        </section>
+        <NoticeWorkspace
+          hasSelectedProject={hasSelectedProject}
+          selectedProject={selectedProject}
+          canEdit={canEdit}
+          canEditSelectedProject={canEditSelectedProject}
+          updateSelectedProject={updateSelectedProject}
+          onPrint={exportNoticePdf}
+        />
         ) : null}
 
         <TrackingSection
@@ -7795,6 +7244,7 @@ useEffect(() => {
           login={login}
           loginError={loginError}
           canEdit={canEdit}
+          canEditSelectedProject={canEditSelectedProject}
           canAdmin={canAdmin}
           userStats={userStats}
           newUserName={newUserName}
@@ -10286,6 +9736,11 @@ useEffect(() => {
             </article>
           ))}
         </div>
+      </section>
+      ) : null}
+      {isNoticeMode && noticePrintMode ? (
+      <section className="print-only">
+        <NoticePrintDocument project={selectedProject} />
       </section>
       ) : null}
     </>

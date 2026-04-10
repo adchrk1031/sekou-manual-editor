@@ -55,6 +55,20 @@ const SESSION_INACTIVITY_TIMEOUT_MS = 1000 * 60 * 60;
 const SESSION_ACTIVITY_WRITE_THROTTLE_MS = 15000;
 const LOGIN_LOCK_WINDOW_MS = 1000 * 60 * 15;
 const MAX_FAILED_ATTEMPTS = 5;
+const KNOWN_USER_NAME_BY_EMAIL: Record<string, string> = {
+  "h.adachi@denryoku.co.jp": "安達広樹",
+};
+
+function canonicalizeKnownPersonName(name: string, email?: string): string {
+  const normalizedEmail = normalizeEmail(typeof email === "string" ? email : "");
+  if (normalizedEmail && KNOWN_USER_NAME_BY_EMAIL[normalizedEmail]) {
+    return KNOWN_USER_NAME_BY_EMAIL[normalizedEmail];
+  }
+  if (name === "安達宏樹") {
+    return "安達広樹";
+  }
+  return name;
+}
 
 function isApproverRole(role: AuthRole): boolean {
   return role === "system_admin" || role === "admin";
@@ -315,7 +329,7 @@ function sanitizeUsers(users: AuthUser[]): AuthUser[] {
           : (typeof user.lastLoginAt === "string" && user.lastLoginAt ? user.lastLoginAt : new Date().toISOString()));
     return {
       ...user,
-      name: typeof user.name === "string" ? user.name : "",
+      name: canonicalizeKnownPersonName(typeof user.name === "string" ? user.name : "", normalizedEmail || user.email),
       email: normalizedEmail || user.email,
       password: typeof user.password === "string" ? user.password : "",
       active: normalizedRole === "system_admin" ? true : (typeof user.active === "boolean" ? user.active : true),
@@ -338,16 +352,17 @@ function sanitizeUsers(users: AuthUser[]): AuthUser[] {
               if (normalizedRole === "system_admin") {
                 return "システム管理者";
               }
-              const label = typeof user.approvedByName === "string" ? user.approvedByName.trim() : "";
+              const label = canonicalizeKnownPersonName(typeof user.approvedByName === "string" ? user.approvedByName.trim() : "");
               if (normalizedRole === "admin" && (!label || label === "システム" || label === "システム登録")) {
                 return "管理者";
               }
               if (label) {
                 return label;
               }
-              return user.createdByName || "システム登録";
+              return canonicalizeKnownPersonName(user.createdByName || "システム登録");
             })()
-          : user.approvedByName,
+          : canonicalizeKnownPersonName(typeof user.approvedByName === "string" ? user.approvedByName : ""),
+      createdByName: canonicalizeKnownPersonName(typeof user.createdByName === "string" ? user.createdByName : "", normalizedEmail || user.email),
     };
   });
 
@@ -487,7 +502,17 @@ export function getLoginAttempts(): LoginAttemptLog[] {
   try {
     const raw = localStorage.getItem(ACCESS_LOG_STORAGE_KEY);
     const parsed = raw ? (JSON.parse(raw) as LoginAttemptLog[]) : [];
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    const normalized = parsed.map((entry) => ({
+      ...entry,
+      userName: canonicalizeKnownPersonName(typeof entry.userName === "string" ? entry.userName : "", entry.email),
+    }));
+    if (JSON.stringify(normalized) !== JSON.stringify(parsed)) {
+      localStorage.setItem(ACCESS_LOG_STORAGE_KEY, JSON.stringify(normalized));
+    }
+    return normalized;
   } catch {
     return [];
   }
@@ -501,6 +526,7 @@ export function appendLoginAttempt(entry: Omit<LoginAttemptLog, "id" | "at">): v
     id: uid("access"),
     at: new Date().toISOString(),
     ...entry,
+    userName: canonicalizeKnownPersonName(entry.userName, entry.email),
   };
   const logs = getLoginAttempts();
   localStorage.setItem(ACCESS_LOG_STORAGE_KEY, JSON.stringify([next, ...logs].slice(0, MAX_ACCESS_LOGS)));

@@ -45,6 +45,7 @@ function controlStyle(multiline = false): CSSProperties {
 
 export default function ProjectBasicsForm({
   project,
+  canEdit,
   saveState,
   lastSavedAt,
   onTextChange,
@@ -59,6 +60,7 @@ export default function ProjectBasicsForm({
   onToggleWorkCode,
 }: {
   project: PlannerWorkspaceProject;
+  canEdit: boolean;
   saveState: "idle" | "saving" | "saved" | "error";
   lastSavedAt: string;
   onTextChange: (
@@ -101,6 +103,11 @@ export default function ProjectBasicsForm({
           <p style={{ margin: "8px 0 0", color: "#5f6f82", lineHeight: 1.7 }}>
             まずは基本情報だけを新 UI から編集します。保存は既存 localStorage 契約へ書き戻します。
           </p>
+          {!canEdit ? (
+            <p style={{ margin: "8px 0 0", color: "#9a3412", lineHeight: 1.7 }}>
+              このアカウントは閲覧専用のため、preview ワークスペースからは編集できません。
+            </p>
+          ) : null}
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: "8px", alignItems: "flex-end" }}>
           <span
@@ -121,7 +128,16 @@ export default function ProjectBasicsForm({
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "16px" }}>
+      <fieldset
+        disabled={!canEdit}
+        style={{
+          border: 0,
+          padding: 0,
+          margin: 0,
+          minWidth: 0,
+        }}
+      >
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "16px" }}>
         <FieldShell label="案件ID">
           <div style={{ ...controlStyle(), background: "#f8fafc" }}>{project.projectId}</div>
         </FieldShell>
@@ -266,7 +282,8 @@ export default function ProjectBasicsForm({
             style={controlStyle(true)}
           />
         </FieldShell>
-      </div>
+        </div>
+      </fieldset>
     </section>
   );
 }

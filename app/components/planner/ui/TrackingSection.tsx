@@ -29,6 +29,7 @@ type TrackingSectionProps = {
   login: () => void;
   loginError: string;
   canEdit: boolean;
+  canEditSelectedProject: boolean;
   canAdmin: boolean;
   userStats: UserStats;
   newUserName: string;
@@ -82,6 +83,7 @@ export function TrackingSection({
   login,
   loginError,
   canEdit,
+  canEditSelectedProject,
   canAdmin,
   userStats,
   newUserName,
@@ -327,7 +329,7 @@ export function TrackingSection({
                     ))}
                   </select>
                 </label>
-                <button type="button" className="btn btn-subtle tracking-history-action-btn" onClick={saveManualRevision} disabled={!canEdit}>
+                <button type="button" className="btn btn-subtle tracking-history-action-btn" onClick={saveManualRevision} disabled={!canEditSelectedProject}>
                   <span className="btn-icon"><UiIcon name="save" /></span>現在内容を履歴保存
                 </button>
               </div>
@@ -364,7 +366,7 @@ export function TrackingSection({
                     ))}
                   </select>
                 </label>
-                <button type="button" className="btn btn-subtle tracking-history-action-btn" onClick={restoreRevision} disabled={!canEdit || !selectedRevision}>
+                <button type="button" className="btn btn-subtle tracking-history-action-btn" onClick={restoreRevision} disabled={!canEditSelectedProject || !selectedRevision}>
                   <span className="btn-icon"><UiIcon name="history" /></span>この時点に戻す
                 </button>
               </div>
@@ -417,7 +419,7 @@ export function TrackingSection({
             <h4>履歴保存・復元</h4>
             <p className="mini">「履歴を保存」を押すと今の状態を保存し、「この時点に戻す」で復元できます。</p>
             <div className="inline-row wrap">
-              <button type="button" className="btn btn-subtle" onClick={saveManualRevision} disabled={!canEdit}><span className="btn-icon"><UiIcon name="save" /></span>現在内容を履歴保存</button>
+              <button type="button" className="btn btn-subtle" onClick={saveManualRevision} disabled={!canEditSelectedProject}><span className="btn-icon"><UiIcon name="save" /></span>現在内容を履歴保存</button>
             </div>
             <label className="field">
               <span>復元する履歴</span>
@@ -431,7 +433,7 @@ export function TrackingSection({
               </select>
             </label>
             <div className="inline-row wrap">
-              <button type="button" className="btn btn-subtle" onClick={restoreRevision} disabled={!canEdit || !selectedRevision}><span className="btn-icon"><UiIcon name="history" /></span>この時点に戻す</button>
+              <button type="button" className="btn btn-subtle" onClick={restoreRevision} disabled={!canEditSelectedProject || !selectedRevision}><span className="btn-icon"><UiIcon name="history" /></span>この時点に戻す</button>
             </div>
           </article>
           <article className="sub-panel">

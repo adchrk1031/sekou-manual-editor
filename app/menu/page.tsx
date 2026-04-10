@@ -47,15 +47,24 @@ export default function MenuPage() {
   const [userName, setUserName] = useState("");
 
   useEffect(() => {
-    const checkSession = async (): Promise<void> => {
-      await pullSharedStorageSnapshot();
+    const applySessionState = (): boolean => {
       const user = getSessionUser();
       if (!user) {
         setUserName("");
         router.replace("/");
-        return;
+        return false;
       }
       setUserName(user.name);
+      return true;
+    };
+
+    const checkSession = async (): Promise<void> => {
+      const hasSession = applySessionState();
+      if (!hasSession) {
+        return;
+      }
+      await pullSharedStorageSnapshot();
+      applySessionState();
     };
     void checkSession();
     const timer = window.setInterval(() => {
@@ -68,7 +77,7 @@ export default function MenuPage() {
       if (event.key && !event.key.startsWith("sekou-tool-session")) {
         return;
       }
-      void checkSession();
+      applySessionState();
     };
     window.addEventListener("pointerdown", onActivity, { passive: true });
     window.addEventListener("keydown", onActivity);
