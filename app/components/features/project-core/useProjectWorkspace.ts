@@ -3,7 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getSessionUser, type AuthUser } from "../../auth";
 import { PROJECT_SAVE_DEBOUNCE_MS } from "../../planner/constants";
-import { pullSharedStorageSnapshot, pushSharedStorageSnapshot, SHARED_STORAGE_UPDATED_EVENT } from "../../sharedStorage";
+import {
+  pullSharedStorageSnapshot,
+  pushSharedStorageSnapshot,
+  SHARED_STORAGE_RESYNC_INTERVAL_MS,
+  SHARED_STORAGE_UPDATED_EVENT,
+} from "../../sharedStorage";
 import {
   formatProjectEditLockNotice,
   getProjectEditLockOwner,
@@ -120,6 +125,19 @@ export function useProjectWorkspace() {
     return () => {
       window.removeEventListener("storage", onStorage);
       window.removeEventListener(SHARED_STORAGE_UPDATED_EVENT, onSharedUpdated as EventListener);
+    };
+  }, []);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      if (document.visibilityState !== "visible" || dirtyRef.current) {
+        return;
+      }
+      void reload(true);
+    }, SHARED_STORAGE_RESYNC_INTERVAL_MS);
+
+    return () => {
+      window.clearInterval(interval);
     };
   }, []);
 

@@ -26,6 +26,7 @@ type SharedStatePushOptions = {
 const SHARED_STATE_API_PATH = "/api/manual-editor/state";
 const SHARED_FETCH_TIMEOUT_MS = 5000;
 export const SHARED_STORAGE_UPDATED_EVENT = "sekou:shared-storage-updated";
+export const SHARED_STORAGE_RESYNC_INTERVAL_MS = 30 * 1000;
 const SHARED_KEY_PREFIXES = [
   "sekou-project-data-v1:",
   "sekou-",

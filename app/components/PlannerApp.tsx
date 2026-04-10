@@ -4,7 +4,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { CSSProperties, ChangeEvent, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { clearSession, ensureUsers, getLoginAttempts, getLoginFailureMessage, getSessionUser, loginWithCredentials, type LoginAttemptLog } from "./auth";
-import { SHARED_STORAGE_UPDATED_EVENT, pullSharedStorageSnapshot, pushSharedStorageSnapshot } from "./sharedStorage";
+import {
+  SHARED_STORAGE_RESYNC_INTERVAL_MS,
+  SHARED_STORAGE_UPDATED_EVENT,
+  pullSharedStorageSnapshot,
+  pushSharedStorageSnapshot,
+} from "./sharedStorage";
 import { isAdminLikeRole, formatAuditAction, formatAuditScreen, formatAuditDetail, formatAuditDetailForNonAdmin, formatUserCreatedByLabel, formatUserApprovedByLabel } from "./planner/utils/audit";
 import {
   APPROVAL_STATUS_LABELS,
@@ -2127,7 +2132,24 @@ useEffect(() => {
     return;
   }
 
+  const hasPendingLocalWrites = (): boolean => Boolean(saveTimerRef.current || csvSaveTimerRef.current);
+
+  const pullLatestWorkspace = async (): Promise<void> => {
+    if (hasPendingLocalWrites()) {
+      return;
+    }
+    const pulled = await pullSharedStorageSnapshot();
+    if (!pulled) {
+      return;
+    }
+    loadWorkspaceStateFromStorage(true);
+    setSharedSyncState("synced");
+  };
+
   const resyncWorkspace = async () => {
+    if (hasPendingLocalWrites()) {
+      return;
+    }
     setSharedSyncState("syncing");
     const pulled = await pullSharedStorageSnapshot();
     loadWorkspaceStateFromStorage(true);
@@ -2141,14 +2163,21 @@ useEffect(() => {
 
   const handleVisible = () => {
     if (document.visibilityState === "visible") {
-      void resyncWorkspace();
+      void pullLatestWorkspace();
     }
   };
+
+  const interval = window.setInterval(() => {
+    if (document.visibilityState === "visible") {
+      void pullLatestWorkspace();
+    }
+  }, SHARED_STORAGE_RESYNC_INTERVAL_MS);
 
   window.addEventListener("online", handleOnline);
   document.addEventListener("visibilitychange", handleVisible);
 
   return () => {
+    window.clearInterval(interval);
     window.removeEventListener("online", handleOnline);
     document.removeEventListener("visibilitychange", handleVisible);
   };
@@ -4627,14 +4656,16 @@ useEffect(() => {
       return;
     }
     setRequiredHint("");
-    updateSelectedProject(
-      (project) => ({
-        ...project,
-        pdfExportCount: Math.max(0, project.pdfExportCount || 0) + 1,
-        pdfLastExportedAt: new Date().toISOString(),
-      }),
-      { action: "pdf_export", detail: "PDF出力を実行", snapshotLabel: "PDF出力実行前バックアップ" },
-    );
+    if (canEditSelectedProject) {
+      updateSelectedProject(
+        (project) => ({
+          ...project,
+          pdfExportCount: Math.max(0, project.pdfExportCount || 0) + 1,
+          pdfLastExportedAt: new Date().toISOString(),
+        }),
+        { action: "pdf_export", detail: "PDF出力を実行", snapshotLabel: "PDF出力実行前バックアップ" },
+      );
+    }
     const originalTitle = document.title;
     setPrintMode(true);
     document.title = "";
