@@ -137,14 +137,6 @@ export default function MenuPage() {
             <h2>CSV編集スペース</h2>
             <p>Salesforce取込CSVの確認・修正・案件反映を行います。</p>
           </Link>
-          <Link href="/tracking" className="menu-link-card">
-            <div className="menu-link-head">
-              <span className="menu-link-icon" aria-hidden="true"><MenuCardIcon type="tracking" /></span>
-              <span className="menu-link-tag">ユーザー管理</span>
-            </div>
-            <h2 className="menu-track-title">ログイン管理</h2>
-            <p>承認、履歴、バックアップ、ユーザー管理を行います。</p>
-          </Link>
           <Link href="/notice" className="menu-link-card">
             <div className="menu-link-head">
               <span className="menu-link-icon" aria-hidden="true"><MenuCardIcon type="notice" /></span>
@@ -152,6 +144,14 @@ export default function MenuPage() {
             </div>
             <h2>停電案内文</h2>
             <p>停電案内文の作成、事前工事日の整理、案内文PDF出力を行います。</p>
+          </Link>
+          <Link href="/tracking" className="menu-link-card">
+            <div className="menu-link-head">
+              <span className="menu-link-icon" aria-hidden="true"><MenuCardIcon type="tracking" /></span>
+              <span className="menu-link-tag">ユーザー管理</span>
+            </div>
+            <h2 className="menu-track-title">ログイン管理</h2>
+            <p>承認、履歴、バックアップ、ユーザー管理を行います。</p>
           </Link>
         </div>
       </section>
