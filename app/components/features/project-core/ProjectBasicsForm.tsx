@@ -19,10 +19,12 @@ function FieldShell({
         display: "flex",
         flexDirection: "column",
         gap: "8px",
-        gridColumn: span === 2 ? "span 2" : undefined,
+        gridColumn: span === 2 ? "1 / -1" : undefined,
+        minWidth: 0,
+        width: "100%",
       }}
     >
-      <span style={{ fontSize: "0.82rem", fontWeight: 700, color: "#4b5563" }}>{label}</span>
+      <span style={{ fontSize: "0.82rem", fontWeight: 700, color: "#4b5563", lineHeight: 1.45, overflowWrap: "anywhere" }}>{label}</span>
       {children}
     </label>
   );
@@ -31,6 +33,8 @@ function FieldShell({
 function controlStyle(multiline = false): CSSProperties {
   return {
     width: "100%",
+    minWidth: 0,
+    maxWidth: "100%",
     borderRadius: "12px",
     border: "1px solid #d7dee6",
     background: "#ffffff",
@@ -137,7 +141,7 @@ export default function ProjectBasicsForm({
           minWidth: 0,
         }}
       >
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "16px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(240px, 100%), 1fr))", gap: "16px" }}>
         <FieldShell label="案件ID">
           <div style={{ ...controlStyle(), background: "#f8fafc" }}>{project.projectId}</div>
         </FieldShell>

@@ -2411,12 +2411,20 @@ p {
 .field {
   display: grid;
   gap: 6px;
+  min-width: 0;
+}
+
+.field > * {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .field span {
   font-size: var(--ui-field-label-size);
   font-weight: 700;
   color: var(--muted);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .field-help {
@@ -2424,6 +2432,7 @@ p {
   font-size: 0.82rem;
   color: #4e6782;
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .date-range-preview {
@@ -2437,10 +2446,14 @@ p {
   font-size: 0.92rem;
   font-weight: 700;
   color: #0d4d8d;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .span-2 {
-  grid-column: span 2;
+  grid-column: 1 / -1;
 }
 
 .inline-row {
@@ -2503,6 +2516,8 @@ p {
 
 .control {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   min-height: var(--ui-control-height);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -5208,6 +5223,8 @@ input.control[type="datetime-local"] {
   .field input.control[type="time"],
   .timeline-edit-table input.control[type="datetime-local"] {
     width: 100%;
+    max-width: 100%;
+    inline-size: 100%;
     min-width: 0;
     min-height: 48px;
     padding: 10px 12px;
@@ -5351,6 +5368,29 @@ input.control[type="datetime-local"] {
   .inline-row > * {
     min-width: 0;
     max-width: 100%;
+  }
+
+  .field-grid,
+  .field-grid > *,
+  .field,
+  .field .control,
+  .field input.control,
+  .field select.control,
+  .field textarea.control,
+  .date-range-preview,
+  .check-pill {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .check-pill {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-start;
+    border-radius: 12px;
+    padding: 10px 12px;
   }
 
   .photo-slider-nav {
