@@ -1594,6 +1594,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   const [projectSearchText, setProjectSearchText] = useState<string>("");
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [missingPanelOpen, setMissingPanelOpen] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [sharedStorageReady, setSharedStorageReady] = useState(false);
   const [sharedSyncState, setSharedSyncState] = useState<"idle" | "pending" | "syncing" | "synced" | "error">("idle");
@@ -1601,6 +1602,8 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   const [projectEditLockStatus, setProjectEditLockStatus] = useState<ProjectEditLockSyncResult["status"]>("idle");
   const [projectEditLockNotice, setProjectEditLockNotice] = useState("");
   const [lastSavedAt, setLastSavedAt] = useState("-");
+  const [lastSharedSyncAt, setLastSharedSyncAt] = useState("-");
+  const [isOnline, setIsOnline] = useState<boolean>(() => (typeof navigator === "undefined" ? true : navigator.onLine));
   const [importStatus, setImportStatus] = useState("CSV未取込");
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [csvDraftRows, setCsvDraftRows] = useState<CsvRecord[]>([]);
@@ -1770,6 +1773,31 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     csvHeadersRef.current = csvHeaders;
     csvDraftRowsRef.current = csvDraftRows;
   }, [csvHeaders, csvDraftRows]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const syncNetworkState = (): void => {
+      setIsOnline(window.navigator.onLine);
+    };
+
+    syncNetworkState();
+    window.addEventListener("online", syncNetworkState);
+    window.addEventListener("offline", syncNetworkState);
+
+    return () => {
+      window.removeEventListener("online", syncNetworkState);
+      window.removeEventListener("offline", syncNetworkState);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (sharedSyncState === "synced") {
+      setLastSharedSyncAt(new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
+    }
+  }, [sharedSyncState]);
 
   const loadWorkspaceStateFromStorage = useCallback((preserveSelection: boolean): void => {
     try {
@@ -2009,6 +2037,68 @@ useEffect(() => {
     };
   }, [currentUserId, mode, selectedId, users]);
 
+  const ensureSelectedProjectWriteLock = useCallback(async (): Promise<boolean> => {
+    const currentUserCurrent = users.find((user) => user.id === currentUserId && user.active && user.approvalStatus === "approved") ?? null;
+    const canEditCurrent = Boolean(currentUserCurrent && currentUserCurrent.role !== "viewer");
+    const projectEditOwnerCurrent = currentUserCurrent ? getProjectEditLockOwner(currentUserCurrent) : null;
+
+    if (selectedId && projectEditOwnerCurrent && canEditCurrent && mode !== "csv") {
+      const lockResult = await syncProjectEditLock(selectedId, projectEditOwnerCurrent, { acquire: true });
+      setProjectEditLock(lockResult.lock);
+      setProjectEditLockStatus(lockResult.status);
+      if (lockResult.status !== "owned") {
+        setProjectEditLockNotice(formatProjectEditLockNotice(lockResult.lock, currentUserCurrent?.id) || "この案件は現在ほかのユーザーが編集中です。");
+        setSharedSyncState("error");
+        return false;
+      }
+      setProjectEditLockNotice("");
+    }
+
+    return true;
+  }, [currentUserId, mode, selectedId, users]);
+
+  const flushWorkspaceNow = useCallback(async (): Promise<boolean> => {
+    if (!hydrated) {
+      return false;
+    }
+
+    const lockOk = await ensureSelectedProjectWriteLock();
+    if (!lockOk) {
+      return false;
+    }
+
+    if (saveTimerRef.current) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    persistProjectsToStorage(projectsRef.current);
+
+    if (csvSaveTimerRef.current) {
+      window.clearTimeout(csvSaveTimerRef.current);
+      csvSaveTimerRef.current = null;
+    }
+    const serializedCsv = stringifyForStorage({ headers: csvHeadersRef.current, rows: csvDraftRowsRef.current });
+    if (serializedCsv !== csvSerializedCacheRef.current) {
+      localStorage.setItem(CSV_EDITOR_STORAGE_KEY, serializedCsv);
+      csvSerializedCacheRef.current = serializedCsv;
+    }
+
+    if (sharedSyncTimerRef.current) {
+      window.clearTimeout(sharedSyncTimerRef.current);
+      sharedSyncTimerRef.current = null;
+    }
+
+    if (!isOnline) {
+      setSharedSyncState("pending");
+      return false;
+    }
+
+    setSharedSyncState("syncing");
+    const pushed = await pushSharedStorageSnapshot({ force: true });
+    setSharedSyncState(pushed ? "synced" : "error");
+    return pushed;
+  }, [ensureSelectedProjectWriteLock, hydrated, isOnline, persistProjectsToStorage]);
+
   useEffect(() => {
     if (!hydrated) {
       return;
@@ -2018,21 +2108,10 @@ useEffect(() => {
     }
     saveTimerRef.current = window.setTimeout(() => {
       void (async () => {
-        const currentUserCurrent = users.find((user) => user.id === currentUserId && user.active && user.approvalStatus === "approved") ?? null;
-        const canEditCurrent = Boolean(currentUserCurrent && currentUserCurrent.role !== "viewer");
-        const projectEditOwnerCurrent = currentUserCurrent ? getProjectEditLockOwner(currentUserCurrent) : null;
-
-        if (selectedId && projectEditOwnerCurrent && canEditCurrent && mode !== "csv") {
-          const lockResult = await syncProjectEditLock(selectedId, projectEditOwnerCurrent, { acquire: true });
-          setProjectEditLock(lockResult.lock);
-          setProjectEditLockStatus(lockResult.status);
-          if (lockResult.status !== "owned") {
-            setProjectEditLockNotice(formatProjectEditLockNotice(lockResult.lock, currentUserCurrent?.id) || "この案件は現在ほかのユーザーが編集中です。");
-            setSharedSyncState("error");
-            saveTimerRef.current = null;
-            return;
-          }
-          setProjectEditLockNotice("");
+        const lockOk = await ensureSelectedProjectWriteLock();
+        if (!lockOk) {
+          saveTimerRef.current = null;
+          return;
         }
         persistProjectsToStorage(projects);
         saveTimerRef.current = null;
@@ -2045,7 +2124,7 @@ useEffect(() => {
         saveTimerRef.current = null;
       }
     };
-  }, [currentUserId, hydrated, mode, persistProjectsToStorage, projects, selectedId, users]);
+  }, [ensureSelectedProjectWriteLock, hydrated, persistProjectsToStorage, projects]);
 
 useEffect(() => {
   if (!hydrated) {
@@ -6877,6 +6956,75 @@ useEffect(() => {
   }, [requiredMissingMap, missingEnabledPartyCompanyKeys]);
   const totalMissingRequiredCount = requiredMissingKeys.length;
   const canExportPdf = totalMissingRequiredCount === 0;
+  const requiredMissingItems = useMemo(() => {
+    const staticMap: Record<string, { section: string; label: string }> = {
+      propertyName: { section: "基本情報", label: "物件名" },
+      coverRecipientSuffix: { section: "基本情報", label: "表紙宛名" },
+      titleSubject: { section: "基本情報", label: "件名" },
+      propertyAddress: { section: "基本情報", label: "住所" },
+      workDateStart: { section: "基本情報", label: "工事開始日" },
+      workDateEnd: { section: "基本情報", label: "工事終了日" },
+      outageDateStart: { section: "基本情報", label: "停電開始日" },
+      outageDateEnd: { section: "基本情報", label: "停電終了日" },
+      outageTimeStart: { section: "基本情報", label: "停電開始時間" },
+      outageTimeEnd: { section: "基本情報", label: "停電終了時間" },
+      scheduleRows: { section: "日程", label: "工程表を1行以上追加" },
+      detailPhotos: { section: "写真", label: "参考写真を1枚以上追加" },
+      relatedPartiesEnabled: { section: "体制表", label: "反映先会社を1件以上設定" },
+      layoutAssets: { section: "配置図・写真", label: "配置図または配置写真を追加" },
+    };
+    const partyLabelMap: Record<RelatedPartyKey, string> = {
+      owner: "発注者",
+      utility: "電力会社",
+      contractor: "施工会社",
+      management: "管理会社",
+      residents: "居住者",
+    };
+
+    return requiredMissingKeys.map((key) => {
+      if (key.startsWith("relatedPartyCompany:")) {
+        const partyKey = key.replace("relatedPartyCompany:", "") as RelatedPartyKey;
+        return {
+          key,
+          section: "体制表",
+          label: `${partyLabelMap[partyKey] ?? "関連先"}の会社名`,
+        };
+      }
+      const item = staticMap[key];
+      return {
+        key,
+        section: item?.section ?? "確認",
+        label: item?.label ?? key,
+      };
+    });
+  }, [requiredMissingKeys]);
+  const requiredMissingSections = useMemo(() => {
+    const sectionMap = new Map<string, typeof requiredMissingItems>();
+    requiredMissingItems.forEach((item) => {
+      const current = sectionMap.get(item.section) ?? [];
+      current.push(item);
+      sectionMap.set(item.section, current);
+    });
+    return Array.from(sectionMap.entries()).map(([section, items]) => ({ section, items }));
+  }, [requiredMissingItems]);
+  const syncStatusLabel = !isOnline
+    ? "オフライン"
+    : sharedSyncState === "pending"
+      ? "保存待ち"
+      : sharedSyncState === "syncing"
+        ? "同期中"
+        : sharedSyncState === "error"
+          ? "再試行待ち"
+          : "保存済み";
+  const syncStatusTone = !isOnline || sharedSyncState === "error"
+    ? "warn"
+    : sharedSyncState === "syncing" || sharedSyncState === "pending"
+      ? "info"
+      : "ok";
+  const saveStatusLabel = lastSavedAt === "-" ? "未保存" : `端末保存 ${lastSavedAt}`;
+  const cloudSyncLabel = !isOnline
+    ? (lastSharedSyncAt === "-" ? "クラウド再接続待ち" : `クラウド再接続待ち / 前回 ${lastSharedSyncAt}`)
+    : (lastSharedSyncAt === "-" ? "クラウド未同期" : `クラウド同期 ${lastSharedSyncAt}`);
   function scrollToMissingField(targetKey?: string): void {
     const key = targetKey || requiredMissingKeys[0];
     if (!key) {
@@ -6912,6 +7060,21 @@ useEffect(() => {
     focusTarget?.focus();
   }
 
+  async function handleManualSave(): Promise<void> {
+    if (!canEditSelectedProject) {
+      return;
+    }
+    await flushWorkspaceNow();
+  }
+
+  function openActionMenu(): void {
+    if (typeof window !== "undefined" && window.matchMedia("(max-width: 1023px)").matches) {
+      setMobileMenuOpen(true);
+      return;
+    }
+    void router.push("/menu");
+  }
+
   function selectProjectFromSearch(projectId: string): void {
     setSelectedId(projectId);
     setProjectSearchText("");
@@ -6943,6 +7106,12 @@ useEffect(() => {
   const isTrackingMode = mode === "tracking";
   const isNoticeMode = mode === "notice";
   const showEditorAssist = false;
+
+  useEffect(() => {
+    if (!isEditorMode || !hasSelectedProject || totalMissingRequiredCount === 0) {
+      setMissingPanelOpen(false);
+    }
+  }, [hasSelectedProject, isEditorMode, totalMissingRequiredCount]);
 
   useEffect(() => {
     if (!projectPickerOpen) {
@@ -7164,13 +7333,66 @@ useEffect(() => {
           <button
             type="button"
             className="btn missing-jump-fab"
-            onClick={() => scrollToMissingField()}
-            title={`未入力項目 ${totalMissingRequiredCount} 件の先頭へ移動`}
+            onClick={() => setMissingPanelOpen(true)}
+            title={`未入力項目 ${totalMissingRequiredCount} 件の一覧を開く`}
           >
             <span className="btn-icon"><UiIcon name="down" /></span>
-            <span>未入力へ移動</span>
+            <span>未入力一覧</span>
             <span className="missing-jump-fab-count">{totalMissingRequiredCount}件</span>
           </button>
+        ) : null}
+
+        {isEditorMode && hasSelectedProject && missingPanelOpen ? (
+          <>
+            <div
+              className="missing-panel-backdrop"
+              onClick={() => setMissingPanelOpen(false)}
+              aria-hidden="true"
+            />
+            <section className="missing-panel" role="dialog" aria-modal="true" aria-label="未入力項目一覧">
+              <div className="missing-panel-head">
+                <div>
+                  <h3>未入力一覧</h3>
+                  <p className="mini">漏れなく埋めるために、項目ごとにそのまま移動できます。</p>
+                </div>
+                <button type="button" className="btn btn-subtle" onClick={() => setMissingPanelOpen(false)}>
+                  <span className="btn-icon"><UiIcon name="clear" /></span>
+                  閉じる
+                </button>
+              </div>
+              <div className="missing-panel-summary">
+                <span className={`status-chip ${syncStatusTone}`}>{syncStatusLabel}</span>
+                <span className="status-chip warn">未入力 {totalMissingRequiredCount}件</span>
+                <span className={`status-chip ${incompleteCards.length ? "warn" : "ok"}`}>進捗 {completionRate}%</span>
+              </div>
+              <div className="missing-panel-sections">
+                {requiredMissingSections.map(({ section, items }) => (
+                  <article key={`missing_section_${section}`} className="missing-panel-section">
+                    <div className="missing-panel-section-head">
+                      <h4>{section}</h4>
+                      <span>{items.length}件</span>
+                    </div>
+                    <div className="missing-panel-list">
+                      {items.map((item) => (
+                        <button
+                          key={`missing_item_${item.key}`}
+                          type="button"
+                          className="missing-panel-item"
+                          onClick={() => {
+                            setMissingPanelOpen(false);
+                            scrollToMissingField(item.key);
+                          }}
+                        >
+                          <span>{item.label}</span>
+                          <span className="missing-panel-item-action">移動</span>
+                        </button>
+                      ))}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          </>
         ) : null}
 
         {projectEditLockNotice ? (
@@ -9385,30 +9607,27 @@ useEffect(() => {
 
       {isEditorMode && hasSelectedProject ? (
       <footer className="bottom-bar" aria-label="Bottom">
-        <p>
-          保存: {lastSavedAt} / {selectedProject.projectId}
-          <span className={`pdf-export-meta ${sharedSyncState === "error" ? "warn" : ""}`}>
-            同期:
-            {sharedSyncState === "pending"
-              ? "保存待ち"
-              : sharedSyncState === "syncing"
-                ? "同期中"
-                : sharedSyncState === "error"
-                  ? "再試行待ち"
-                  : "保存済み"}
-          </span>
-          <span className="pdf-export-meta">PDF出力: {selectedProjectExportCount}回 / 最終: {selectedProjectLastExportLabel}</span>
-          <span className={`pdf-hint ${incompleteCards.length ? "warn" : "ok"}`}>
-            {incompleteCards.length ? `未完了 ${incompleteCards.length}カード` : "PDF出力OK"}
-          </span>
-        </p>
-        <div className="inline-row">
-          <button type="button" className="btn btn-subtle" onClick={regenerateSchedule}><span className="btn-icon"><UiIcon name="refresh" /></span>工程再生成</button>
-          {!canExportPdf ? (
-            <button type="button" className="btn btn-subtle" onClick={() => scrollToMissingField()}>
-              <span className="btn-icon"><UiIcon name="down" /></span>未入力へ移動
-            </button>
-          ) : null}
+        <div className="bottom-bar-status">
+          <p className="bottom-bar-project">
+            案件: {selectedProject.propertyName || "未設定"} / {selectedProject.projectId}
+          </p>
+          <div className="bottom-bar-status-chips">
+            <span className={`status-chip ${syncStatusTone}`}>{syncStatusLabel}</span>
+            <span className="status-chip">{saveStatusLabel}</span>
+            <span className={`status-chip ${!isOnline ? "warn" : "info"}`}>{cloudSyncLabel}</span>
+            <span className={`status-chip ${incompleteCards.length ? "warn" : "ok"}`}>
+              {incompleteCards.length ? `未完了 ${incompleteCards.length}カード` : "PDF出力OK"}
+            </span>
+            <span className="status-chip">PDF {selectedProjectExportCount}回 / 最終 {selectedProjectLastExportLabel}</span>
+          </div>
+        </div>
+        <div className="bottom-bar-actions">
+          <button type="button" className="btn btn-subtle" onClick={() => void handleManualSave()} disabled={!canEditSelectedProject}>
+            <span className="btn-icon"><UiIcon name="save" /></span>保存
+          </button>
+          <button type="button" className="btn btn-subtle" onClick={() => setMissingPanelOpen(true)} disabled={totalMissingRequiredCount === 0}>
+            <span className="btn-icon"><UiIcon name="down" /></span>{totalMissingRequiredCount > 0 ? `未入力一覧 ${totalMissingRequiredCount}件` : "未入力なし"}
+          </button>
           <button
             type="button"
             className="btn btn-accent"
@@ -9417,6 +9636,9 @@ useEffect(() => {
             title={!canExportPdf ? "必須項目を入力するとPDF出力できます" : ""}
           >
             <span className="btn-icon"><UiIcon name="pdf" /></span>PDF出力
+          </button>
+          <button type="button" className="btn btn-subtle" onClick={openActionMenu}>
+            <span className="btn-icon"><UiIcon name="menu" /></span>メニュー
           </button>
         </div>
       </footer>
