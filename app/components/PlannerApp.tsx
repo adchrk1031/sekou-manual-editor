@@ -7089,11 +7089,13 @@ useEffect(() => {
         </button>
 
         <nav className="workspace-switch" aria-label="Workspace navigation">
-          <Link href="/editor" className={`workspace-link ${isEditorMode ? "active" : ""}`}>施工計画書編集</Link>
-          <Link href="/csv" className={`workspace-link ${isCsvMode ? "active" : ""}`}>CSV編集スペース</Link>
-          <Link href="/tracking" className={`workspace-link ${isTrackingMode ? "active" : ""}`}>ログイン管理</Link>
-          <Link href="/notice" className={`workspace-link ${isNoticeMode ? "active" : ""}`}>停電案内文</Link>
-          <Link href="/menu" className="workspace-link subtle">メニューへ戻る</Link>
+          <div className="workspace-switch-group">
+            <Link href="/editor" className={`workspace-link ${isEditorMode ? "active" : ""}`}>施工計画書編集</Link>
+            <Link href="/csv" className={`workspace-link ${isCsvMode ? "active" : ""}`}>CSV編集スペース</Link>
+            <Link href="/notice" className={`workspace-link ${isNoticeMode ? "active" : ""}`}>停電案内文</Link>
+            <Link href="/tracking" className={`workspace-link ${isTrackingMode ? "active" : ""}`}>ログイン管理</Link>
+          </div>
+          <Link href="/menu" className="workspace-link subtle workspace-link-back">メニューへ戻る</Link>
         </nav>
 
         <div
@@ -7153,9 +7155,9 @@ useEffect(() => {
           <div className="mobile-drawer-section mobile-drawer-nav">
             <Link href="/editor" className={`workspace-link ${isEditorMode ? "active" : ""}`} onClick={() => setMobileMenuOpen(false)}>施工計画書編集</Link>
             <Link href="/csv" className={`workspace-link ${isCsvMode ? "active" : ""}`} onClick={() => setMobileMenuOpen(false)}>CSV編集スペース</Link>
-            <Link href="/tracking" className={`workspace-link ${isTrackingMode ? "active" : ""}`} onClick={() => setMobileMenuOpen(false)}>ログイン管理</Link>
             <Link href="/notice" className={`workspace-link ${isNoticeMode ? "active" : ""}`} onClick={() => setMobileMenuOpen(false)}>停電案内文</Link>
-            <Link href="/menu" className="workspace-link subtle mobile-menu-back-link" onClick={() => setMobileMenuOpen(false)}>メニューへ戻る</Link>
+            <Link href="/tracking" className={`workspace-link ${isTrackingMode ? "active" : ""}`} onClick={() => setMobileMenuOpen(false)}>ログイン管理</Link>
+            <Link href="/menu" className="workspace-link subtle workspace-link-back mobile-menu-back-link" onClick={() => setMobileMenuOpen(false)}>メニューへ戻る</Link>
           </div>
         </aside>
         {isEditorMode && hasSelectedProject && totalMissingRequiredCount > 0 ? (

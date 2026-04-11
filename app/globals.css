@@ -450,6 +450,13 @@ p {
 .workspace-switch {
   display: flex;
   flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.workspace-switch-group {
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
 }
@@ -475,10 +482,9 @@ p {
   background: #0b6bcb;
 }
 
-.workspace-link.subtle {
+.workspace-link-back {
   margin-left: auto;
 }
-
 
 .mobile-drawer-backdrop {
   position: fixed;
@@ -5401,7 +5407,11 @@ input.control[type="datetime-local"] {
 }
 
 @media (max-width: 1024px) {
-  .workspace-link.subtle {
+  .workspace-switch-group {
+    width: 100%;
+  }
+
+  .workspace-link-back {
     margin-left: 0;
   }
 
