@@ -5018,6 +5018,10 @@ input.control[type="datetime-local"] {
     padding-inline: 12px;
     padding-bottom: 184px;
     overflow-x: hidden;
+    --ui-panel-padding: 14px;
+    --ui-control-height: 48px;
+    --ui-control-font-size: 1rem;
+    --ui-field-label-size: 0.86rem;
   }
 
   .planner-app > * {
@@ -5358,6 +5362,27 @@ input.control[type="datetime-local"] {
     overflow-x: hidden;
   }
 
+  .panel,
+  .sub-panel,
+  .page-card {
+    padding: 14px;
+  }
+
+  .page-card-head,
+  .panel-head,
+  .party-head,
+  .photo-card-head,
+  .notice-panel-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .page-card-index,
+  .panel-head .status-chip,
+  .page-card-head .status-chip {
+    align-self: flex-start;
+  }
+
   .inline-row {
     display: flex;
     flex-wrap: wrap;
@@ -5384,13 +5409,47 @@ input.control[type="datetime-local"] {
     min-width: 0;
   }
 
+  .field span,
+  .field-help,
+  .mini,
+  .top-kicker,
+  .top-heading-slot h1 {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .field input:not([type="checkbox"]):not([type="radio"]),
+  .field select,
+  .field textarea,
+  .control {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    min-inline-size: 0;
+  }
+
   .check-pill {
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
+    align-items: flex-start;
     justify-content: flex-start;
     border-radius: 12px;
     padding: 10px 12px;
+    gap: 10px;
+    line-height: 1.45;
+  }
+
+  .check-pill input[type="checkbox"],
+  .checks input[type="checkbox"] {
+    flex: 0 0 auto;
+    margin-top: 2px;
+  }
+
+  .checks label {
+    width: 100%;
+    min-width: 0;
+    align-items: flex-start;
   }
 
   .photo-slider-nav {
