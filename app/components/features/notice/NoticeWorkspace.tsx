@@ -1,9 +1,11 @@
 "use client";
 
-import { useDeferredValue, useMemo } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { createBlankProject } from "../project-core/project-normalize";
+import { CSV_PROJECT_FIELD_ALIASES } from "../../planner/constants";
 import { formatDateWithWeekday } from "../../planner/utils/dateTime";
-import type { NoticeAdviceItem, NoticeAdvicePhase, NoticeOutageState, NoticeScheduleRow, NoticeWorkType, Project } from "../../planner/types";
+import { createCsvValueGetter } from "../../planner/utils/csv";
+import type { CsvRecord, NoticeAdviceItem, NoticeAdvicePhase, NoticeOutageState, NoticeScheduleRow, NoticeWorkType, Project } from "../../planner/types";
 import { UiIcon } from "../../planner/ui/UiIcon";
 
 const NOTICE_PHASE_ORDER: NoticeAdvicePhase[] = ["before", "during", "after"];
@@ -12,16 +14,26 @@ const NOTICE_PHASE_LABELS: Record<NoticeAdvicePhase, string> = {
   during: "停電中",
   after: "復旧後",
 };
-const NOTICE_WORK_TYPE_OPTIONS: NoticeWorkType[] = ["事前工事", "本工事"];
+const NOTICE_WORK_TYPE_OPTIONS: NoticeWorkType[] = ["事前工事", "本工事", "事後工事"];
 const NOTICE_OUTAGE_STATE_OPTIONS: NoticeOutageState[] = ["停電なし", "停電あり"];
 const NOTICE_SECOND_PAGE_NOTE =
   "停電時に発生したお客さまの家電製品及び設備の不具合についての原因方法等は、取扱説明書をご確認いただくか、お客さまからメーカーへ直接お問い合わせいただきますようお願いいたします。";
+
+type NoticeProjectOption = {
+  projectId: string;
+  propertyName: string;
+  propertyAddress: string;
+};
 
 type NoticeWorkspaceProps = {
   hasSelectedProject: boolean;
   selectedProject: Project;
   canEdit: boolean;
   canEditSelectedProject: boolean;
+  projectOptions: NoticeProjectOption[];
+  csvDraftRows: CsvRecord[];
+  onSelectProject: (projectId: string) => void;
+  onStartFromCsvRow: (record: CsvRecord) => void;
   updateSelectedProject: (updater: (project: Project) => Project) => void;
   onPrint: () => void;
 };
@@ -91,6 +103,40 @@ function createAdviceItem(phase: NoticeAdvicePhase): NoticeAdviceItem {
     phase,
     title: "",
     body: "",
+  };
+}
+
+type NoticeCsvMatch = {
+  record: CsvRecord;
+  projectId: string;
+  propertyName: string;
+  propertyAddress: string;
+  outageDate: string;
+  outageTimeStart: string;
+  outageTimeEnd: string;
+};
+
+function matchesNoticeSearch(values: string[], keyword: string): boolean {
+  if (!keyword) {
+    return true;
+  }
+  return values.some((value) => String(value ?? "").toLowerCase().includes(keyword));
+}
+
+function getNoticeCsvMatch(record: CsvRecord): NoticeCsvMatch | null {
+  const getField = createCsvValueGetter(record);
+  const projectId = getField(...CSV_PROJECT_FIELD_ALIASES.projectId).trim();
+  if (!projectId) {
+    return null;
+  }
+  return {
+    record,
+    projectId,
+    propertyName: getField(...CSV_PROJECT_FIELD_ALIASES.propertyName).trim(),
+    propertyAddress: getField(...CSV_PROJECT_FIELD_ALIASES.propertyAddress).trim(),
+    outageDate: getField(...CSV_PROJECT_FIELD_ALIASES.outageDateStart).trim(),
+    outageTimeStart: getField(...CSV_PROJECT_FIELD_ALIASES.outageTimeStart).trim(),
+    outageTimeEnd: getField(...CSV_PROJECT_FIELD_ALIASES.outageTimeEnd).trim(),
   };
 }
 
@@ -293,10 +339,17 @@ export function NoticeWorkspace({
   selectedProject,
   canEdit,
   canEditSelectedProject,
+  projectOptions,
+  csvDraftRows,
+  onSelectProject,
+  onStartFromCsvRow,
   updateSelectedProject,
   onPrint,
 }: NoticeWorkspaceProps) {
   const previewProject = useDeferredValue(selectedProject);
+  const [noticeSearchText, setNoticeSearchText] = useState("");
+  const deferredNoticeSearchText = useDeferredValue(noticeSearchText);
+  const [printErrorMessage, setPrintErrorMessage] = useState("");
   const noticeMissingFields = useMemo(
     () => [
       { key: "noticePropertyName", label: "物件名", missing: !selectedProject.noticePropertyName.trim() },
@@ -320,8 +373,43 @@ export function NoticeWorkspace({
     () => groupAdviceItems(selectedProject.noticeAdviceItems),
     [selectedProject.noticeAdviceItems],
   );
+  const noticeSearchKeyword = deferredNoticeSearchText.trim().toLowerCase();
+  const projectOptionIds = useMemo(
+    () => new Set(projectOptions.map((project) => project.projectId)),
+    [projectOptions],
+  );
+  const filteredProjectOptions = useMemo(
+    () => projectOptions
+      .filter((project) => matchesNoticeSearch(
+        [project.projectId, project.propertyName, project.propertyAddress],
+        noticeSearchKeyword,
+      ))
+      .slice(0, 8),
+    [noticeSearchKeyword, projectOptions],
+  );
+  const filteredCsvMatches = useMemo(
+    () => csvDraftRows
+      .map((record) => getNoticeCsvMatch(record))
+      .filter((item): item is NoticeCsvMatch => item !== null)
+      .filter((item) => matchesNoticeSearch(
+        [item.projectId, item.propertyName, item.propertyAddress, item.outageDate, item.outageTimeStart, item.outageTimeEnd],
+        noticeSearchKeyword,
+      ))
+      .slice(0, 8),
+    [csvDraftRows, noticeSearchKeyword],
+  );
 
   const readOnly = hasSelectedProject && !canEditSelectedProject;
+
+  useEffect(() => {
+    if (!noticeMissingFields.length) {
+      setPrintErrorMessage("");
+      return;
+    }
+    if (printErrorMessage) {
+      setPrintErrorMessage(`未入力があるため出力できません。${noticeMissingFields.map((field) => field.label).join(" / ")} を入力してください。`);
+    }
+  }, [noticeMissingFields, printErrorMessage]);
 
   function updateNoticeField<K extends keyof Project>(field: K, value: Project[K]) {
     updateSelectedProject((project) => ({ ...project, [field]: value }));
@@ -396,9 +484,11 @@ export function NoticeWorkspace({
 
   function handlePrint() {
     if (noticeMissingFields.length) {
+      setPrintErrorMessage(`未入力があるため出力できません。${noticeMissingFields.map((field) => field.label).join(" / ")} を入力してください。`);
       scrollToMissingNoticeField();
       return;
     }
+    setPrintErrorMessage("");
     onPrint();
   }
 
@@ -420,30 +510,6 @@ export function NoticeWorkspace({
       ...project,
       ...buildNoticeDefaultsFromProject(project),
     }));
-  }
-
-  if (!hasSelectedProject) {
-    return (
-      <section className="panel notice-panel">
-        <div className="panel-head">
-          <div>
-            <h3 className="section-title">
-              <span className="section-icon" aria-hidden="true">
-                <UiIcon name="template" />
-              </span>
-              停電案内文
-            </h3>
-            <p className="mini">案件を選ぶと、停電案内文の編集と PDF 出力ができます。</p>
-          </div>
-        </div>
-        <section className="sub-panel project-empty-panel">
-          <h4>案件を選択してください</h4>
-          <p className="mini">
-            `/csv` で取り込んだ案件、または `/editor` で作成した案件を選ぶと、その内容をもとに停電案内文を作れます。
-          </p>
-        </section>
-      </section>
-    );
   }
 
   return (
@@ -472,11 +538,121 @@ export function NoticeWorkspace({
               <span className="btn-icon"><UiIcon name="down" /></span>未入力へ移動
             </button>
           ) : null}
-          <button type="button" className="btn btn-accent" onClick={handlePrint}>
+          <button type="button" className="btn btn-accent" onClick={handlePrint} disabled={!hasSelectedProject}>
             <span className="btn-icon"><UiIcon name="pdf" /></span>案内文を印刷 / PDF出力
           </button>
         </div>
       </div>
+
+      <section className="sub-panel notice-search-panel">
+        <div className="panel-head">
+          <div>
+            <h4>案件 / CSV から案内文を開始</h4>
+            <p className="mini">
+              ここで案件を検索して選ぶと、そのまま停電案内文を編集できます。CSV 行はここから直接案内文用に反映できます。
+            </p>
+          </div>
+          {hasSelectedProject ? (
+            <span className="status-chip ok">
+              選択中: {selectedProject.propertyName || "（物件名未設定）"} / {selectedProject.projectId}
+            </span>
+          ) : (
+            <span className="status-chip warn">案件未選択</span>
+          )}
+        </div>
+        <label className="field notice-search-input">
+          <span>検索</span>
+          <input
+            className="control"
+            value={noticeSearchText}
+            placeholder="案件ID・物件名・住所・停電日で検索"
+            onChange={(event) => setNoticeSearchText(event.target.value)}
+          />
+        </label>
+        <div className="notice-search-grid">
+          <section className="notice-search-column">
+            <div className="notice-search-column-head">
+              <div>
+                <h5>既存案件</h5>
+                <p className="mini">すでに案件化されているデータを開きます。</p>
+              </div>
+              <span className="status-chip">{filteredProjectOptions.length}件</span>
+            </div>
+            <div className="notice-search-list">
+              {filteredProjectOptions.length ? (
+                filteredProjectOptions.map((project) => (
+                  <button
+                    key={`notice_project_option_${project.projectId}`}
+                    type="button"
+                    className={`notice-search-item ${hasSelectedProject && project.projectId === selectedProject.projectId ? "is-active" : ""}`}
+                    onClick={() => onSelectProject(project.projectId)}
+                  >
+                    <span className="notice-search-item-head">
+                      <strong>{project.propertyName || "（物件名未設定）"}</strong>
+                      <span className="notice-search-item-action">この案件で作る</span>
+                    </span>
+                    <span className="notice-search-item-meta">案件ID: {project.projectId}</span>
+                    <span className="notice-search-item-meta">{project.propertyAddress || "住所未設定"}</span>
+                  </button>
+                ))
+              ) : (
+                <p className="mini notice-search-empty">一致する案件がありません。</p>
+              )}
+            </div>
+          </section>
+
+          <section className="notice-search-column">
+            <div className="notice-search-column-head">
+              <div>
+                <h5>CSV 取込データ</h5>
+                <p className="mini">CSV 編集スペースの行から案内文を開始します。事前工事 / 事後工事はあとで手入力調整できます。</p>
+              </div>
+              <span className="status-chip">{filteredCsvMatches.length}件</span>
+            </div>
+            <div className="notice-search-list">
+              {filteredCsvMatches.length ? (
+                filteredCsvMatches.map((item, index) => (
+                  <button
+                    key={`notice_csv_option_${item.projectId}_${index}`}
+                    type="button"
+                    className="notice-search-item"
+                    onClick={() => onStartFromCsvRow(item.record)}
+                    disabled={!canEdit}
+                  >
+                    <span className="notice-search-item-head">
+                      <strong>{item.propertyName || "（物件名未設定）"}</strong>
+                      <span className="notice-search-item-action">
+                        {projectOptionIds.has(item.projectId) ? "CSVから更新して開始" : "CSVから開始"}
+                      </span>
+                    </span>
+                    <span className="notice-search-item-meta">案件ID: {item.projectId}</span>
+                    <span className="notice-search-item-meta">
+                      {item.propertyAddress || "住所未設定"}
+                      {item.outageDate ? ` / 停電日 ${item.outageDate}` : ""}
+                      {item.outageTimeStart || item.outageTimeEnd ? ` / ${item.outageTimeStart || "--:--"}〜${item.outageTimeEnd || "--:--"}` : ""}
+                    </span>
+                  </button>
+                ))
+              ) : (
+                <p className="mini notice-search-empty">
+                  {csvDraftRows.length
+                    ? "一致する CSV 行がありません。"
+                    : "CSV 編集スペースに取込済みの行がまだありません。"}
+                </p>
+              )}
+            </div>
+          </section>
+        </div>
+      </section>
+
+      {!hasSelectedProject ? (
+        <section className="sub-panel project-empty-panel">
+          <h4>案件を選択してください</h4>
+          <p className="mini">
+            上の検索から既存案件を開くか、CSV 取込データを選んで案内文用の案件を開始してください。
+          </p>
+        </section>
+      ) : null}
 
       {readOnly ? (
         <section className="sub-panel required-summary-panel">
@@ -486,12 +662,22 @@ export function NoticeWorkspace({
         </section>
       ) : null}
 
+      {printErrorMessage ? (
+        <section className="sub-panel required-summary-panel">
+          <h4>案内文を出力できない理由</h4>
+          <p className="mini error-text">{printErrorMessage}</p>
+        </section>
+      ) : null}
+
       {noticeMissingFields.length ? (
         <section className="sub-panel required-summary-panel">
           <h4>印刷前に入力したい項目</h4>
           <p className="mini notice-toolbar-meta">{noticeMissingFields.map((field) => field.label).join(" / ")}</p>
         </section>
       ) : null}
+
+      {!hasSelectedProject ? null : (
+        <>
 
       <section className="sub-panel">
         <h4>ヘッダー・停電情報</h4>
@@ -594,7 +780,7 @@ export function NoticeWorkspace({
         <div className="panel-head">
           <div>
             <h4>工事日程</h4>
-            <p className="mini">事前工事日と本工事日をこのまま印刷ページへ反映します。</p>
+            <p className="mini">事前工事 / 本工事 / 事後工事をこのまま印刷ページへ反映します。CSV で足りない分はここで手入力できます。</p>
           </div>
           <button type="button" className="btn btn-subtle" onClick={addNoticeScheduleRow} disabled={!canEdit || !canEditSelectedProject}>
             <span className="btn-icon"><UiIcon name="plus" /></span>行追加
@@ -754,6 +940,8 @@ export function NoticeWorkspace({
           <NoticePrintDocument project={previewProject} preview />
         </div>
       </section>
+        </>
+      )}
     </section>
   );
 }
