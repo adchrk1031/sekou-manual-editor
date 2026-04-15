@@ -1584,6 +1584,62 @@ function projectFromCsv(record: CsvRecord): Project | null {
   return project;
 }
 
+function mergeProjectForNoticeFromCsv(existing: Project, imported: Project): Project {
+  return {
+    ...existing,
+    propertyName: imported.propertyName,
+    propertyAddress: imported.propertyAddress,
+    titleSubject: imported.titleSubject,
+    workDateStart: imported.workDateStart,
+    workDateEnd: imported.workDateEnd,
+    outageDateStart: imported.outageDateStart,
+    outageDateEnd: imported.outageDateEnd,
+    outageTimeStart: imported.outageTimeStart,
+    outageTimeEnd: imported.outageTimeEnd,
+    outageEnabled: imported.outageEnabled,
+    flags: imported.flags,
+    selectedWorkCodes: imported.selectedWorkCodes,
+    noteSpecial: imported.noteSpecial,
+    noteApprovalExtra: imported.noteApprovalExtra,
+    coverRecipientSuffix: imported.coverRecipientSuffix,
+    pdfTemplateId: imported.pdfTemplateId,
+    pdfCompanyName: imported.pdfCompanyName,
+    pdfTeam: imported.pdfTeam,
+    pdfContactPerson: imported.pdfContactPerson,
+    pdfAddress: imported.pdfAddress,
+    pdfEmail: imported.pdfEmail,
+    pdfTel: imported.pdfTel,
+    pdfFax: imported.pdfFax,
+    scheduleRows: imported.scheduleRows,
+    relatedParties: {
+      ...existing.relatedParties,
+      owner: {
+        ...existing.relatedParties.owner,
+        ...imported.relatedParties.owner,
+      },
+    },
+    noticePropertyName: imported.noticePropertyName,
+    noticeRecipientName: imported.noticeRecipientName,
+    noticeSenderCompany: imported.noticeSenderCompany,
+    noticeHeadline: imported.noticeHeadline,
+    noticeIntroText: imported.noticeIntroText,
+    noticeMainWorkDate: imported.noticeMainWorkDate,
+    noticeOutageDate: imported.noticeOutageDate,
+    noticeOutageTimeStart: imported.noticeOutageTimeStart,
+    noticeOutageTimeEnd: imported.noticeOutageTimeEnd,
+    noticeScheduleRows: imported.noticeScheduleRows,
+    noticePrivateAreaText: imported.noticePrivateAreaText,
+    noticeCommonAreaText: imported.noticeCommonAreaText,
+    noticeCompensationText: imported.noticeCompensationText,
+    noticeContactCompany: imported.noticeContactCompany,
+    noticeContactDepartment: imported.noticeContactDepartment,
+    noticeContactAddress: imported.noticeContactAddress,
+    noticeContactTel: imported.noticeContactTel,
+    noticeContactHours: imported.noticeContactHours,
+    noticeAdviceItems: imported.noticeAdviceItems,
+  };
+}
+
 const seedProjects: Project[] = [
 ];
 
@@ -3971,6 +4027,47 @@ useEffect(() => {
     setImportStatus(`${imported.length}件を${sourceLabel === "import" ? "CSV取込" : "編集データ反映"}しました`);
     setCsvSelectedRows([]);
     appendAudit("csv_apply", `${imported.length}件を${sourceLabel === "import" ? "CSV取込" : "CSV編集から反映"}`, imported[0].projectId);
+  }
+
+  function startNoticeFromCsvRow(record: CsvRecord): void {
+    if (!canEdit) {
+      return;
+    }
+    const imported = projectFromCsv(record);
+    if (!imported) {
+      setImportStatus("案内文開始失敗: project_id 列がある行を選択してください");
+      return;
+    }
+
+    const existing = projectsRef.current.find((project) => project.projectId === imported.projectId);
+    if (existing) {
+      const approved = window.confirm(
+        `案件「${existing.projectId} | ${existing.propertyName || "（物件名未設定）"}」はすでに存在します。\nCSV の内容で停電案内文向けの基本情報を更新してよろしいですか？`,
+      );
+      if (!approved) {
+        return;
+      }
+    }
+
+    const nextProject = existing
+      ? mergeProjectForNoticeFromCsv(existing, imported)
+      : imported;
+
+    setProjects((prev) => {
+      const map = new Map<string, Project>();
+      prev.forEach((project) => map.set(project.projectId, project));
+      map.set(nextProject.projectId, nextProject);
+      return Array.from(map.values());
+    });
+    setSelectedId(nextProject.projectId);
+    setImportStatus(existing
+      ? `CSV内容をもとに停電案内文を更新しました: ${nextProject.projectId}`
+      : `CSV内容から停電案内文用案件を開始しました: ${nextProject.projectId}`);
+    appendAudit(
+      existing ? "notice_csv_refresh" : "notice_csv_start",
+      existing ? "CSV内容で停電案内文向け基本情報を更新" : "CSV内容から停電案内文を開始",
+      nextProject.projectId,
+    );
   }
 
   function updateCsvCell(rowIndex: number, header: string, value: string): void {
@@ -7453,6 +7550,14 @@ useEffect(() => {
           selectedProject={selectedProject}
           canEdit={canEdit}
           canEditSelectedProject={canEditSelectedProject}
+          projectOptions={projects.map((project) => ({
+            projectId: project.projectId,
+            propertyName: project.propertyName,
+            propertyAddress: project.propertyAddress,
+          }))}
+          csvDraftRows={csvDraftRows}
+          onSelectProject={selectProjectFromSearch}
+          onStartFromCsvRow={startNoticeFromCsvRow}
           updateSelectedProject={updateSelectedProject}
           onPrint={exportNoticePdf}
         />

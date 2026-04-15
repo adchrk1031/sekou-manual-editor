@@ -3562,6 +3562,100 @@ input.control[type="datetime-local"] {
   align-items: flex-start;
 }
 
+.notice-search-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.notice-search-input {
+  display: grid;
+  gap: 6px;
+}
+
+.notice-search-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.notice-search-column {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #d7e4f4;
+  border-radius: 16px;
+  background: #fbfcff;
+  padding: 14px;
+}
+
+.notice-search-column-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.notice-search-column-head h5 {
+  margin: 0 0 4px;
+  font-size: 1rem;
+}
+
+.notice-search-list {
+  display: grid;
+  gap: 10px;
+}
+
+.notice-search-item {
+  width: 100%;
+  border: 1px solid #d7e4f4;
+  border-radius: 14px;
+  background: #fff;
+  padding: 12px;
+  display: grid;
+  gap: 6px;
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.notice-search-item.is-active {
+  border-color: #0b6bcb;
+  box-shadow: 0 0 0 2px rgba(11, 107, 203, 0.12);
+}
+
+.notice-search-item:hover:not(:disabled) {
+  border-color: #a8c7ef;
+  background: #eef5ff;
+}
+
+.notice-search-item:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+}
+
+.notice-search-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.notice-search-item-action {
+  flex-shrink: 0;
+  font-size: 0.79rem;
+  font-weight: 700;
+  color: #0b6bcb;
+}
+
+.notice-search-item-meta {
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.notice-search-empty {
+  margin: 0;
+}
+
 .notice-actions {
   justify-content: flex-end;
 }
@@ -5375,6 +5469,16 @@ input.control[type="datetime-local"] {
   .notice-panel-head {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .notice-search-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .notice-search-column-head,
+  .notice-search-item-head {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .page-card-index,

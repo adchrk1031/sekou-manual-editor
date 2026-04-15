@@ -209,7 +209,7 @@ export type PartyCompanyTemplatePreset = {
   tel: string;
 };
 
-export type NoticeWorkType = "事前工事" | "本工事";
+export type NoticeWorkType = "事前工事" | "本工事" | "事後工事";
 export type NoticeOutageState = "停電なし" | "停電あり";
 export type NoticeAdvicePhase = "before" | "during" | "after";
 
