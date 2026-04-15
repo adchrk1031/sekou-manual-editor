@@ -464,6 +464,40 @@ export function registerInitialAdmin(_name: string, _email: string, _password: s
   return next;
 }
 
+export function registerInitialAdminWithGoogle(_name: string, _email: string): AuthUser | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const name = canonicalizeKnownPersonName(_name.trim(), _email);
+  const email = normalizeEmail(_email);
+  if (!name || !email) {
+    return null;
+  }
+  const users = ensureUsers();
+  if (users.length > 0) {
+    return null;
+  }
+  const now = new Date().toISOString();
+  const next: AuthUser = {
+    id: uid("user"),
+    name,
+    email,
+    password: uid("google_login"),
+    role: "system_admin",
+    active: true,
+    approvalStatus: "approved",
+    approvedAt: now,
+    approvedById: "self_google",
+    approvedByName: "Google認証",
+    createdAt: now,
+    createdById: "self_google",
+    createdByName: "Google認証",
+  };
+  localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(sanitizeUsers([next])));
+  syncSharedSnapshotInBackground();
+  return next;
+}
+
 export function registerSelfUser(name: string, email: string, password: string): { user: AuthUser | null; error?: string } {
   if (typeof window === "undefined") {
     return { user: null, error: "client_only" };
