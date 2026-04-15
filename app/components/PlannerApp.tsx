@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { CSSProperties, ChangeEvent, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { clearSession, ensureUsers, getLoginAttempts, getLoginFailureMessage, getSessionUser, loginWithCredentials, type LoginAttemptLog } from "./auth";
+import { clearSession, ensureUsers, getLoginAttempts, getLoginFailureMessage, getSessionUser, loginWithCredentials, pushAuthUsersSnapshot, type LoginAttemptLog } from "./auth";
 import {
   SHARED_STORAGE_RESYNC_INTERVAL_MS,
   SHARED_STORAGE_UPDATED_EVENT,
@@ -2325,6 +2325,9 @@ useEffect(() => {
       return;
     }
     localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users));
+    if (users.length > 0) {
+      void pushAuthUsersSnapshot(users);
+    }
   }, [users, hydrated]);
 
   useEffect(() => {

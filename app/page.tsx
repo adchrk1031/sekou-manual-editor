@@ -8,6 +8,8 @@ import {
   getSessionUser,
   loginWithCredentials,
   loginWithGoogleEmail,
+  pullAuthUsersSnapshot,
+  pushAuthUsersSnapshot,
   registerInitialAdmin,
   registerInitialAdminWithGoogle,
   registerSelfUser,
@@ -123,12 +125,17 @@ export default function Page() {
   useEffect(() => {
     let cancelled = false;
     const bootstrap = async () => {
+      const authUsersResult = await pullAuthUsersSnapshot();
+      let users = ensureUsers();
+      if (!authUsersResult.exists && users.length > 0) {
+        await pushAuthUsersSnapshot(users);
+        users = ensureUsers();
+      }
       const synced = await pullSharedStorageSnapshot();
       if (cancelled) {
         return;
       }
       setSharedSyncReady(synced);
-      const users = ensureUsers();
       setHasUsers(users.length > 0);
       setAuthTab(users.length === 0 ? "register" : "login");
       if (synced && users.length > 0) {
@@ -305,6 +312,7 @@ export default function Page() {
       setGoogleAuthBusy(true);
       setMessage(null);
       setAuthTab("login");
+      await pullAuthUsersSnapshot();
       const synced = sharedSyncReady || await pullSharedStorageSnapshot();
       setSharedSyncReady(synced);
       if (!synced) {
