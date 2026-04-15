@@ -49,12 +49,32 @@ export const USERS_STORAGE_KEY = "sekou-tool-users-v1";
 export const SESSION_STORAGE_KEY = "sekou-tool-session-v1";
 export const ACCESS_LOG_STORAGE_KEY = "sekou-auth-attempts-v1";
 export const LOGIN_GUARD_STORAGE_KEY = "sekou-auth-login-guard-v1";
+const AUTH_USERS_API_PATH = "/api/manual-editor/auth-users";
 const MAX_ACCESS_LOGS = 500;
 const SESSION_TTL_MS = 1000 * 60 * 60 * 12;
 const SESSION_INACTIVITY_TIMEOUT_MS = 1000 * 60 * 60;
 const SESSION_ACTIVITY_WRITE_THROTTLE_MS = 15000;
 const LOGIN_LOCK_WINDOW_MS = 1000 * 60 * 15;
 const MAX_FAILED_ATTEMPTS = 5;
+
+type AuthUsersSnapshot = {
+  users: AuthUser[];
+};
+
+type AuthUsersPullResponse = {
+  ok?: unknown;
+  exists?: unknown;
+  payload?: unknown;
+  updatedAt?: unknown;
+};
+
+type AuthUsersPushResponse = {
+  ok?: unknown;
+  payload?: unknown;
+  updatedAt?: unknown;
+};
+
+let lastPulledAuthUsersUpdatedAt: string | null = null;
 const KNOWN_USER_NAME_BY_EMAIL: Record<string, string> = {
   "h.adachi@denryoku.co.jp": "安達広樹",
 };
@@ -162,6 +182,14 @@ function nowMs(): number {
 
 function normalizeEmail(value: string): string {
   return value.trim().toLowerCase();
+}
+
+function isAuthUsersSnapshot(value: unknown): value is AuthUsersSnapshot {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const users = (value as { users?: unknown }).users;
+  return Array.isArray(users);
 }
 
 function loadLoginGuardMap(): LoginGuardMap {
@@ -406,6 +434,127 @@ function syncSharedSnapshotInBackground(): void {
   void pushSharedStorageSnapshot();
 }
 
+function persistUsers(users: AuthUser[], options?: { syncRemote?: boolean }): AuthUser[] {
+  if (typeof window === "undefined") {
+    return sanitizeUsers(users);
+  }
+  const normalized = sanitizeUsers(users);
+  localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(normalized));
+  if (options?.syncRemote !== false && normalized.length > 0) {
+    void pushAuthUsersSnapshot(normalized);
+  }
+  return normalized;
+}
+
+async function requestAuthUsersPush(
+  users: AuthUser[],
+  baseUpdatedAt: string | null,
+): Promise<{ ok: true; updatedAt?: string } | { ok: false; status?: number; payload?: AuthUser[]; updatedAt?: string }> {
+  try {
+    const response = await fetch(AUTH_USERS_API_PATH, {
+      method: "PUT",
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        payload: { users },
+        baseUpdatedAt,
+      }),
+    });
+    const body = (await response.json().catch(() => null)) as AuthUsersPushResponse | null;
+    if (response.ok) {
+      return {
+        ok: true,
+        updatedAt: typeof body?.updatedAt === "string" ? body.updatedAt : undefined,
+      };
+    }
+    if (response.status === 409 && isAuthUsersSnapshot(body?.payload)) {
+      return {
+        ok: false,
+        status: 409,
+        payload: sanitizeUsers(body.payload.users),
+        updatedAt: typeof body?.updatedAt === "string" ? body.updatedAt : undefined,
+      };
+    }
+    return { ok: false, status: response.status };
+  } catch {
+    return { ok: false };
+  }
+}
+
+export async function pullAuthUsersSnapshot(): Promise<{ ok: boolean; exists: boolean; count: number }> {
+  if (typeof window === "undefined") {
+    return { ok: false, exists: false, count: 0 };
+  }
+  try {
+    const response = await fetch(AUTH_USERS_API_PATH, {
+      method: "GET",
+      cache: "no-store",
+      credentials: "same-origin",
+    });
+    if (!response.ok) {
+      return { ok: false, exists: false, count: 0 };
+    }
+    const body = (await response.json()) as AuthUsersPullResponse;
+    if (body.ok !== true) {
+      return { ok: false, exists: false, count: 0 };
+    }
+    if (body.exists === false) {
+      lastPulledAuthUsersUpdatedAt = null;
+      return { ok: true, exists: false, count: 0 };
+    }
+    if (!isAuthUsersSnapshot(body.payload)) {
+      return { ok: false, exists: false, count: 0 };
+    }
+    const users = persistUsers(body.payload.users, { syncRemote: false });
+    lastPulledAuthUsersUpdatedAt = typeof body.updatedAt === "string" ? body.updatedAt : null;
+    return { ok: true, exists: true, count: users.length };
+  } catch {
+    return { ok: false, exists: false, count: 0 };
+  }
+}
+
+export async function pushAuthUsersSnapshot(usersArg?: AuthUser[]): Promise<boolean> {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  const localUsers = sanitizeUsers(usersArg ?? ensureUsers());
+  if (!localUsers.length) {
+    return false;
+  }
+
+  const firstAttempt = await requestAuthUsersPush(localUsers, lastPulledAuthUsersUpdatedAt);
+  if (firstAttempt.ok) {
+    if (firstAttempt.updatedAt) {
+      lastPulledAuthUsersUpdatedAt = firstAttempt.updatedAt;
+    }
+    return true;
+  }
+
+  if (firstAttempt.status !== 409 || !firstAttempt.payload) {
+    return false;
+  }
+
+  if (firstAttempt.updatedAt) {
+    lastPulledAuthUsersUpdatedAt = firstAttempt.updatedAt;
+  }
+  const mergedUsers = sanitizeUsers([...localUsers, ...firstAttempt.payload]);
+  persistUsers(mergedUsers, { syncRemote: false });
+
+  if (JSON.stringify(mergedUsers) === JSON.stringify(firstAttempt.payload)) {
+    return true;
+  }
+
+  const retryAttempt = await requestAuthUsersPush(mergedUsers, lastPulledAuthUsersUpdatedAt);
+  if (retryAttempt.ok) {
+    if (retryAttempt.updatedAt) {
+      lastPulledAuthUsersUpdatedAt = retryAttempt.updatedAt;
+    }
+    return true;
+  }
+  return false;
+}
+
 export function ensureUsers(): AuthUser[] {
   if (typeof window === "undefined") {
     return [];
@@ -416,7 +565,7 @@ export function ensureUsers(): AuthUser[] {
     if (Array.isArray(parsed)) {
       const normalized = sanitizeUsers(parsed);
       if (JSON.stringify(normalized) !== JSON.stringify(parsed)) {
-        localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(normalized));
+        persistUsers(normalized, { syncRemote: false });
       }
       return normalized;
     }
@@ -459,7 +608,7 @@ export function registerInitialAdmin(_name: string, _email: string, _password: s
     createdById: "self",
     createdByName: "初期登録",
   };
-  localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(sanitizeUsers([next])));
+  persistUsers([next]);
   syncSharedSnapshotInBackground();
   return next;
 }
@@ -493,7 +642,7 @@ export function registerInitialAdminWithGoogle(_name: string, _email: string): A
     createdById: "self_google",
     createdByName: "Google認証",
   };
-  localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(sanitizeUsers([next])));
+  persistUsers([next]);
   syncSharedSnapshotInBackground();
   return next;
 }
@@ -524,7 +673,7 @@ export function registerSelfUser(name: string, email: string, password: string):
     createdById: "self_signup",
     createdByName: "本人申請（セルフ登録）",
   };
-  localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(sanitizeUsers([next, ...users])));
+  persistUsers([next, ...users]);
   syncSharedSnapshotInBackground();
   return { user: next };
 }
@@ -646,7 +795,7 @@ export function loginWithCredentials(
       ? { ...user, lastLoginAt: new Date().toISOString() }
       : user,
   );
-  localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(sanitizeUsers(nextUsers)));
+  persistUsers(nextUsers);
   writeSession(foundByEmail.id);
   clearLoginGuard(targetEmail);
   appendLoginAttempt({ email: foundByEmail.email, userName: foundByEmail.name, result: "success", source });
@@ -694,7 +843,7 @@ export function loginWithGoogleEmail(
       ? { ...user, lastLoginAt: new Date().toISOString() }
       : user,
   );
-  localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(sanitizeUsers(nextUsers)));
+  persistUsers(nextUsers);
   writeSession(found.id);
   clearLoginGuard(targetEmail);
   appendLoginAttempt({ email: found.email, userName: found.name, result: "success", source });

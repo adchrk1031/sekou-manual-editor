@@ -33,6 +33,7 @@ const SHARED_KEY_PREFIXES = [
 ];
 const SHARED_KEY_EXCLUDES = new Set([
   "sekou-tool-session-v1",
+  "sekou-tool-users-v1",
   "sekou-auth-login-guard-v1",
   "sekou-debug-outage-trace",
   "sekou-debug-legacy-date",
