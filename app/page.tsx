@@ -1,18 +1,35 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ensureUsers,
   getLoginFailureMessage,
   getSessionUser,
   loginWithCredentials,
+  loginWithGoogleEmail,
   registerInitialAdmin,
+  registerInitialAdminWithGoogle,
   registerSelfUser,
 } from "./components/auth";
 import { pullSharedStorageSnapshot, pushSharedStorageSnapshot } from "./components/sharedStorage";
 
 type AuthTab = "register" | "login";
+
+const GOOGLE_ERROR_MESSAGES: Record<string, string> = {
+  config: "Googleログイン設定が未完了です。管理者へ設定確認を依頼してください。",
+  state: "Googleログインの確認情報が一致しませんでした。もう一度お試しください。",
+  token: "Googleログイン用の認証トークン取得に失敗しました。時間をおいて再試行してください。",
+  userinfo: "Googleプロフィールの取得に失敗しました。時間をおいて再試行してください。",
+  email: "Googleアカウントの確認済みメールアドレスを取得できませんでした。",
+};
+
+function getGoogleLoginErrorMessage(code: string | null): string {
+  if (!code) {
+    return "Googleログインに失敗しました。時間をおいて再試行してください。";
+  }
+  return GOOGLE_ERROR_MESSAGES[code] ?? "Googleログインに失敗しました。時間をおいて再試行してください。";
+}
 
 async function notifyAdminPendingApproval(user: { name: string; email: string }): Promise<boolean> {
   try {
@@ -75,6 +92,7 @@ export default function Page() {
   const [authTab, setAuthTab] = useState<AuthTab>("login");
   const [hasUsers, setHasUsers] = useState(false);
   const [sharedSyncReady, setSharedSyncReady] = useState(false);
+  const [googleAuthBusy, setGoogleAuthBusy] = useState(false);
 
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
@@ -88,21 +106,23 @@ export default function Page() {
 
   const [message, setMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
   const isInitialSetup = useMemo(() => sharedSyncReady && !hasUsers, [hasUsers, sharedSyncReady]);
+  const googleFlowHandledRef = useRef(false);
+
+  const clearGoogleQueryState = (): void => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const url = new URL(window.location.href);
+    url.searchParams.delete("google");
+    url.searchParams.delete("email");
+    url.searchParams.delete("name");
+    url.searchParams.delete("google_error");
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  };
 
   useEffect(() => {
     let cancelled = false;
-    const localUsers = ensureUsers();
-    setHasUsers(localUsers.length > 0);
-    setAuthTab(localUsers.length === 0 ? "register" : "login");
-    if (getSessionUser()) {
-      router.replace("/menu");
-      return () => {
-        cancelled = true;
-      };
-    }
-    setHydrated(true);
-
-    const syncShared = async () => {
+    const bootstrap = async () => {
       const synced = await pullSharedStorageSnapshot();
       if (cancelled) {
         return;
@@ -111,10 +131,14 @@ export default function Page() {
       const users = ensureUsers();
       setHasUsers(users.length > 0);
       setAuthTab(users.length === 0 ? "register" : "login");
+      if (synced && users.length > 0) {
+        void pushSharedStorageSnapshot();
+      }
       if (getSessionUser()) {
         router.replace("/menu");
         return;
       }
+      setHydrated(true);
       if (!synced) {
         setMessage({
           type: "error",
@@ -122,7 +146,7 @@ export default function Page() {
         });
       }
     };
-    void syncShared();
+    void bootstrap();
     return () => {
       cancelled = true;
     };
@@ -243,6 +267,96 @@ export default function Page() {
     setRegisterPasswordConfirm("");
   }
 
+  useEffect(() => {
+    if (!hydrated || googleFlowHandledRef.current) {
+      return;
+    }
+
+    if (typeof window === "undefined") {
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    const googleStatus = params.get("google");
+    const googleError = params.get("google_error");
+    const googleEmail = params.get("email");
+    const googleName = params.get("name");
+
+    if (!googleStatus && !googleError) {
+      return;
+    }
+
+    googleFlowHandledRef.current = true;
+
+    if (googleError) {
+      setAuthTab("login");
+      setMessage({ type: "error", text: getGoogleLoginErrorMessage(googleError) });
+      clearGoogleQueryState();
+      return;
+    }
+
+    if (googleStatus !== "ok" || !googleEmail) {
+      setAuthTab("login");
+      setMessage({ type: "error", text: getGoogleLoginErrorMessage(null) });
+      clearGoogleQueryState();
+      return;
+    }
+
+    const handleGoogleLogin = async () => {
+      setGoogleAuthBusy(true);
+      setMessage(null);
+      setAuthTab("login");
+      const synced = sharedSyncReady || await pullSharedStorageSnapshot();
+      setSharedSyncReady(synced);
+      if (!synced) {
+        setMessage({
+          type: "error",
+          text: "共有データへ接続できないため、Googleログインを完了できませんでした。時間をおいて再試行してください。",
+        });
+        clearGoogleQueryState();
+        setGoogleAuthBusy(false);
+        return;
+      }
+
+      const existingUsers = ensureUsers();
+      setHasUsers(existingUsers.length > 0);
+      if (!existingUsers.length) {
+        const createdAdmin = registerInitialAdminWithGoogle(googleName?.trim() || googleEmail, googleEmail);
+        if (!createdAdmin) {
+          setMessage({
+            type: "error",
+            text: "初期管理者の自動登録に失敗しました。手入力登録か、時間をおいて再試行してください。",
+          });
+          clearGoogleQueryState();
+          setGoogleAuthBusy(false);
+          return;
+        }
+        await pushSharedStorageSnapshot({ force: true });
+      }
+
+      const result = loginWithGoogleEmail(googleEmail, "login_page");
+      if (!result.user) {
+        setLoginEmail(googleEmail.trim().toLowerCase());
+        setMessage({ type: "error", text: getLoginFailureMessage(result.reason) });
+        clearGoogleQueryState();
+        setGoogleAuthBusy(false);
+        return;
+      }
+
+      await pushSharedStorageSnapshot({ force: true });
+      clearGoogleQueryState();
+      router.replace("/menu");
+    };
+
+    void handleGoogleLogin();
+  }, [hydrated, router, sharedSyncReady]);
+
+  const startGoogleLogin = (): void => {
+    setMessage(null);
+    if (typeof window !== "undefined") {
+      window.location.assign("/api/auth/google/start");
+    }
+  };
+
   if (!hydrated) {
     return (
       <main className="auth-shell">
@@ -289,6 +403,20 @@ export default function Page() {
         {authTab === "register" ? (
           <section className="auth-form" aria-label="ユーザー登録">
             <p className="auth-section-title">{isInitialSetup ? "初期管理者登録" : "初めて利用する方（ユーザー登録）"}</p>
+            {isInitialSetup ? (
+              <>
+                <button
+                  type="button"
+                  className="auth-google-btn"
+                  onClick={startGoogleLogin}
+                  disabled={googleAuthBusy || !sharedSyncReady}
+                >
+                  <span className="auth-google-icon" aria-hidden="true">G</span>
+                  Googleで初期管理者を開始
+                </button>
+                <div className="auth-divider"><span>または手入力で登録</span></div>
+              </>
+            ) : null}
             <label className="field">
               <span>ユーザー名（フルネーム）</span>
               <input className="control" value={registerName} placeholder="例: 山田 太郎" onChange={(event) => setRegisterName(event.target.value)} />
@@ -332,7 +460,7 @@ export default function Page() {
               className="btn btn-accent auth-login-btn"
               style={AUTH_PRIMARY_BUTTON_STYLE}
               onClick={onRegister}
-              disabled={!sharedSyncReady}
+              disabled={!sharedSyncReady || googleAuthBusy}
             >
               {isInitialSetup ? "初期管理者を登録する" : "登録する"}
             </button>
@@ -346,6 +474,16 @@ export default function Page() {
         ) : (
           <section className="auth-form" aria-label="ログイン">
             <p className="auth-section-title">ログイン（登録済みユーザー）</p>
+            <button
+              type="button"
+              className="auth-google-btn"
+              onClick={startGoogleLogin}
+              disabled={googleAuthBusy}
+            >
+              <span className="auth-google-icon" aria-hidden="true">G</span>
+              Googleでログイン
+            </button>
+            <div className="auth-divider"><span>またはメールとパスワードでログイン</span></div>
             <label className="field">
               <span>メールアドレス</span>
               <input className="control" type="email" value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} />
@@ -374,9 +512,9 @@ export default function Page() {
               className="btn btn-accent auth-login-btn"
               style={AUTH_PRIMARY_BUTTON_STYLE}
               onClick={onLogin}
-              disabled={!loginEmail.trim() || !loginPassword.trim()}
+              disabled={!loginEmail.trim() || !loginPassword.trim() || googleAuthBusy}
             >
-              ログインして続行
+              {googleAuthBusy ? "Googleログインを処理中..." : "ログインして続行"}
             </button>
           </section>
         )}
