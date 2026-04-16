@@ -146,6 +146,13 @@ export function CsvEditorSection({
               CSV取込
               <input type="file" accept=".csv,text/csv" onChange={handleCsvImport} disabled={!canEdit} />
             </label>
+            <a
+              className="btn btn-subtle"
+              href="/test-data/sekou_csv_test_200.csv"
+              download="sekou_csv_test_200.csv"
+            >
+              <span className="btn-icon"><UiIcon name="save" /></span>200件テストCSVをダウンロード
+            </a>
             <button type="button" className="btn btn-accent" onClick={() => applyCsvRowsToProjects(csvDraftRows, "editor")} disabled={!canEdit || !csvDraftRows.length}>
               <span className="btn-icon"><UiIcon name="apply" /></span>この編集内容を案件に反映
             </button>

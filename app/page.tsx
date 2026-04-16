@@ -14,7 +14,7 @@ import {
   registerInitialAdminWithGoogle,
   registerSelfUser,
 } from "./components/auth";
-import { pullSharedStorageSnapshot, pushSharedStorageSnapshot } from "./components/sharedStorage";
+import { pullSharedStorageSnapshot } from "./components/sharedStorage";
 
 type AuthTab = "register" | "login";
 
@@ -138,9 +138,6 @@ export default function Page() {
       setSharedSyncReady(synced);
       setHasUsers(users.length > 0);
       setAuthTab(users.length === 0 ? "register" : "login");
-      if (synced && users.length > 0) {
-        void pushSharedStorageSnapshot();
-      }
       if (getSessionUser()) {
         router.replace("/menu");
         return;
@@ -195,7 +192,6 @@ export default function Page() {
     refreshUsersState();
     const result = loginWithCredentials(loginEmail, loginPassword, "login_page");
     if (result.user) {
-      await pushSharedStorageSnapshot();
       router.push("/menu");
       return;
     }
@@ -229,11 +225,9 @@ export default function Page() {
         refreshUsersState();
         return;
       }
-      await pushSharedStorageSnapshot();
       const loginResult = loginWithCredentials(admin.email, admin.password, "login_page");
       refreshUsersState();
       if (loginResult.user) {
-        await pushSharedStorageSnapshot();
         router.push("/menu");
         return;
       }
@@ -245,7 +239,6 @@ export default function Page() {
     }
 
     const created = registerSelfUser(name, email, password);
-    await pushSharedStorageSnapshot();
     refreshUsersState();
     if (!created.user) {
       if (created.error === "duplicate_email") {
@@ -338,7 +331,6 @@ export default function Page() {
           setGoogleAuthBusy(false);
           return;
         }
-        await pushSharedStorageSnapshot({ force: true });
       }
 
       const result = loginWithGoogleEmail(googleEmail, "login_page");
@@ -350,7 +342,6 @@ export default function Page() {
         return;
       }
 
-      await pushSharedStorageSnapshot({ force: true });
       clearGoogleQueryState();
       router.replace("/menu");
     };

@@ -5471,6 +5471,33 @@ input.control[type="datetime-local"] {
     align-items: stretch;
   }
 
+  .party-slider-nav {
+    display: none;
+  }
+
+  .party-slider-window {
+    overflow: visible;
+  }
+
+  .party-slider-track {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
+    width: 100%;
+    transform: none !important;
+  }
+
+  .party-slide,
+  .party-card {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .party-company-template-actions {
+    margin-top: 0;
+  }
+
   .notice-search-grid {
     grid-template-columns: 1fr;
   }
@@ -5546,6 +5573,21 @@ input.control[type="datetime-local"] {
 
   .check-pill input[type="checkbox"],
   .checks input[type="checkbox"] {
+    flex: 0 0 auto;
+    margin-top: 2px;
+  }
+
+  .party-check {
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: flex-start;
+    line-height: 1.45;
+  }
+
+  .party-check input[type="checkbox"] {
     flex: 0 0 auto;
     margin-top: 2px;
   }
