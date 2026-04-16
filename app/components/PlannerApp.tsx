@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { CSSProperties, ChangeEvent, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { clearSession, ensureUsers, getLoginAttempts, getLoginFailureMessage, getSessionUser, loginWithCredentials, pushAuthUsersSnapshot, type LoginAttemptLog } from "./auth";
+import { clearSession, ensureUsers, getLoginAttempts, getLoginFailureMessage, getSessionUser, loginWithCredentials, pullAuthUsersSnapshot, pushAuthUsersSnapshot, type LoginAttemptLog } from "./auth";
 import {
   SHARED_STORAGE_RESYNC_INTERVAL_MS,
   SHARED_STORAGE_UPDATED_EVENT,
@@ -3435,11 +3435,8 @@ useEffect(() => {
   }
 
   async function login(): Promise<void> {
-    await pullSharedStorageSnapshot();
-    setUsers(ensureUsers() as UserAccount[]);
-    setAccessLogs(getLoginAttempts());
     const email = loginEmail.trim().toLowerCase();
-    const result = loginWithCredentials(email, loginPassword, "tracking_page");
+    const result = await loginWithCredentials(email, loginPassword, "tracking_page");
     if (!result.user) {
       setLoginError(getLoginFailureMessage(result.reason));
       appendAudit("login_failed", `ログイン失敗: ${email}`, selectedProject.projectId);
@@ -3447,7 +3444,14 @@ useEffect(() => {
       return;
     }
     const user = result.user;
-    await pushSharedStorageSnapshot();
+    await pullAuthUsersSnapshot();
+    const sharedPulled = await pullSharedStorageSnapshot({ force: true });
+    if (sharedPulled) {
+      loadWorkspaceStateFromStorage(true);
+      setSharedSyncState("synced");
+    } else {
+      setSharedSyncState("error");
+    }
     setUsers(ensureUsers() as UserAccount[]);
     setAccessLogs(getLoginAttempts());
     setCurrentUserId(user.id);

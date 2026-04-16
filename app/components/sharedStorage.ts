@@ -31,6 +31,7 @@ type SharedStatePullOptions = {
 const SHARED_STATE_API_PATH = "/api/manual-editor/state";
 const SHARED_FETCH_TIMEOUT_MS = 5000;
 const SHARED_PULL_COOLDOWN_MS = 10 * 1000;
+const SESSION_STORAGE_KEY = "sekou-tool-session-v1";
 export const SHARED_STORAGE_UPDATED_EVENT = "sekou:shared-storage-updated";
 export const SHARED_STORAGE_RESYNC_INTERVAL_MS = 30 * 1000;
 const SHARED_KEY_PREFIXES = [
@@ -191,6 +192,9 @@ async function requestSharedStatePush(
         updatedAt: typeof body?.updatedAt === "string" ? body.updatedAt : undefined,
       };
     }
+    if (response.status === 401 || response.status === 403) {
+      clearLocalSessionOnUnauthorized();
+    }
     return {
       ok: false,
       status: response.status,
@@ -342,6 +346,17 @@ function dispatchSharedStorageUpdated(updatedAt?: string): void {
   );
 }
 
+function clearLocalSessionOnUnauthorized(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  if (window.localStorage.getItem(SESSION_STORAGE_KEY) === null) {
+    return;
+  }
+  window.localStorage.removeItem(SESSION_STORAGE_KEY);
+  window.dispatchEvent(new StorageEvent("storage", { key: SESSION_STORAGE_KEY }));
+}
+
 async function pullSharedStorageSnapshotOnce(): Promise<boolean> {
   if (typeof window === "undefined") {
     return false;
@@ -356,6 +371,9 @@ async function pullSharedStorageSnapshotOnce(): Promise<boolean> {
       signal: controller.signal,
     });
     if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        clearLocalSessionOnUnauthorized();
+      }
       return false;
     }
     const body = (await response.json()) as SharedStatePullResponse;

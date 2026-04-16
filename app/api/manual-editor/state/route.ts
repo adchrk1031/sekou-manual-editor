@@ -3,6 +3,7 @@ import {
   readManualEditorState,
   writeManualEditorState,
 } from "../../../../lib/manualEditorStateStore";
+import { requireManualEditorUser } from "../../../../lib/manualEditorServerAuth";
 
 type SharedStatePayload = {
   items: Record<string, string>;
@@ -42,7 +43,11 @@ function isSharedStatePayload(value: unknown): value is SharedStatePayload {
   );
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const auth = await requireManualEditorUser(request);
+  if (!auth.ok) {
+    return auth.response;
+  }
   try {
     const stored = await readManualEditorState(SHARED_STATE_ID, isSharedStatePayload);
     if (!stored.exists || !stored.payload) {
@@ -72,6 +77,10 @@ export async function GET() {
 }
 
 export async function PUT(req: NextRequest) {
+  const auth = await requireManualEditorUser(req);
+  if (!auth.ok) {
+    return auth.response;
+  }
   let body: { payload?: unknown; baseUpdatedAt?: unknown } = {};
   try {
     body = (await req.json()) as { payload?: unknown; baseUpdatedAt?: unknown };
