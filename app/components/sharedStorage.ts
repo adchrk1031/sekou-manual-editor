@@ -23,8 +23,14 @@ type SharedStatePushOptions = {
   force?: boolean;
 };
 
+type SharedStatePullOptions = {
+  force?: boolean;
+  minIntervalMs?: number;
+};
+
 const SHARED_STATE_API_PATH = "/api/manual-editor/state";
 const SHARED_FETCH_TIMEOUT_MS = 5000;
+const SHARED_PULL_COOLDOWN_MS = 10 * 1000;
 export const SHARED_STORAGE_UPDATED_EVENT = "sekou:shared-storage-updated";
 export const SHARED_STORAGE_RESYNC_INTERVAL_MS = 30 * 1000;
 const SHARED_KEY_PREFIXES = [
@@ -61,6 +67,8 @@ function isSharedStatePayload(value: unknown): value is SharedStatePayload {
 
 let lastPulledUpdatedAt: string | null = null;
 let lastKnownSharedSnapshot: SharedStatePayload = EMPTY_SHARED_STATE_PAYLOAD;
+let lastPullFinishedAt = 0;
+let lastPullOk = false;
 let pushLoopPromise: Promise<boolean> | null = null;
 let pullLoopPromise: Promise<boolean> | null = null;
 let pushRequested = false;
@@ -380,14 +388,24 @@ async function pullSharedStorageSnapshotOnce(): Promise<boolean> {
   }
 }
 
-export async function pullSharedStorageSnapshot(): Promise<boolean> {
+export async function pullSharedStorageSnapshot(options?: SharedStatePullOptions): Promise<boolean> {
   if (typeof window === "undefined") {
     return false;
   }
+  const minIntervalMs = options?.minIntervalMs ?? SHARED_PULL_COOLDOWN_MS;
+  if (!options?.force && lastPullFinishedAt > 0 && Date.now() - lastPullFinishedAt < minIntervalMs) {
+    return lastPullOk;
+  }
   if (!pullLoopPromise) {
-    pullLoopPromise = pullSharedStorageSnapshotOnce().finally(() => {
-      pullLoopPromise = null;
-    });
+    pullLoopPromise = pullSharedStorageSnapshotOnce()
+      .then((ok) => {
+        lastPullOk = ok;
+        lastPullFinishedAt = Date.now();
+        return ok;
+      })
+      .finally(() => {
+        pullLoopPromise = null;
+      });
   }
   return pullLoopPromise;
 }

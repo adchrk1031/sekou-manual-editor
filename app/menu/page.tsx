@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { clearSession, getSessionUser, touchSessionActivity } from "../components/auth";
 import { pullSharedStorageSnapshot } from "../components/sharedStorage";
@@ -45,6 +45,7 @@ function MenuCardIcon({ type }: { type: "editor" | "csv" | "tracking" | "notice"
 export default function MenuPage() {
   const router = useRouter();
   const [userName, setUserName] = useState("");
+  const lastSharedRefreshAtRef = useRef(0);
 
   useEffect(() => {
     const applySessionState = (): boolean => {
@@ -58,20 +59,49 @@ export default function MenuPage() {
       return true;
     };
 
-    const checkSession = async (): Promise<void> => {
-      const hasSession = applySessionState();
-      if (!hasSession) {
+    const syncSharedState = async (force = false): Promise<void> => {
+      if (!applySessionState()) {
         return;
       }
-      await pullSharedStorageSnapshot();
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        return;
+      }
+      const now = Date.now();
+      if (!force && now - lastSharedRefreshAtRef.current < 60 * 1000) {
+        return;
+      }
+      lastSharedRefreshAtRef.current = now;
+      await pullSharedStorageSnapshot({ force, minIntervalMs: 45 * 1000 });
       applySessionState();
     };
-    void checkSession();
+
+    applySessionState();
+    void syncSharedState(true);
+
     const timer = window.setInterval(() => {
-      void checkSession();
-    }, 15 * 1000);
+      applySessionState();
+      if (document.visibilityState === "visible") {
+        void syncSharedState();
+      }
+    }, 60 * 1000);
     const onActivity = (): void => {
       touchSessionActivity();
+    };
+    const onFocus = (): void => {
+      applySessionState();
+      void syncSharedState(true);
+    };
+    const onVisibilityChange = (): void => {
+      if (document.visibilityState === "visible") {
+        applySessionState();
+        void syncSharedState(true);
+      }
+    };
+    const onOnline = (): void => {
+      void syncSharedState(true);
     };
     const onStorage = (event: StorageEvent): void => {
       if (event.key && !event.key.startsWith("sekou-tool-session")) {
@@ -84,6 +114,9 @@ export default function MenuPage() {
     window.addEventListener("touchstart", onActivity, { passive: true });
     window.addEventListener("wheel", onActivity, { passive: true });
     window.addEventListener("storage", onStorage);
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("online", onOnline);
+    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       window.clearInterval(timer);
       window.removeEventListener("pointerdown", onActivity);
@@ -91,6 +124,9 @@ export default function MenuPage() {
       window.removeEventListener("touchstart", onActivity);
       window.removeEventListener("wheel", onActivity);
       window.removeEventListener("storage", onStorage);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("online", onOnline);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [router]);
 
