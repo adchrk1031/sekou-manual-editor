@@ -3,15 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  ensureUsers,
   getLoginFailureMessage,
   getSessionUser,
   loginWithCredentials,
   loginWithGoogleEmail,
   pullAuthUsersSnapshot,
-  pushAuthUsersSnapshot,
   registerInitialAdmin,
-  registerInitialAdminWithGoogle,
   registerSelfUser,
 } from "./components/auth";
 import { pullSharedStorageSnapshot } from "./components/sharedStorage";
@@ -93,7 +90,7 @@ export default function Page() {
   const [hydrated, setHydrated] = useState(false);
   const [authTab, setAuthTab] = useState<AuthTab>("login");
   const [hasUsers, setHasUsers] = useState(false);
-  const [sharedSyncReady, setSharedSyncReady] = useState(false);
+  const [authBootstrapReady, setAuthBootstrapReady] = useState(false);
   const [googleAuthBusy, setGoogleAuthBusy] = useState(false);
 
   const [loginEmail, setLoginEmail] = useState("");
@@ -107,7 +104,7 @@ export default function Page() {
   const [showRegisterPassword, setShowRegisterPassword] = useState(false);
 
   const [message, setMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
-  const isInitialSetup = useMemo(() => sharedSyncReady && !hasUsers, [hasUsers, sharedSyncReady]);
+  const isInitialSetup = useMemo(() => authBootstrapReady && !hasUsers, [authBootstrapReady, hasUsers]);
   const googleFlowHandledRef = useRef(false);
 
   const clearGoogleQueryState = (): void => {
@@ -126,27 +123,24 @@ export default function Page() {
     let cancelled = false;
     const bootstrap = async () => {
       const authUsersResult = await pullAuthUsersSnapshot();
-      let users = ensureUsers();
-      if (!authUsersResult.exists && users.length > 0) {
-        await pushAuthUsersSnapshot(users);
-        users = ensureUsers();
-      }
-      const synced = await pullSharedStorageSnapshot();
       if (cancelled) {
         return;
       }
-      setSharedSyncReady(synced);
-      setHasUsers(users.length > 0);
-      setAuthTab(users.length === 0 ? "register" : "login");
+      const nextHasUsers = authUsersResult.ok
+        ? authUsersResult.exists || authUsersResult.count > 0
+        : true;
+      setAuthBootstrapReady(true);
+      setHasUsers(nextHasUsers);
+      setAuthTab(nextHasUsers ? "login" : "register");
       if (getSessionUser()) {
         router.replace("/menu");
         return;
       }
       setHydrated(true);
-      if (!synced) {
+      if (!authUsersResult.ok) {
         setMessage({
           type: "error",
-          text: "共有データへの接続に失敗しました。この端末の保存データでログインを継続します。新規登録は共有接続時のみ可能です。",
+          text: "認証データへの接続に失敗しました。時間をおいて再試行してください。",
         });
       }
     };
@@ -156,42 +150,16 @@ export default function Page() {
     };
   }, [router]);
 
-  function refreshUsersState(): void {
-    const users = ensureUsers();
-    setHasUsers(users.length > 0);
-  }
-
-  async function ensureSharedReadyOrFail(mode: "login" | "register"): Promise<boolean> {
-    if (sharedSyncReady) {
-      return true;
-    }
-    const synced = await pullSharedStorageSnapshot();
-    setSharedSyncReady(synced);
-    if (!synced) {
-      if (mode === "login") {
-        setMessage({
-          type: "error",
-          text: "共有データへの接続に失敗しました。この端末の保存データでログインを継続します。",
-        });
-        return true;
-      }
-      setMessage({
-        type: "error",
-        text: "共有データへ接続できません。新規登録は共有接続時のみ可能です。時間をおいて再試行してください。",
-      });
-      return false;
-    }
-    return true;
+  function warmSharedStateAfterAuth(): void {
+    void pullSharedStorageSnapshot({ force: true });
   }
 
   async function onLogin(): Promise<void> {
     setMessage(null);
-    if (!(await ensureSharedReadyOrFail("login"))) {
-      return;
-    }
-    refreshUsersState();
-    const result = loginWithCredentials(loginEmail, loginPassword, "login_page");
+    const result = await loginWithCredentials(loginEmail, loginPassword, "login_page");
     if (result.user) {
+      setHasUsers(true);
+      warmSharedStateAfterAuth();
       router.push("/menu");
       return;
     }
@@ -200,10 +168,6 @@ export default function Page() {
 
   async function onRegister(): Promise<void> {
     setMessage(null);
-    if (!(await ensureSharedReadyOrFail("register"))) {
-      return;
-    }
-    refreshUsersState();
     const name = registerName.trim();
     const email = registerEmail.trim().toLowerCase();
     const password = registerPassword;
@@ -219,27 +183,18 @@ export default function Page() {
     }
 
     if (isInitialSetup) {
-      const admin = registerInitialAdmin(name, email, password);
+      const admin = await registerInitialAdmin(name, email, password);
       if (!admin) {
         setMessage({ type: "error", text: "初期管理者の登録に失敗しました。ページを再読み込みして再度お試しください。" });
-        refreshUsersState();
         return;
       }
-      const loginResult = loginWithCredentials(admin.email, admin.password, "login_page");
-      refreshUsersState();
-      if (loginResult.user) {
-        router.push("/menu");
-        return;
-      }
-      setMessage({ type: "ok", text: "初期管理者を登録しました。ログインしてください。" });
-      setAuthTab("login");
-      setLoginEmail(admin.email);
-      setLoginPassword(admin.password);
+      setHasUsers(true);
+      warmSharedStateAfterAuth();
+      router.push("/menu");
       return;
     }
 
-    const created = registerSelfUser(name, email, password);
-    refreshUsersState();
+    const created = await registerSelfUser(name, email, password);
     if (!created.user) {
       if (created.error === "duplicate_email") {
         setMessage({ type: "error", text: "このメールアドレスはすでに登録済みです。" });
@@ -258,6 +213,7 @@ export default function Page() {
         ? "ユーザー登録を受け付けました。管理者承認後にログインできます。"
         : "ユーザー登録を受け付けました。管理者承認後にログインできます（Slack通知は未設定または送信失敗）。",
     });
+    setHasUsers(true);
     setAuthTab("login");
     setLoginEmail(created.user.email);
     setLoginPassword("");
@@ -305,35 +261,7 @@ export default function Page() {
       setGoogleAuthBusy(true);
       setMessage(null);
       setAuthTab("login");
-      await pullAuthUsersSnapshot();
-      const synced = sharedSyncReady || await pullSharedStorageSnapshot();
-      setSharedSyncReady(synced);
-      if (!synced) {
-        setMessage({
-          type: "error",
-          text: "共有データへ接続できないため、Googleログインを完了できませんでした。時間をおいて再試行してください。",
-        });
-        clearGoogleQueryState();
-        setGoogleAuthBusy(false);
-        return;
-      }
-
-      const existingUsers = ensureUsers();
-      setHasUsers(existingUsers.length > 0);
-      if (!existingUsers.length) {
-        const createdAdmin = registerInitialAdminWithGoogle(googleName?.trim() || googleEmail, googleEmail);
-        if (!createdAdmin) {
-          setMessage({
-            type: "error",
-            text: "初期管理者の自動登録に失敗しました。手入力登録か、時間をおいて再試行してください。",
-          });
-          clearGoogleQueryState();
-          setGoogleAuthBusy(false);
-          return;
-        }
-      }
-
-      const result = loginWithGoogleEmail(googleEmail, "login_page");
+      const result = await loginWithGoogleEmail(googleEmail, "login_page", googleName?.trim() || googleEmail);
       if (!result.user) {
         setLoginEmail(googleEmail.trim().toLowerCase());
         setMessage({ type: "error", text: getLoginFailureMessage(result.reason) });
@@ -342,12 +270,14 @@ export default function Page() {
         return;
       }
 
+      setHasUsers(true);
+      warmSharedStateAfterAuth();
       clearGoogleQueryState();
       router.replace("/menu");
     };
 
     void handleGoogleLogin();
-  }, [hydrated, router, sharedSyncReady]);
+  }, [hydrated, router]);
 
   const startGoogleLogin = (): void => {
     setMessage(null);
@@ -408,7 +338,7 @@ export default function Page() {
                   type="button"
                   className="auth-google-btn"
                   onClick={startGoogleLogin}
-                  disabled={googleAuthBusy || !sharedSyncReady}
+                  disabled={googleAuthBusy || !authBootstrapReady}
                 >
                   <span className="auth-google-icon" aria-hidden="true">G</span>
                   Googleで初期管理者を開始
@@ -459,7 +389,7 @@ export default function Page() {
               className="btn btn-accent auth-login-btn"
               style={AUTH_PRIMARY_BUTTON_STYLE}
               onClick={onRegister}
-              disabled={!sharedSyncReady || googleAuthBusy}
+              disabled={!authBootstrapReady || googleAuthBusy}
             >
               {isInitialSetup ? "初期管理者を登録する" : "登録する"}
             </button>
@@ -511,7 +441,7 @@ export default function Page() {
               className="btn btn-accent auth-login-btn"
               style={AUTH_PRIMARY_BUTTON_STYLE}
               onClick={onLogin}
-              disabled={!loginEmail.trim() || !loginPassword.trim() || googleAuthBusy}
+              disabled={!authBootstrapReady || !loginEmail.trim() || !loginPassword.trim() || googleAuthBusy}
             >
               {googleAuthBusy ? "Googleログインを処理中..." : "ログインして続行"}
             </button>

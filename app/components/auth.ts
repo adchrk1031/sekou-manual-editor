@@ -29,7 +29,8 @@ export type AuthLoginFailureReason =
   | "inactive"
   | "pending_approval"
   | "rejected"
-  | "locked";
+  | "locked"
+  | "unavailable";
 
 export type AuthLoginResult = {
   user: AuthUser | null;
@@ -50,6 +51,10 @@ export const SESSION_STORAGE_KEY = "sekou-tool-session-v1";
 export const ACCESS_LOG_STORAGE_KEY = "sekou-auth-attempts-v1";
 export const LOGIN_GUARD_STORAGE_KEY = "sekou-auth-login-guard-v1";
 const AUTH_USERS_API_PATH = "/api/manual-editor/auth-users";
+const AUTH_LOGIN_API_PATH = "/api/manual-editor/session/login";
+const AUTH_GOOGLE_LOGIN_API_PATH = "/api/manual-editor/session/google-login";
+const AUTH_REGISTER_API_PATH = "/api/manual-editor/session/register";
+const AUTH_LOGOUT_API_PATH = "/api/manual-editor/session/logout";
 const MAX_ACCESS_LOGS = 500;
 const SESSION_TTL_MS = 1000 * 60 * 60 * 12;
 const SESSION_INACTIVITY_TIMEOUT_MS = 1000 * 60 * 60;
@@ -64,6 +69,8 @@ type AuthUsersSnapshot = {
 type AuthUsersPullResponse = {
   ok?: unknown;
   exists?: unknown;
+  count?: unknown;
+  access?: unknown;
   payload?: unknown;
   updatedAt?: unknown;
 };
@@ -72,6 +79,14 @@ type AuthUsersPushResponse = {
   ok?: unknown;
   payload?: unknown;
   updatedAt?: unknown;
+};
+
+type AuthSessionResponse = {
+  ok?: unknown;
+  user?: unknown;
+  users?: unknown;
+  reason?: unknown;
+  error?: unknown;
 };
 
 let lastPulledAuthUsersUpdatedAt: string | null = null;
@@ -139,6 +154,9 @@ function pickPreferredCandidate(candidates: AuthUser[]): AuthUser | null {
 }
 
 export function getLoginFailureMessage(reason?: AuthLoginFailureReason): string {
+  if (reason === "unavailable") {
+    return "認証サービスへ接続できませんでした。時間をおいて再試行してください。";
+  }
   if (reason === "not_registered") {
     return "このメールアドレスは未登録です。管理者にユーザー追加を依頼してください。";
   }
@@ -190,6 +208,66 @@ function isAuthUsersSnapshot(value: unknown): value is AuthUsersSnapshot {
   }
   const users = (value as { users?: unknown }).users;
   return Array.isArray(users);
+}
+
+function isAuthUserLike(value: unknown): value is AuthUser {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const user = value as Partial<AuthUser>;
+  return typeof user.id === "string"
+    && typeof user.name === "string"
+    && typeof user.email === "string"
+    && typeof user.role === "string"
+    && typeof user.active === "boolean"
+    && typeof user.approvalStatus === "string";
+}
+
+function normalizeAuthFailureReason(value: unknown): AuthLoginFailureReason | undefined {
+  if (
+    value === "missing"
+    || value === "not_registered"
+    || value === "invalid_password"
+    || value === "inactive"
+    || value === "pending_approval"
+    || value === "rejected"
+    || value === "locked"
+    || value === "unavailable"
+  ) {
+    return value;
+  }
+  return undefined;
+}
+
+async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<{ ok: boolean; status: number; body: T | null }> {
+  try {
+    const response = await fetch(input, {
+      credentials: "same-origin",
+      cache: "no-store",
+      ...init,
+    });
+    const body = (await response.json().catch(() => null)) as T | null;
+    return {
+      ok: response.ok,
+      status: response.status,
+      body,
+    };
+  } catch {
+    return {
+      ok: false,
+      status: 0,
+      body: null,
+    };
+  }
+}
+
+function storeAuthenticatedUsers(users: AuthUser[], currentUserId?: string): AuthUser[] {
+  const normalized = persistUsers(users, { syncRemote: false });
+  const resolvedCurrentUserId = currentUserId ?? normalized[0]?.id ?? "";
+  if (resolvedCurrentUserId) {
+    writeSession(resolvedCurrentUserId);
+  }
+  return normalized;
 }
 
 function loadLoginGuardMap(): LoginGuardMap {
@@ -431,6 +509,12 @@ function uid(prefix: string): string {
 }
 
 function syncSharedSnapshotInBackground(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  if (!getSessionUser()) {
+    return;
+  }
   void pushSharedStorageSnapshot();
 }
 
@@ -482,7 +566,7 @@ async function requestAuthUsersPush(
   }
 }
 
-export async function pullAuthUsersSnapshot(): Promise<{ ok: boolean; exists: boolean; count: number }> {
+export async function pullAuthUsersSnapshot(): Promise<{ ok: boolean; exists: boolean; count: number; access?: "metadata" | "admin" | "self" }> {
   if (typeof window === "undefined") {
     return { ok: false, exists: false, count: 0 };
   }
@@ -499,16 +583,24 @@ export async function pullAuthUsersSnapshot(): Promise<{ ok: boolean; exists: bo
     if (body.ok !== true) {
       return { ok: false, exists: false, count: 0 };
     }
+    const access = body.access === "metadata" || body.access === "admin" || body.access === "self" ? body.access : undefined;
+    const count = typeof body.count === "number" && Number.isFinite(body.count) ? body.count : 0;
     if (body.exists === false) {
       lastPulledAuthUsersUpdatedAt = null;
-      return { ok: true, exists: false, count: 0 };
+      return { ok: true, exists: false, count: 0, access };
+    }
+    if (access === "metadata") {
+      if (typeof body.updatedAt === "string") {
+        lastPulledAuthUsersUpdatedAt = body.updatedAt;
+      }
+      return { ok: true, exists: true, count, access };
     }
     if (!isAuthUsersSnapshot(body.payload)) {
-      return { ok: false, exists: false, count: 0 };
+      return { ok: false, exists: true, count, access };
     }
     const users = persistUsers(body.payload.users, { syncRemote: false });
     lastPulledAuthUsersUpdatedAt = typeof body.updatedAt === "string" ? body.updatedAt : null;
-    return { ok: true, exists: true, count: users.length };
+    return { ok: true, exists: true, count: count || users.length, access };
   } catch {
     return { ok: false, exists: false, count: 0 };
   }
@@ -579,7 +671,7 @@ export function hasRegisteredUsers(): boolean {
   return ensureUsers().length > 0;
 }
 
-export function registerInitialAdmin(_name: string, _email: string, _password: string): AuthUser | null {
+export async function registerInitialAdmin(_name: string, _email: string, _password: string): Promise<AuthUser | null> {
   if (typeof window === "undefined") {
     return null;
   }
@@ -589,65 +681,33 @@ export function registerInitialAdmin(_name: string, _email: string, _password: s
   if (!name || !email || !password) {
     return null;
   }
-  const users = ensureUsers();
-  if (users.length > 0) {
+  const response = await requestJson<AuthSessionResponse>(AUTH_REGISTER_API_PATH, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      mode: "initial",
+      name,
+      email,
+      password,
+    }),
+  });
+  if (!response.ok || response.body?.ok !== true || !isAuthUserLike(response.body.user)) {
     return null;
   }
-  const next: AuthUser = {
-    id: uid("user"),
-    name,
-    email,
-    password,
-    role: "system_admin",
-    active: true,
-    approvalStatus: "approved",
-    approvedAt: new Date().toISOString(),
-    approvedById: "self",
-    approvedByName: "システム管理者",
-    createdAt: new Date().toISOString(),
-    createdById: "self",
-    createdByName: "初期登録",
-  };
-  persistUsers([next]);
-  syncSharedSnapshotInBackground();
-  return next;
+  const authenticatedUser = response.body.user;
+  const users = Array.isArray(response.body.users) && response.body.users.every((user) => isAuthUserLike(user))
+    ? response.body.users
+    : [authenticatedUser];
+  const persistedUsers = storeAuthenticatedUsers(users, authenticatedUser.id);
+  return persistedUsers.find((user) => user.id === authenticatedUser.id) ?? authenticatedUser;
 }
 
-export function registerInitialAdminWithGoogle(_name: string, _email: string): AuthUser | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-  const name = canonicalizeKnownPersonName(_name.trim(), _email);
-  const email = normalizeEmail(_email);
-  if (!name || !email) {
-    return null;
-  }
-  const users = ensureUsers();
-  if (users.length > 0) {
-    return null;
-  }
-  const now = new Date().toISOString();
-  const next: AuthUser = {
-    id: uid("user"),
-    name,
-    email,
-    password: uid("google_login"),
-    role: "system_admin",
-    active: true,
-    approvalStatus: "approved",
-    approvedAt: now,
-    approvedById: "self_google",
-    approvedByName: "Google認証",
-    createdAt: now,
-    createdById: "self_google",
-    createdByName: "Google認証",
-  };
-  persistUsers([next]);
-  syncSharedSnapshotInBackground();
-  return next;
+export async function registerInitialAdminWithGoogle(_name: string, _email: string): Promise<AuthUser | null> {
+  const result = await loginWithGoogleEmail(_email, "login_page", _name);
+  return result.user;
 }
 
-export function registerSelfUser(name: string, email: string, password: string): { user: AuthUser | null; error?: string } {
+export async function registerSelfUser(name: string, email: string, password: string): Promise<{ user: AuthUser | null; error?: string }> {
   if (typeof window === "undefined") {
     return { user: null, error: "client_only" };
   }
@@ -657,25 +717,28 @@ export function registerSelfUser(name: string, email: string, password: string):
   if (!trimmedName || !trimmedEmail || !trimmedPassword) {
     return { user: null, error: "missing" };
   }
-  const users = ensureUsers();
-  if (users.some((user) => normalizeEmail(user.email) === trimmedEmail)) {
-    return { user: null, error: "duplicate_email" };
+  const response = await requestJson<AuthSessionResponse>(AUTH_REGISTER_API_PATH, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      mode: "self",
+      name: trimmedName,
+      email: trimmedEmail,
+      password: trimmedPassword,
+    }),
+  });
+  if (!response.ok || response.body?.ok !== true || !isAuthUserLike(response.body.user)) {
+    if (response.status === 409 && response.body?.error === "duplicate_email") {
+      return { user: null, error: "duplicate_email" };
+    }
+    return { user: null, error: "request_failed" };
   }
-  const next: AuthUser = {
-    id: uid("user"),
-    name: trimmedName,
-    email: trimmedEmail,
-    password: trimmedPassword,
-    role: "editor",
-    active: true,
-    approvalStatus: "pending",
-    createdAt: new Date().toISOString(),
-    createdById: "self_signup",
-    createdByName: "本人申請（セルフ登録）",
-  };
-  persistUsers([next, ...users]);
-  syncSharedSnapshotInBackground();
-  return { user: next };
+  const createdUser = response.body.user;
+  persistUsers([
+    createdUser,
+    ...ensureUsers().filter((user) => normalizeEmail(user.email) !== trimmedEmail),
+  ], { syncRemote: false });
+  return { user: createdUser };
 }
 
 export function getLoginAttempts(): LoginAttemptLog[] {
@@ -742,15 +805,14 @@ export function getSessionUser(): AuthUser | null {
   return found;
 }
 
-export function loginWithCredentials(
+export async function loginWithCredentials(
   email: string,
   password: string,
   source: "login_page" | "tracking_page" = "login_page",
-): AuthLoginResult {
+): Promise<AuthLoginResult> {
   if (typeof window === "undefined") {
     return { user: null, reason: "missing" };
   }
-  const users = ensureUsers();
   const targetEmail = normalizeEmail(email);
   if (!targetEmail || !password.trim()) {
     return { user: null, reason: "missing" };
@@ -760,57 +822,43 @@ export function loginWithCredentials(
     appendLoginAttempt({ email: targetEmail, userName: "-", result: "failed", source });
     return { user: null, reason: "locked" };
   }
-  const candidates = users.filter((user) => normalizeEmail(user.email) === targetEmail);
-  if (!candidates.length) {
-    markLoginFailed(targetEmail);
+  const response = await requestJson<AuthSessionResponse>(AUTH_LOGIN_API_PATH, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      email: targetEmail,
+      password,
+    }),
+  });
+  const body = response.body;
+  const failureReason = normalizeAuthFailureReason(body?.reason) ?? (!response.ok ? "unavailable" : undefined);
+  if (!response.ok || body?.ok !== true || !isAuthUserLike(body.user)) {
+    if (failureReason === "not_registered" || failureReason === "invalid_password") {
+      markLoginFailed(targetEmail);
+    }
     appendLoginAttempt({ email: targetEmail, userName: "-", result: "failed", source });
-    return { user: null, reason: "not_registered" };
+    return { user: null, reason: failureReason ?? "unavailable" };
   }
-  const passwordMatched = candidates.filter((user) => user.password === password);
-  const foundByEmail = pickPreferredCandidate(passwordMatched.length ? passwordMatched : candidates);
-  if (!foundByEmail) {
-    markLoginFailed(targetEmail);
-    appendLoginAttempt({ email: targetEmail, userName: "-", result: "failed", source });
-    return { user: null, reason: "invalid_password" };
-  }
-  if (foundByEmail.password !== password) {
-    markLoginFailed(targetEmail);
-    appendLoginAttempt({ email: targetEmail, userName: "-", result: "failed", source });
-    return { user: null, reason: "invalid_password" };
-  }
-  if (!foundByEmail.active) {
-    appendLoginAttempt({ email: targetEmail, userName: foundByEmail.name, result: "failed", source });
-    return { user: null, reason: "inactive" };
-  }
-  if (foundByEmail.approvalStatus === "pending") {
-    appendLoginAttempt({ email: targetEmail, userName: foundByEmail.name, result: "failed", source });
-    return { user: null, reason: "pending_approval" };
-  }
-  if (foundByEmail.approvalStatus === "rejected") {
-    appendLoginAttempt({ email: targetEmail, userName: foundByEmail.name, result: "failed", source });
-    return { user: null, reason: "rejected" };
-  }
-  const nextUsers = users.map((user) =>
-    user.id === foundByEmail.id
-      ? { ...user, lastLoginAt: new Date().toISOString() }
-      : user,
-  );
-  persistUsers(nextUsers);
-  writeSession(foundByEmail.id);
+  const authenticatedUser = body.user;
+  const responseUsers = Array.isArray(body.users) && body.users.every((user) => isAuthUserLike(user))
+    ? body.users
+    : [authenticatedUser];
+  const persistedUsers = storeAuthenticatedUsers(responseUsers, authenticatedUser.id);
+  const loggedInUser = persistedUsers.find((user) => user.id === authenticatedUser.id) ?? authenticatedUser;
   clearLoginGuard(targetEmail);
-  appendLoginAttempt({ email: foundByEmail.email, userName: foundByEmail.name, result: "success", source });
+  appendLoginAttempt({ email: loggedInUser.email, userName: loggedInUser.name, result: "success", source });
   syncSharedSnapshotInBackground();
-  return { user: { ...foundByEmail, lastLoginAt: new Date().toISOString() } };
+  return { user: loggedInUser };
 }
 
-export function loginWithGoogleEmail(
+export async function loginWithGoogleEmail(
   email: string,
   source: "login_page" | "tracking_page" = "login_page",
-): AuthLoginResult {
+  name?: string,
+): Promise<AuthLoginResult> {
   if (typeof window === "undefined") {
     return { user: null, reason: "missing" };
   }
-  const users = ensureUsers();
   const targetEmail = normalizeEmail(email);
   if (!targetEmail) {
     return { user: null, reason: "missing" };
@@ -820,35 +868,33 @@ export function loginWithGoogleEmail(
     appendLoginAttempt({ email: targetEmail, userName: "-", result: "failed", source });
     return { user: null, reason: "locked" };
   }
-  const found = pickPreferredCandidate(users.filter((user) => normalizeEmail(user.email) === targetEmail));
-  if (!found) {
-    markLoginFailed(targetEmail);
+  const response = await requestJson<AuthSessionResponse>(AUTH_GOOGLE_LOGIN_API_PATH, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      email: targetEmail,
+      name: name ? canonicalizeKnownPersonName(name, targetEmail) : undefined,
+    }),
+  });
+  const body = response.body;
+  const failureReason = normalizeAuthFailureReason(body?.reason) ?? (!response.ok ? "unavailable" : undefined);
+  if (!response.ok || body?.ok !== true || !isAuthUserLike(body.user)) {
+    if (failureReason === "not_registered") {
+      markLoginFailed(targetEmail);
+    }
     appendLoginAttempt({ email: targetEmail, userName: "-", result: "failed", source });
-    return { user: null, reason: "not_registered" };
+    return { user: null, reason: failureReason ?? "unavailable" };
   }
-  if (!found.active) {
-    appendLoginAttempt({ email: targetEmail, userName: found.name, result: "failed", source });
-    return { user: null, reason: "inactive" };
-  }
-  if (found.approvalStatus === "pending") {
-    appendLoginAttempt({ email: targetEmail, userName: found.name, result: "failed", source });
-    return { user: null, reason: "pending_approval" };
-  }
-  if (found.approvalStatus === "rejected") {
-    appendLoginAttempt({ email: targetEmail, userName: found.name, result: "failed", source });
-    return { user: null, reason: "rejected" };
-  }
-  const nextUsers = users.map((user) =>
-    user.id === found.id
-      ? { ...user, lastLoginAt: new Date().toISOString() }
-      : user,
-  );
-  persistUsers(nextUsers);
-  writeSession(found.id);
+  const authenticatedUser = body.user;
+  const responseUsers = Array.isArray(body.users) && body.users.every((user) => isAuthUserLike(user))
+    ? body.users
+    : [authenticatedUser];
+  const persistedUsers = storeAuthenticatedUsers(responseUsers, authenticatedUser.id);
+  const loggedInUser = persistedUsers.find((user) => user.id === authenticatedUser.id) ?? authenticatedUser;
   clearLoginGuard(targetEmail);
-  appendLoginAttempt({ email: found.email, userName: found.name, result: "success", source });
+  appendLoginAttempt({ email: loggedInUser.email, userName: loggedInUser.name, result: "success", source });
   syncSharedSnapshotInBackground();
-  return { user: { ...found, lastLoginAt: new Date().toISOString() } };
+  return { user: loggedInUser };
 }
 
 export function clearSession(): void {
@@ -856,4 +902,8 @@ export function clearSession(): void {
     return;
   }
   localStorage.removeItem(SESSION_STORAGE_KEY);
+  void fetch(AUTH_LOGOUT_API_PATH, {
+    method: "POST",
+    credentials: "same-origin",
+  }).catch(() => undefined);
 }
