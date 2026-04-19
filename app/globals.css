@@ -1011,6 +1011,89 @@ p {
   overflow: auto;
 }
 
+.csv-virtual-wrap {
+  overflow: auto hidden;
+}
+
+.csv-virtual-table {
+  min-width: max-content;
+  width: max-content;
+  min-width: 100%;
+}
+
+.csv-virtual-grid-row {
+  display: grid;
+  grid-template-columns: var(--csv-grid-template);
+  min-width: max-content;
+}
+
+.csv-virtual-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #f8fbff;
+  border-bottom: 1px solid var(--border);
+}
+
+.csv-virtual-body {
+  position: relative;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: #fff;
+}
+
+.csv-virtual-spacer {
+  position: relative;
+}
+
+.csv-virtual-data-row {
+  position: absolute;
+  inset-inline: 0;
+  min-height: 58px;
+  border-bottom: 1px solid #e8eef7;
+  background: #fff;
+}
+
+.csv-virtual-cell {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  padding: 8px;
+  white-space: nowrap;
+}
+
+.csv-virtual-header-cell {
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: #41506a;
+}
+
+.csv-virtual-checkbox-cell {
+  justify-content: center;
+}
+
+.csv-virtual-op-cell {
+  justify-content: center;
+}
+
+.csv-virtual-cell .csv-cell-input {
+  width: 100%;
+}
+
+.csv-virtual-data-row.csv-row-exported .csv-virtual-cell {
+  background: #eef5ff;
+}
+
+.csv-virtual-data-row.csv-row-exported .csv-virtual-cell:first-child {
+  box-shadow: inset 3px 0 0 #2f81f7;
+}
+
+.csv-virtual-empty {
+  padding: 18px 14px;
+  color: #607089;
+  font-size: 0.92rem;
+}
+
 .csv-editor-table {
   width: max-content;
   min-width: 100%;
@@ -5437,6 +5520,22 @@ input.control[type="datetime-local"] {
   .csv-pagination {
     width: 100%;
     justify-content: space-between;
+  }
+
+  .csv-virtual-wrap {
+    overflow-x: auto;
+  }
+
+  .csv-virtual-body {
+    max-width: 100%;
+  }
+
+  .csv-virtual-cell {
+    padding: 6px;
+  }
+
+  .csv-virtual-header-cell {
+    font-size: 0.78rem;
   }
 
   .panel,

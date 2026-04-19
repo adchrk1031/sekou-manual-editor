@@ -2,13 +2,16 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { CSSProperties, ChangeEvent, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { CSSProperties, ChangeEvent, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { clearSession, ensureUsers, getLoginAttempts, getLoginFailureMessage, getSessionUser, loginWithCredentials, pullAuthUsersSnapshot, pushAuthUsersSnapshot, type LoginAttemptLog } from "./auth";
 import {
   SHARED_STORAGE_RESYNC_INTERVAL_MS,
   SHARED_STORAGE_UPDATED_EVENT,
+  removeSharedStorageItem,
   pullSharedStorageSnapshot,
   pushSharedStorageSnapshot,
+  resetSharedStorageSnapshotCache,
+  writeSharedStorageItem,
 } from "./sharedStorage";
 import { isAdminLikeRole, formatAuditAction, formatAuditScreen, formatAuditDetail, formatAuditDetailForNonAdmin, formatUserCreatedByLabel, formatUserApprovedByLabel } from "./planner/utils/audit";
 import {
@@ -175,6 +178,7 @@ import { TrackingSection } from "./planner/ui/TrackingSection";
 import { PdfCoverAndTocSection } from "./planner/ui/PdfCoverAndTocSection";
 import { PdfWorkOverviewPreview } from "./planner/ui/PdfWorkOverviewPreview";
 import { NoticePrintDocument, NoticeWorkspace } from "./features/notice/NoticeWorkspace";
+import { useCsvTableView } from "./features/csv/useCsvTableView";
 
 function LayoutAnnotatedImage({
   imageUrl,
@@ -1673,7 +1677,6 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   const [csvDeleteHeader, setCsvDeleteHeader] = useState("");
   const [csvBulkValue, setCsvBulkValue] = useState("");
   const [csvBulkNotice, setCsvBulkNotice] = useState<UserCreateNotice | null>(null);
-  const deferredCsvSearch = useDeferredValue(csvSearch);
   const [dragInfo, setDragInfo] = useState<DragInfo | null>(null);
   const [partySlide, setPartySlide] = useState(0);
   const [detailPhotoSlide, setDetailPhotoSlide] = useState(0);
@@ -1798,7 +1801,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
         const hasChangedRef = projectRefCacheRef.current[project.projectId] !== project;
         if (hasChangedRef || !projectSerializedCacheRef.current[project.projectId]) {
           const serialized = stringifyForStorage(project);
-          localStorage.setItem(`${PROJECT_DATA_STORAGE_PREFIX}${project.projectId}`, serialized);
+          writeSharedStorageItem(`${PROJECT_DATA_STORAGE_PREFIX}${project.projectId}`, serialized);
           nextSerializedCache[project.projectId] = serialized;
         } else {
           nextSerializedCache[project.projectId] = projectSerializedCacheRef.current[project.projectId];
@@ -1807,12 +1810,12 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
 
       Object.keys(projectRefCacheRef.current).forEach((oldId) => {
         if (!nextRefCache[oldId]) {
-          localStorage.removeItem(`${PROJECT_DATA_STORAGE_PREFIX}${oldId}`);
+          removeSharedStorageItem(`${PROJECT_DATA_STORAGE_PREFIX}${oldId}`);
         }
       });
 
-      localStorage.setItem(PROJECT_INDEX_STORAGE_KEY, JSON.stringify(ids));
-      localStorage.removeItem(STORAGE_KEY);
+      writeSharedStorageItem(PROJECT_INDEX_STORAGE_KEY, JSON.stringify(ids));
+      removeSharedStorageItem(STORAGE_KEY);
       projectRefCacheRef.current = nextRefCache;
       projectSerializedCacheRef.current = nextSerializedCache;
       setLastSavedAt(new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
@@ -1952,7 +1955,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
           if (seeded.addedCount > 0) {
             localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(nextUsers));
           }
-          localStorage.setItem(TEST_EDITOR_SEED_STORAGE_KEY, "1");
+          writeSharedStorageItem(TEST_EDITOR_SEED_STORAGE_KEY, "1");
         }
         setUsers(nextUsers);
       } else {
@@ -2135,7 +2138,7 @@ useEffect(() => {
     }
     const serializedCsv = stringifyForStorage({ headers: csvHeadersRef.current, rows: csvDraftRowsRef.current });
     if (serializedCsv !== csvSerializedCacheRef.current) {
-      localStorage.setItem(CSV_EDITOR_STORAGE_KEY, serializedCsv);
+      writeSharedStorageItem(CSV_EDITOR_STORAGE_KEY, serializedCsv);
       csvSerializedCacheRef.current = serializedCsv;
     }
 
@@ -2234,7 +2237,7 @@ useEffect(() => {
       }
       const serialized = stringifyForStorage({ headers: csvHeadersRef.current, rows: csvDraftRowsRef.current });
       if (serialized !== csvSerializedCacheRef.current) {
-        localStorage.setItem(CSV_EDITOR_STORAGE_KEY, serialized);
+        writeSharedStorageItem(CSV_EDITOR_STORAGE_KEY, serialized);
         csvSerializedCacheRef.current = serialized;
       }
     if (sharedSyncTimerRef.current) {
@@ -2334,14 +2337,14 @@ useEffect(() => {
     if (!hydrated) {
       return;
     }
-    localStorage.setItem(AUDIT_STORAGE_KEY, stringifyForStorage(auditLogs));
+    writeSharedStorageItem(AUDIT_STORAGE_KEY, stringifyForStorage(auditLogs));
   }, [auditLogs, hydrated]);
 
   useEffect(() => {
     if (!hydrated) {
       return;
     }
-    localStorage.setItem(REVISION_STORAGE_KEY, stringifyForStorage(revisions));
+    writeSharedStorageItem(REVISION_STORAGE_KEY, stringifyForStorage(revisions));
   }, [revisions, hydrated]);
 
   useEffect(() => {
@@ -2354,7 +2357,7 @@ useEffect(() => {
     csvSaveTimerRef.current = window.setTimeout(() => {
       const serialized = stringifyForStorage({ headers: csvHeaders, rows: csvDraftRows });
       if (serialized !== csvSerializedCacheRef.current) {
-        localStorage.setItem(CSV_EDITOR_STORAGE_KEY, serialized);
+        writeSharedStorageItem(CSV_EDITOR_STORAGE_KEY, serialized);
         csvSerializedCacheRef.current = serialized;
       }
       csvSaveTimerRef.current = null;
@@ -2437,42 +2440,42 @@ useEffect(() => {
     if (!hydrated) {
       return;
     }
-    localStorage.setItem(SCHEDULE_TEMPLATE_STORAGE_KEY, stringifyForStorage(scheduleTemplates));
+    writeSharedStorageItem(SCHEDULE_TEMPLATE_STORAGE_KEY, stringifyForStorage(scheduleTemplates));
   }, [scheduleTemplates, hydrated]);
 
   useEffect(() => {
     if (!hydrated) {
       return;
     }
-    localStorage.setItem(SCHEDULE_PROCEDURE_TEMPLATE_STORAGE_KEY, stringifyForStorage(scheduleProcedureTemplates));
+    writeSharedStorageItem(SCHEDULE_PROCEDURE_TEMPLATE_STORAGE_KEY, stringifyForStorage(scheduleProcedureTemplates));
   }, [scheduleProcedureTemplates, hydrated]);
 
   useEffect(() => {
     if (!hydrated) {
       return;
     }
-    localStorage.setItem(DETAIL_PHOTO_TEMPLATE_STORAGE_KEY, stringifyForStorage(detailPhotoTemplates));
+    writeSharedStorageItem(DETAIL_PHOTO_TEMPLATE_STORAGE_KEY, stringifyForStorage(detailPhotoTemplates));
   }, [detailPhotoTemplates, hydrated]);
 
   useEffect(() => {
     if (!hydrated) {
       return;
     }
-    localStorage.setItem(PARTY_TEMPLATE_STORAGE_KEY, stringifyForStorage(partyTemplates));
+    writeSharedStorageItem(PARTY_TEMPLATE_STORAGE_KEY, stringifyForStorage(partyTemplates));
   }, [partyTemplates, hydrated]);
 
   useEffect(() => {
     if (!hydrated) {
       return;
     }
-    localStorage.setItem(PARTY_COMPANY_TEMPLATE_STORAGE_KEY, stringifyForStorage(partyCompanyTemplates));
+    writeSharedStorageItem(PARTY_COMPANY_TEMPLATE_STORAGE_KEY, stringifyForStorage(partyCompanyTemplates));
   }, [partyCompanyTemplates, hydrated]);
 
   useEffect(() => {
     if (!hydrated) {
       return;
     }
-    localStorage.setItem(LAYOUT_TEMPLATE_STORAGE_KEY, stringifyForStorage(layoutTemplates));
+    writeSharedStorageItem(LAYOUT_TEMPLATE_STORAGE_KEY, stringifyForStorage(layoutTemplates));
   }, [layoutTemplates, hydrated]);
 
   useEffect(() => {
@@ -2645,48 +2648,23 @@ useEffect(() => {
     });
     return map;
   }, [projects]);
-  const csvFilteredRows = useMemo(() => {
-    const keyword = deferredCsvSearch.trim().toLowerCase();
-    const rows = csvDraftRows.map((row, index) => ({ row, index }));
-    return rows.filter(({ row }) => {
-      const keywordMatched = !keyword
-        || csvHeaders.some((header) => String(row[header] ?? "").toLowerCase().includes(keyword));
-      if (!keywordMatched) {
-        return false;
-      }
-      if (csvExportFilter === "all") {
-        return true;
-      }
-      const getField = createCsvValueGetter(row);
-      const projectId = getField(...CSV_PROJECT_FIELD_ALIASES.projectId).trim();
-      const exported = projectExportMetaById.get(projectId)?.exported ?? false;
-      return csvExportFilter === "exported" ? exported : !exported;
-    });
-  }, [csvDraftRows, csvHeaders, deferredCsvSearch, csvExportFilter, projectExportMetaById]);
-  const csvTotalPages = Math.max(1, Math.ceil(csvFilteredRows.length / csvPageSize));
-  const csvVisibleRows = useMemo(() => {
-    const start = csvPage * csvPageSize;
-    return csvFilteredRows.slice(start, start + csvPageSize);
-  }, [csvFilteredRows, csvPage, csvPageSize]);
-  const csvSelectedSet = useMemo(() => new Set(csvSelectedRows), [csvSelectedRows]);
-  const csvVisibleSelectedCount = useMemo(
-    () => csvVisibleRows.filter(({ index }) => csvSelectedSet.has(index)).length,
-    [csvVisibleRows, csvSelectedSet],
-  );
-  const csvAllVisibleSelected = csvVisibleRows.length > 0 && csvVisibleSelectedCount === csvVisibleRows.length;
-  const csvColumnWidthMap = useMemo(() => {
-    const map: Record<string, CSSProperties> = {};
-    csvHeaders.forEach((header) => {
-      const headerLen = getCsvHeaderLabel(header).length;
-      const maxValueLen = csvDraftRows.reduce((max, row) => {
-        const nextLen = String(row[header] ?? "").length;
-        return Math.max(max, nextLen);
-      }, 0);
-      const charWidth = clamp(Math.max(headerLen, maxValueLen) + 2, 10, 36);
-      map[header] = { minWidth: `${charWidth}ch` };
-    });
-    return map;
-  }, [csvHeaders, csvDraftRows]);
+  const {
+    csvFilteredRows,
+    csvTotalPages,
+    csvVisibleRows,
+    csvSelectedSet,
+    csvAllVisibleSelected,
+    csvColumnWidthMap,
+  } = useCsvTableView({
+    csvDraftRows,
+    csvHeaders,
+    csvSearch,
+    csvExportFilter,
+    csvPage,
+    csvPageSize,
+    csvSelectedRows,
+    projectExportMetaById,
+  });
   const projectRevisions = useMemo(
     () => revisions.filter((revision) => revision.projectId === selectedProject.projectId),
     [revisions, selectedProject.projectId],
@@ -3749,6 +3727,7 @@ useEffect(() => {
       parsed.items.forEach((item) => {
         window.localStorage.setItem(item.key, item.value);
       });
+      resetSharedStorageSnapshotCache();
       alert("データをインポートしました。画面を再読み込みします。");
       window.location.reload();
     } catch {
@@ -4958,7 +4937,7 @@ useEffect(() => {
       };
       // 登録直後の再ログインでも参照できるよう即時永続化
       if (hydrated) {
-        localStorage.setItem(PARTY_COMPANY_TEMPLATE_STORAGE_KEY, stringifyForStorage(next));
+        writeSharedStorageItem(PARTY_COMPANY_TEMPLATE_STORAGE_KEY, stringifyForStorage(next));
       }
       return next;
     });

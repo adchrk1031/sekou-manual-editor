@@ -17,6 +17,7 @@ import {
   toTimelineOffset,
 } from "../../planner/utils/dateTime";
 import { parseStorageJson, stringifyForStorage } from "../../planner/utils/storage";
+import { removeSharedStorageItem, writeSharedStorageItem } from "../../sharedStorage";
 import { normalizePdfTemplateId, normalizeProject, type ProjectNormalizationInput } from "./project-normalize";
 
 const VALID_WORK_CODES: WorkCode[] = [
@@ -588,7 +589,7 @@ export function persistProjectRecordsToStorage(records: PlannerWorkspaceProjectR
     const existingIds = parseStorageJson<string[]>(window.localStorage.getItem(PROJECT_INDEX_STORAGE_KEY)) ?? [];
 
     records.forEach((record) => {
-      window.localStorage.setItem(
+      writeSharedStorageItem(
         `${PROJECT_DATA_STORAGE_PREFIX}${record.project.projectId}`,
         stringifyForStorage(record.rawProject),
       );
@@ -596,12 +597,12 @@ export function persistProjectRecordsToStorage(records: PlannerWorkspaceProjectR
 
     existingIds.forEach((projectId) => {
       if (!nextIds.includes(projectId)) {
-        window.localStorage.removeItem(`${PROJECT_DATA_STORAGE_PREFIX}${projectId}`);
+        removeSharedStorageItem(`${PROJECT_DATA_STORAGE_PREFIX}${projectId}`);
       }
     });
 
-    window.localStorage.setItem(PROJECT_INDEX_STORAGE_KEY, JSON.stringify(nextIds));
-    window.localStorage.removeItem(STORAGE_KEY);
+    writeSharedStorageItem(PROJECT_INDEX_STORAGE_KEY, JSON.stringify(nextIds));
+    removeSharedStorageItem(STORAGE_KEY);
 
     return new Date().toLocaleTimeString("ja-JP", {
       hour: "2-digit",
