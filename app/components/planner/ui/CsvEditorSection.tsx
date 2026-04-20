@@ -1,10 +1,9 @@
 import type { CSSProperties, ChangeEvent, Dispatch, SetStateAction } from "react";
-import { CSV_PAGE_SIZE_OPTIONS, CSV_PROJECT_FIELD_ALIASES, getCsvHeaderLabel } from "../constants";
-import { createCsvValueGetter } from "../utils/csv";
+import { CSV_PAGE_SIZE_OPTIONS, getCsvHeaderLabel } from "../constants";
 import type { CsvExportFilter, CsvRecord, UserCreateNotice } from "../types";
+import { VirtualizedCsvTable } from "../../features/csv/VirtualizedCsvTable";
+import type { CsvVisibleRow } from "../../features/csv/useCsvTableView";
 import { UiIcon } from "./UiIcon";
-
-type CsvVisibleRow = { row: CsvRecord; index: number };
 
 type CsvEditorSectionProps = {
   isCsvMode: boolean;
@@ -281,68 +280,19 @@ export function CsvEditorSection({
           <p className="mini">CSVを取り込むと、ここで編集できるようになります。</p>
         ) : (
           <>
-            <div className="table-wrap csv-editor-wrap">
-              <table className="schedule-table csv-editor-table">
-                <thead>
-                  <tr>
-                    <th style={{ width: 56 }}>
-                      <input
-                        type="checkbox"
-                        aria-label="表示中の行を全選択"
-                        checked={csvAllVisibleSelected}
-                        onChange={(event) => toggleCsvVisibleSelection(event.target.checked)}
-                        disabled={!canEdit || !csvVisibleRows.length}
-                      />
-                    </th>
-                    {csvHeaders.map((header) => (
-                      <th key={`csv_header_${header}`} style={csvColumnWidthMap[header]}>
-                        {getCsvHeaderLabel(header)}
-                      </th>
-                    ))}
-                    <th className="csv-op-col">操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {csvVisibleRows.length ? (
-                    csvVisibleRows.map(({ row, index }) => {
-                      const getField = createCsvValueGetter(row);
-                      const rowProjectId = getField(...CSV_PROJECT_FIELD_ALIASES.projectId).trim();
-                      const exported = projectExportMetaById.get(rowProjectId)?.exported ?? false;
-                      return (
-                        <tr key={`csv_row_${index}`} className={exported ? "csv-row-exported" : undefined}>
-                          <td>
-                            <input
-                              type="checkbox"
-                              aria-label={`${index + 1}行目を選択`}
-                              checked={csvSelectedSet.has(index)}
-                              onChange={() => toggleCsvRowSelection(index)}
-                              disabled={!canEdit}
-                            />
-                          </td>
-                          {csvHeaders.map((header) => (
-                            <td key={`csv_cell_${index}_${header}`} style={csvColumnWidthMap[header]}>
-                              <input
-                                className="control csv-cell-input"
-                                value={row[header] ?? ""}
-                                onChange={(event) => updateCsvCell(index, header, event.target.value)}
-                                disabled={!canEdit}
-                              />
-                            </td>
-                          ))}
-                          <td className="csv-op-cell">
-                            <button type="button" className="btn btn-danger csv-row-delete-btn" onClick={() => deleteCsvRow(index)} disabled={!canEdit}>
-                              <span className="btn-icon"><UiIcon name="delete" /></span>削除
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  ) : (
-                    <tr><td colSpan={csvHeaders.length + 2}>該当データがありません</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <VirtualizedCsvTable
+              canEdit={canEdit}
+              csvHeaders={csvHeaders}
+              csvVisibleRows={csvVisibleRows}
+              csvAllVisibleSelected={csvAllVisibleSelected}
+              toggleCsvVisibleSelection={toggleCsvVisibleSelection}
+              csvColumnWidthMap={csvColumnWidthMap}
+              csvSelectedSet={csvSelectedSet}
+              toggleCsvRowSelection={toggleCsvRowSelection}
+              updateCsvCell={updateCsvCell}
+              deleteCsvRow={deleteCsvRow}
+              projectExportMetaById={projectExportMetaById}
+            />
             <div className="csv-pagination">
               <button type="button" className="btn btn-subtle" onClick={() => setCsvPage((prev) => Math.max(0, prev - 1))} disabled={csvPage <= 0}>
                 <span className="btn-icon"><UiIcon name="arrowLeft" /></span>前へ

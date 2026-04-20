@@ -4,6 +4,7 @@ import type { AuthUser } from "../../auth";
 import { MAX_REVISIONS, REVISION_STORAGE_KEY } from "../../planner/constants";
 import type { Project, ProjectRevision, ProjectSnapshot, WorkCode } from "../../planner/types";
 import { parseStorageJson, stringifyForStorage } from "../../planner/utils/storage";
+import { writeSharedStorageItem } from "../../sharedStorage";
 import { normalizeProject, type ProjectNormalizationInput } from "../project-core/project-normalize";
 
 const VALID_WORK_CODES: WorkCode[] = [
@@ -137,7 +138,7 @@ export function loadRevisionsFromStorage(): ProjectRevision[] {
 
 export function persistRevisionsToStorage(revisions: ProjectRevision[]): boolean {
   try {
-    window.localStorage.setItem(
+    writeSharedStorageItem(
       REVISION_STORAGE_KEY,
       stringifyForStorage(revisions.slice(0, MAX_REVISIONS)),
     );

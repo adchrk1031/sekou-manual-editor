@@ -73,6 +73,7 @@ let lastPullOk = false;
 let pushLoopPromise: Promise<boolean> | null = null;
 let pullLoopPromise: Promise<boolean> | null = null;
 let pushRequested = false;
+let sharedSnapshotCacheItems: Record<string, string> | null = null;
 
 function normalizeSharedStatePayload(payload: SharedStatePayload): SharedStatePayload {
   const items = payload.items || {};
@@ -96,6 +97,67 @@ function getSharedStateSignature(payload: SharedStatePayload): string {
 
 function getEmptySharedStatePayload(): SharedStatePayload {
   return { items: {} };
+}
+
+function rebuildSharedSnapshotCache(): Record<string, string> {
+  const items: Record<string, string> = {};
+  if (typeof window === "undefined") {
+    return items;
+  }
+  for (let i = 0; i < window.localStorage.length; i += 1) {
+    const key = window.localStorage.key(i);
+    if (!key || !isSharedStorageKey(key)) {
+      continue;
+    }
+    const value = window.localStorage.getItem(key);
+    if (typeof value === "string") {
+      items[key] = value;
+    }
+  }
+  return items;
+}
+
+function ensureSharedSnapshotCache(): Record<string, string> {
+  if (!sharedSnapshotCacheItems) {
+    sharedSnapshotCacheItems = rebuildSharedSnapshotCache();
+  }
+  return sharedSnapshotCacheItems;
+}
+
+function updateSharedSnapshotCacheEntry(key: string, value: string | null): void {
+  if (!isSharedStorageKey(key)) {
+    return;
+  }
+  const cache = ensureSharedSnapshotCache();
+  if (typeof value === "string") {
+    cache[key] = value;
+    return;
+  }
+  delete cache[key];
+}
+
+export function writeSharedStorageItem(key: string, value: string): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(key, value);
+  updateSharedSnapshotCacheEntry(key, value);
+}
+
+export function removeSharedStorageItem(key: string): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.removeItem(key);
+  updateSharedSnapshotCacheEntry(key, null);
+}
+
+export function resetSharedStorageSnapshotCache(): void {
+  sharedSnapshotCacheItems = null;
+  lastKnownSharedSnapshot = getEmptySharedStatePayload();
+  lastPulledUpdatedAt = null;
+  lastPullFinishedAt = 0;
+  lastPullOk = false;
 }
 
 function mergeSharedStateSnapshots(
@@ -285,21 +347,10 @@ async function drainSharedStoragePushQueue(options?: SharedStatePushOptions): Pr
 }
 
 export function collectSharedStorageSnapshot(): SharedStatePayload {
-  const items: Record<string, string> = {};
   if (typeof window === "undefined") {
-    return { items };
+    return { items: {} };
   }
-  for (let i = 0; i < window.localStorage.length; i += 1) {
-    const key = window.localStorage.key(i);
-    if (!key || !isSharedStorageKey(key)) {
-      continue;
-    }
-    const value = window.localStorage.getItem(key);
-    if (typeof value === "string") {
-      items[key] = value;
-    }
-  }
-  return normalizeSharedStatePayload({ items });
+  return normalizeSharedStatePayload({ items: { ...ensureSharedSnapshotCache() } });
 }
 
 export function applySharedStorageSnapshot(payload: SharedStatePayload): boolean {
@@ -308,26 +359,20 @@ export function applySharedStorageSnapshot(payload: SharedStatePayload): boolean
   }
   let changed = false;
   const nextItems = normalizeSharedStatePayload(payload).items;
-  const existingSharedKeys: string[] = [];
-  for (let i = 0; i < window.localStorage.length; i += 1) {
-    const key = window.localStorage.key(i);
-    if (key && isSharedStorageKey(key)) {
-      existingSharedKeys.push(key);
-    }
-  }
+  const existingSharedKeys = Object.keys(ensureSharedSnapshotCache());
 
   existingSharedKeys.forEach((key) => {
     if (!(key in nextItems)) {
-      window.localStorage.removeItem(key);
+      removeSharedStorageItem(key);
       changed = true;
     }
   });
 
   Object.entries(nextItems).forEach(([key, value]) => {
     if (isSharedStorageKey(key)) {
-      const prev = window.localStorage.getItem(key);
+      const prev = ensureSharedSnapshotCache()[key] ?? null;
       if (prev !== value) {
-        window.localStorage.setItem(key, value);
+        writeSharedStorageItem(key, value);
         changed = true;
       }
     }

@@ -1,6 +1,6 @@
 "use client";
 
-import { pushSharedStorageSnapshot } from "../../sharedStorage";
+import { pushSharedStorageSnapshot, removeSharedStorageItem, writeSharedStorageItem } from "../../sharedStorage";
 
 export type ProjectEditLock = {
   projectId: string;
@@ -144,10 +144,10 @@ function writeProjectEditLock(projectId: string, lock: ProjectEditLock | null): 
   }
   const key = getProjectEditLockKey(projectId);
   if (!lock) {
-    window.localStorage.removeItem(key);
+    removeSharedStorageItem(key);
     return;
   }
-  window.localStorage.setItem(key, JSON.stringify(lock));
+  writeSharedStorageItem(key, JSON.stringify(lock));
 }
 
 function buildProjectEditLock(projectId: string, owner: ProjectEditLockOwner): ProjectEditLock {
