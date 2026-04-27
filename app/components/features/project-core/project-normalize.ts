@@ -865,6 +865,7 @@ export function createBlankProject(seed?: Partial<Project>): Project {
     noticeOutageDate: seed?.noticeOutageDate ?? seed?.outageDateStart ?? noticeMainWorkDate,
     noticeOutageTimeStart: seed?.noticeOutageTimeStart ?? seed?.outageTimeStart ?? "09:00",
     noticeOutageTimeEnd: seed?.noticeOutageTimeEnd ?? seed?.outageTimeEnd ?? "17:00",
+    noticeUnitInspectionEnabled: seed?.noticeUnitInspectionEnabled ?? true,
     noticeScheduleRows: seed?.noticeScheduleRows ? cloneNoticeScheduleRows(seed.noticeScheduleRows) : createDefaultNoticeScheduleRows(noticeMainWorkDate),
     noticePrivateAreaText:
       seed?.noticePrivateAreaText ??
@@ -1015,6 +1016,8 @@ export function normalizeProject(project: ProjectNormalizationInput): Project {
       noticeOutageDate: project.noticeOutageDate,
       noticeOutageTimeStart: project.noticeOutageTimeStart,
       noticeOutageTimeEnd: project.noticeOutageTimeEnd,
+      noticeUnitInspectionEnabled:
+        typeof project.noticeUnitInspectionEnabled === "boolean" ? project.noticeUnitInspectionEnabled : true,
       noticeScheduleRows: project.noticeScheduleRows,
       noticePrivateAreaText: project.noticePrivateAreaText,
       noticeCommonAreaText: project.noticeCommonAreaText,

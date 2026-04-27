@@ -21,6 +21,7 @@ export const USERS_STORAGE_KEY = "sekou-tool-users-v1";
 export const TEST_EDITOR_SEED_STORAGE_KEY = "sekou-tool-test-editors-seeded-v2";
 export const AUDIT_STORAGE_KEY = "sekou-tool-audit-v1";
 export const REVISION_STORAGE_KEY = "sekou-tool-revision-v1";
+export const APPROVAL_NOTE_TEMPLATE_STORAGE_KEY = "sekou-tool-template-approval-note-v1";
 export const SCHEDULE_TEMPLATE_STORAGE_KEY = "sekou-tool-template-schedule-v1";
 export const SCHEDULE_PROCEDURE_TEMPLATE_STORAGE_KEY = "sekou-tool-template-schedule-procedures-v1";
 export const DETAIL_PHOTO_TEMPLATE_STORAGE_KEY = "sekou-tool-template-detail-photos-v1";

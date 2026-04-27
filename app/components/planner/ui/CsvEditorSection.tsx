@@ -13,6 +13,7 @@ type CsvEditorSectionProps = {
   applyCsvRowsToProjects: (rows: CsvRecord[], sourceLabel: "import" | "editor") => void;
   csvDraftRows: CsvRecord[];
   exportCsvEditor: () => void;
+  exportCsvEditorForExcel: () => void;
   addCsvRow: () => void;
   deleteSelectedCsvRows: () => void;
   csvSelectedRows: number[];
@@ -59,6 +60,7 @@ export function CsvEditorSection({
   applyCsvRowsToProjects,
   csvDraftRows,
   exportCsvEditor,
+  exportCsvEditorForExcel,
   addCsvRow,
   deleteSelectedCsvRows,
   csvSelectedRows,
@@ -157,6 +159,9 @@ export function CsvEditorSection({
             </button>
             <button type="button" className="btn btn-subtle" onClick={exportCsvEditor} disabled={!csvDraftRows.length}>
               <span className="btn-icon"><UiIcon name="save" /></span>CSVファイルを保存（ダウンロード）
+            </button>
+            <button type="button" className="btn btn-subtle" onClick={exportCsvEditorForExcel} disabled={!csvDraftRows.length}>
+              <span className="btn-icon"><UiIcon name="save" /></span>Excelで保存
             </button>
             <button type="button" className="btn btn-subtle" onClick={addCsvRow} disabled={!canEdit || !csvHeaders.length}>
               <span className="btn-icon"><UiIcon name="plus" /></span>行追加

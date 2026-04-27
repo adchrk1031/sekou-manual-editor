@@ -77,6 +77,7 @@ export function buildProjectSnapshot(project: Project): ProjectSnapshot {
     noticeOutageDate: project.noticeOutageDate,
     noticeOutageTimeStart: project.noticeOutageTimeStart,
     noticeOutageTimeEnd: project.noticeOutageTimeEnd,
+    noticeUnitInspectionEnabled: project.noticeUnitInspectionEnabled,
     noticeScheduleRows: project.noticeScheduleRows,
     noticePrivateAreaText: project.noticePrivateAreaText,
     noticeCommonAreaText: project.noticeCommonAreaText,
