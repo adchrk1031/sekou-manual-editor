@@ -16,6 +16,7 @@ import {
 import { isAdminLikeRole, formatAuditAction, formatAuditScreen, formatAuditDetail, formatAuditDetailForNonAdmin, formatUserCreatedByLabel, formatUserApprovedByLabel } from "./planner/utils/audit";
 import {
   APPROVAL_STATUS_LABELS,
+  APPROVAL_NOTE_TEMPLATE_STORAGE_KEY,
   AUDIT_STORAGE_KEY,
   CSV_EDITOR_STORAGE_KEY,
   CSV_PAGE_SIZE_OPTIONS,
@@ -1323,12 +1324,15 @@ function syncProjectWorkRange(project: Project): Project {
     project.outageDateEnd,
     ...project.scheduleRows.flatMap((row) => [row.startDate, row.endDate]),
   ].filter(Boolean);
-  const minDate = [...dates].sort()[0] || project.workDateStart;
-  const maxDate = [...dates].sort().slice(-1)[0] || project.workDateEnd;
+  const fallbackStart = [...dates].sort()[0] || todayLocalISO();
+  const fallbackEnd = [...dates].sort().slice(-1)[0] || fallbackStart;
+  const workDateStart = normalizeDate(project.workDateStart) || fallbackStart;
+  const workDateEndRaw = normalizeDate(project.workDateEnd) || fallbackEnd;
+  const workDateEnd = workDateEndRaw < workDateStart ? workDateStart : workDateEndRaw;
   return {
     ...project,
-    workDateStart: minDate,
-    workDateEnd: maxDate < minDate ? minDate : maxDate,
+    workDateStart,
+    workDateEnd,
   };
 }
 
@@ -1588,6 +1592,177 @@ function projectFromCsv(record: CsvRecord): Project | null {
   return project;
 }
 
+function hasCsvValue(getField: (...keys: string[]) => string, aliases: readonly string[]): boolean {
+  return aliases.some((alias) => getField(alias).trim() !== "");
+}
+
+function patchPhotoSlotLabelsFromCsv(
+  slots: PhotoSlots,
+  getField: (...keys: string[]) => string,
+  aliases: readonly (readonly string[])[],
+): PhotoSlots {
+  return slots.map((slot, index) => {
+    const nextLabel = getField(...aliases[index]).trim();
+    if (!nextLabel) {
+      return slot;
+    }
+    return {
+      ...slot,
+      label: nextLabel,
+    };
+  });
+}
+
+function mergeProjectFromCsvRecord(existing: Project, record: CsvRecord): Project {
+  const imported = projectFromCsv(record);
+  if (!imported) {
+    return existing;
+  }
+
+  const getField = createCsvValueGetter(record);
+  const hasWorkDateStart = hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.workDateStart);
+  const hasWorkDateEnd = hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.workDateEnd);
+  const hasOutageDateStart = hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.outageDateStart);
+  const hasOutageDateEnd = hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.outageDateEnd);
+  const hasOutageTimeStart = hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.outageTimeStart);
+  const hasOutageTimeEnd = hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.outageTimeEnd);
+  const hasOutageEnabled = hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.outageEnabled);
+  const hasSelectedWorks =
+    hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.workList)
+    || (Object.values(CSV_WORK_COLUMN_ALIASES) as string[][]).some((aliases) => hasCsvValue(getField, aliases));
+  const hasPdfExportCount = hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.pdfExportCount);
+  const hasPdfLastExportedAt = hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.pdfLastExportedAt);
+
+  const nextProject: Project = {
+    ...existing,
+    propertyName: hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.propertyName) ? imported.propertyName : existing.propertyName,
+    propertyAddress: hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.propertyAddress) ? imported.propertyAddress : existing.propertyAddress,
+    titleSubject: hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.titleSubject) ? imported.titleSubject : existing.titleSubject,
+    workDateStart: hasWorkDateStart ? imported.workDateStart : existing.workDateStart,
+    workDateEnd: hasWorkDateEnd ? imported.workDateEnd : existing.workDateEnd,
+    outageDateStart: hasOutageDateStart ? imported.outageDateStart : existing.outageDateStart,
+    outageDateEnd: hasOutageDateEnd ? imported.outageDateEnd : existing.outageDateEnd,
+    outageTimeStart: hasOutageTimeStart ? imported.outageTimeStart : existing.outageTimeStart,
+    outageTimeEnd: hasOutageTimeEnd ? imported.outageTimeEnd : existing.outageTimeEnd,
+    outageEnabled: hasOutageEnabled ? imported.outageEnabled : existing.outageEnabled,
+    flags: hasSelectedWorks ? imported.flags : existing.flags,
+    selectedWorkCodes: hasSelectedWorks ? imported.selectedWorkCodes : existing.selectedWorkCodes,
+    noteSpecial: hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.noteSpecial) ? imported.noteSpecial : existing.noteSpecial,
+    noteApprovalExtra: hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.noteApprovalExtra) ? imported.noteApprovalExtra : existing.noteApprovalExtra,
+    coverRecipientSuffix: hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.coverRecipientSuffix) ? imported.coverRecipientSuffix : existing.coverRecipientSuffix,
+    pdfTemplateId: hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.pdfTemplateId) ? imported.pdfTemplateId : existing.pdfTemplateId,
+    pdfCompanyName: hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.pdfCompanyName) ? imported.pdfCompanyName : existing.pdfCompanyName,
+    pdfTeam: hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.pdfTeam) ? imported.pdfTeam : existing.pdfTeam,
+    pdfContactPerson: hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.pdfContactPerson) ? imported.pdfContactPerson : existing.pdfContactPerson,
+    pdfAddress: hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.pdfAddress) ? imported.pdfAddress : existing.pdfAddress,
+    pdfEmail: hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.pdfEmail) ? imported.pdfEmail : existing.pdfEmail,
+    pdfTel: hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.pdfTel) ? imported.pdfTel : existing.pdfTel,
+    pdfFax: hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.pdfFax) ? imported.pdfFax : existing.pdfFax,
+    pdfExportCount: hasPdfExportCount ? imported.pdfExportCount : existing.pdfExportCount,
+    pdfLastExportedAt: hasPdfLastExportedAt ? imported.pdfLastExportedAt : existing.pdfLastExportedAt,
+    detailPhotos: patchPhotoSlotLabelsFromCsv(existing.detailPhotos, getField, [
+      CSV_PROJECT_FIELD_ALIASES.photoSlotALabel,
+      CSV_PROJECT_FIELD_ALIASES.photoSlotBLabel,
+      CSV_PROJECT_FIELD_ALIASES.photoSlotCLabel,
+      CSV_PROJECT_FIELD_ALIASES.photoSlotDLabel,
+    ]),
+    layoutPhotos: patchPhotoSlotLabelsFromCsv(existing.layoutPhotos, getField, [
+      CSV_PROJECT_FIELD_ALIASES.layoutPhotoSlotALabel,
+      CSV_PROJECT_FIELD_ALIASES.layoutPhotoSlotBLabel,
+      CSV_PROJECT_FIELD_ALIASES.layoutPhotoSlotCLabel,
+      CSV_PROJECT_FIELD_ALIASES.layoutPhotoSlotDLabel,
+    ]),
+    relatedParties: {
+      ...existing.relatedParties,
+      owner: {
+        ...existing.relatedParties.owner,
+        company: hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.pdfCompanyName)
+          ? imported.relatedParties.owner.company
+          : existing.relatedParties.owner.company,
+        office: hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.pdfTeam)
+          ? imported.relatedParties.owner.office
+          : existing.relatedParties.owner.office,
+        person: hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.pdfContactPerson)
+          ? imported.relatedParties.owner.person
+          : existing.relatedParties.owner.person,
+        tel: hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.pdfTel)
+          ? imported.relatedParties.owner.tel
+          : existing.relatedParties.owner.tel,
+      },
+    },
+    scheduleRows:
+      hasSelectedWorks && existing.scheduleRows.length === 0
+        ? imported.scheduleRows
+        : existing.scheduleRows,
+  };
+
+  if (!existing.noticePropertyName.trim()) {
+    nextProject.noticePropertyName = imported.noticePropertyName;
+  }
+  if (!existing.noticeSenderCompany.trim()) {
+    nextProject.noticeSenderCompany = imported.noticeSenderCompany;
+    nextProject.noticeContactCompany = imported.noticeContactCompany;
+  }
+  if (!existing.noticeContactDepartment.trim()) {
+    nextProject.noticeContactDepartment = imported.noticeContactDepartment;
+  }
+  if (!existing.noticeContactAddress.trim()) {
+    nextProject.noticeContactAddress = imported.noticeContactAddress;
+  }
+  if (!existing.noticeContactTel.trim()) {
+    nextProject.noticeContactTel = imported.noticeContactTel;
+  }
+  if (!existing.noticeMainWorkDate) {
+    nextProject.noticeMainWorkDate = imported.noticeMainWorkDate;
+  }
+  if (!existing.noticeOutageDate) {
+    nextProject.noticeOutageDate = imported.noticeOutageDate;
+  }
+  if (!existing.noticeOutageTimeStart) {
+    nextProject.noticeOutageTimeStart = imported.noticeOutageTimeStart;
+  }
+  if (!existing.noticeOutageTimeEnd) {
+    nextProject.noticeOutageTimeEnd = imported.noticeOutageTimeEnd;
+  }
+
+  return nextProject;
+}
+
+function escapeExcelCell(value: string): string {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;");
+}
+
+function recordsToExcelHtml(headers: string[], rows: CsvRecord[]): string {
+  const headerCells = headers.map((header) => `<th>${escapeExcelCell(getCsvHeaderLabel(header))}</th>`).join("");
+  const bodyRows = rows
+    .map((row) => {
+      const cells = headers
+        .map((header) => `<td>${escapeExcelCell(row[header] ?? "")}</td>`)
+        .join("");
+      return `<tr>${cells}</tr>`;
+    })
+    .join("");
+  return [
+    "<html><head><meta charset=\"utf-8\"></head><body>",
+    "<table border=\"1\">",
+    `<thead><tr>${headerCells}</tr></thead>`,
+    `<tbody>${bodyRows}</tbody>`,
+    "</table>",
+    "</body></html>",
+  ].join("");
+}
+
+function isDeferredRequiredKey(key: string): boolean {
+  return key === "detailPhotos"
+    || key === "layoutAssets"
+    || key === "relatedPartiesEnabled"
+    || key.startsWith("relatedPartyCompany:");
+}
+
 function mergeProjectForNoticeFromCsv(existing: Project, imported: Project): Project {
   return {
     ...existing,
@@ -1631,6 +1806,7 @@ function mergeProjectForNoticeFromCsv(existing: Project, imported: Project): Pro
     noticeOutageDate: imported.noticeOutageDate,
     noticeOutageTimeStart: imported.noticeOutageTimeStart,
     noticeOutageTimeEnd: imported.noticeOutageTimeEnd,
+    noticeUnitInspectionEnabled: imported.noticeUnitInspectionEnabled,
     noticeScheduleRows: imported.noticeScheduleRows,
     noticePrivateAreaText: imported.noticePrivateAreaText,
     noticeCommonAreaText: imported.noticeCommonAreaText,
@@ -1687,6 +1863,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   const [scheduleProcedureTemplates, setScheduleProcedureTemplates] = useState<ScheduleProcedureTemplate[]>(
     cloneScheduleProcedureTemplates(DEFAULT_SCHEDULE_PROCEDURE_TEMPLATES),
   );
+  const [approvalNoteTemplates, setApprovalNoteTemplates] = useState<Array<SimpleTemplate<string>>>([]);
   const [detailPhotoTemplates, setDetailPhotoTemplates] = useState<Array<SimpleTemplate<PhotoSlots>>>([]);
   const [partyTemplates, setPartyTemplates] = useState<Array<SimpleTemplate<Project["relatedParties"]>>>([]);
   const [partyCompanyTemplates, setPartyCompanyTemplates] = useState<Record<RelatedPartyKey, PartyCompanyTemplatePreset[]>>(
@@ -1697,6 +1874,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   >([]);
   const [selectedScheduleTemplateId, setSelectedScheduleTemplateId] = useState("");
   const [selectedScheduleProcedureTemplateId, setSelectedScheduleProcedureTemplateId] = useState("");
+  const [selectedApprovalNoteTemplateId, setSelectedApprovalNoteTemplateId] = useState("");
   const [selectedDetailPhotoTemplateId, setSelectedDetailPhotoTemplateId] = useState("");
   const [selectedPartyTemplateId, setSelectedPartyTemplateId] = useState("");
   const [selectedLayoutTemplateId, setSelectedLayoutTemplateId] = useState("");
@@ -2374,12 +2552,14 @@ useEffect(() => {
     try {
       const scheduleRaw = localStorage.getItem(SCHEDULE_TEMPLATE_STORAGE_KEY);
       const scheduleProcedureRaw = localStorage.getItem(SCHEDULE_PROCEDURE_TEMPLATE_STORAGE_KEY);
+      const approvalNoteRaw = localStorage.getItem(APPROVAL_NOTE_TEMPLATE_STORAGE_KEY);
       const detailRaw = localStorage.getItem(DETAIL_PHOTO_TEMPLATE_STORAGE_KEY);
       const partyRaw = localStorage.getItem(PARTY_TEMPLATE_STORAGE_KEY);
       const partyCompanyRaw = localStorage.getItem(PARTY_COMPANY_TEMPLATE_STORAGE_KEY);
       const layoutRaw = localStorage.getItem(LAYOUT_TEMPLATE_STORAGE_KEY);
       const scheduleParsed = parseStorageJson<Array<SimpleTemplate<ScheduleRow[]>>>(scheduleRaw) ?? [];
       const scheduleProcedureParsed = parseStorageJson<ScheduleProcedureTemplate[]>(scheduleProcedureRaw);
+      const approvalNoteParsed = parseStorageJson<Array<SimpleTemplate<string>>>(approvalNoteRaw) ?? [];
       const detailParsed = parseStorageJson<Array<SimpleTemplate<PhotoSlots>>>(detailRaw) ?? [];
       const partyParsed = parseStorageJson<Array<SimpleTemplate<Project["relatedParties"]>>>(partyRaw) ?? [];
       const partyCompanyParsedRaw = parseStorageJson<Record<RelatedPartyKey, PartyCompanyTemplatePreset[]>>(partyCompanyRaw);
@@ -2397,6 +2577,18 @@ useEffect(() => {
       const normalizedProcedures = normalizeScheduleProcedureTemplates(scheduleProcedureParsed);
       setScheduleProcedureTemplates(normalizedProcedures);
       setSelectedScheduleProcedureTemplateId(normalizedProcedures[0]?.id ?? "");
+      if (Array.isArray(approvalNoteParsed)) {
+        const normalizedApprovalTemplates = approvalNoteParsed.filter(
+          (template): template is SimpleTemplate<string> =>
+            Boolean(template)
+            && typeof template.id === "string"
+            && typeof template.name === "string"
+            && typeof template.createdAt === "string"
+            && typeof template.payload === "string",
+        );
+        setApprovalNoteTemplates(normalizedApprovalTemplates);
+        setSelectedApprovalNoteTemplateId(normalizedApprovalTemplates[0]?.id ?? "");
+      }
       if (Array.isArray(detailParsed)) {
         setDetailPhotoTemplates(detailParsed);
         if (detailParsed[0]) {
@@ -2449,6 +2641,13 @@ useEffect(() => {
     }
     writeSharedStorageItem(SCHEDULE_PROCEDURE_TEMPLATE_STORAGE_KEY, stringifyForStorage(scheduleProcedureTemplates));
   }, [scheduleProcedureTemplates, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated) {
+      return;
+    }
+    writeSharedStorageItem(APPROVAL_NOTE_TEMPLATE_STORAGE_KEY, stringifyForStorage(approvalNoteTemplates));
+  }, [approvalNoteTemplates, hydrated]);
 
   useEffect(() => {
     if (!hydrated) {
@@ -2604,6 +2803,10 @@ useEffect(() => {
     () => scheduleProcedureTemplates.find((template) => template.id === selectedScheduleProcedureTemplateId),
     [scheduleProcedureTemplates, selectedScheduleProcedureTemplateId],
   );
+  const selectedApprovalNoteTemplate = useMemo(
+    () => approvalNoteTemplates.find((template) => template.id === selectedApprovalNoteTemplateId),
+    [approvalNoteTemplates, selectedApprovalNoteTemplateId],
+  );
   const selectedDetailPhotoTemplate = useMemo(
     () => detailPhotoTemplates.find((template) => template.id === selectedDetailPhotoTemplateId),
     [detailPhotoTemplates, selectedDetailPhotoTemplateId],
@@ -2724,6 +2927,7 @@ useEffect(() => {
       noticeOutageDate: project.noticeOutageDate,
       noticeOutageTimeStart: project.noticeOutageTimeStart,
       noticeOutageTimeEnd: project.noticeOutageTimeEnd,
+      noticeUnitInspectionEnabled: project.noticeUnitInspectionEnabled,
       noticeScheduleRows: cloneNoticeScheduleRows(project.noticeScheduleRows),
       noticePrivateAreaText: project.noticePrivateAreaText,
       noticeCommonAreaText: project.noticeCommonAreaText,
@@ -3293,6 +3497,19 @@ useEffect(() => {
       setSelectedScheduleProcedureTemplateId(scheduleProcedureTemplates[0].id);
     }
   }, [scheduleProcedureTemplates, selectedScheduleProcedureTemplateId]);
+
+  useEffect(() => {
+    if (!approvalNoteTemplates.length) {
+      setSelectedApprovalNoteTemplateId("");
+      return;
+    }
+    if (
+      !selectedApprovalNoteTemplateId
+      || !approvalNoteTemplates.some((template) => template.id === selectedApprovalNoteTemplateId)
+    ) {
+      setSelectedApprovalNoteTemplateId(approvalNoteTemplates[0].id);
+    }
+  }, [approvalNoteTemplates, selectedApprovalNoteTemplateId]);
 
   useEffect(() => {
     if (!hasSelectedProject || selectedScheduleProcedureTemplateId) {
@@ -4006,7 +4223,17 @@ useEffect(() => {
     setProjects((prev) => {
       const map = new Map<string, Project>();
       prev.forEach((project) => map.set(project.projectId, project));
-      imported.forEach((project) => map.set(project.projectId, project));
+      rows.forEach((record) => {
+        const importedProject = projectFromCsv(record);
+        if (!importedProject) {
+          return;
+        }
+        const existing = map.get(importedProject.projectId);
+        map.set(
+          importedProject.projectId,
+          existing ? mergeProjectFromCsvRecord(existing, record) : importedProject,
+        );
+      });
       return Array.from(map.values());
     });
     setSelectedId(imported[0].projectId);
@@ -4208,6 +4435,21 @@ useEffect(() => {
     URL.revokeObjectURL(url);
   }
 
+  function exportCsvEditorForExcel(): void {
+    if (!csvHeaders.length || !csvDraftRows.length) {
+      return;
+    }
+    const html = recordsToExcelHtml(csvHeaders, csvDraftRows);
+    const utf8Bom = "\uFEFF";
+    const blob = new Blob([utf8Bom, html], { type: "application/vnd.ms-excel;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `sekou_csv_editor_${new Date().toISOString().slice(0, 10)}.xls`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   function handleCsvImport(event: ChangeEvent<HTMLInputElement>): void {
     if (!canEdit) {
       event.target.value = "";
@@ -4226,7 +4468,7 @@ useEffect(() => {
           return;
         }
         setCsvEditorData(records);
-        applyCsvRowsToProjects(records, "import");
+        setImportStatus(`${records.length}件をCSV編集スペースへ取り込みました。内容確認後に「この編集内容を案件に反映」を押してください。`);
       } catch {
         setImportStatus("取込失敗: CSV形式を確認してください");
       }
@@ -6686,6 +6928,11 @@ useEffect(() => {
     return `${workHead}_配置図写真_${autoTemplateName("tpl")}`;
   }
 
+  function autoApprovalNoteTemplateName(): string {
+    const workHead = selectedProject.titleSubject || selectedProject.propertyName || "承認事項";
+    return `${workHead}_承認事項_${autoTemplateName("tpl")}`;
+  }
+
   function saveScheduleTemplate(): void {
     if (!canEdit) {
       return;
@@ -6698,6 +6945,50 @@ useEffect(() => {
     };
     setScheduleTemplates((prev) => [item, ...prev]);
     setSelectedScheduleTemplateId(item.id);
+  }
+
+  function saveApprovalNoteTemplate(): void {
+    if (!canEdit) {
+      return;
+    }
+    const payload = selectedProject.noteApprovalExtra.trim();
+    if (!payload) {
+      window.alert("承認事項追記を入力してからテンプレート登録してください。");
+      return;
+    }
+    const item: SimpleTemplate<string> = {
+      id: uid("tpl_approval_note"),
+      name: autoApprovalNoteTemplateName(),
+      createdAt: new Date().toISOString(),
+      payload,
+    };
+    setApprovalNoteTemplates((prev) => [item, ...prev]);
+    setSelectedApprovalNoteTemplateId(item.id);
+  }
+
+  function applyApprovalNoteTemplate(): void {
+    if (!selectedApprovalNoteTemplate) {
+      return;
+    }
+    updateSelectedProject(
+      (project) => ({ ...project, noteApprovalExtra: selectedApprovalNoteTemplate.payload }),
+      {
+        action: "template_apply",
+        detail: `承認事項テンプレート適用: ${selectedApprovalNoteTemplate.name}`,
+        snapshotLabel: "承認事項テンプレート適用前バックアップ",
+      },
+    );
+  }
+
+  function deleteApprovalNoteTemplate(): void {
+    if (!canEdit || !selectedApprovalNoteTemplateId) {
+      return;
+    }
+    setApprovalNoteTemplates((prev) => {
+      const next = prev.filter((template) => template.id !== selectedApprovalNoteTemplateId);
+      setSelectedApprovalNoteTemplateId(next[0]?.id ?? "");
+      return next;
+    });
   }
 
   function applyScheduleTemplate(): void {
@@ -7037,7 +7328,17 @@ useEffect(() => {
     if (requiredMissingMap.layoutAssets) keys.push("layoutAssets");
     return keys;
   }, [requiredMissingMap, missingEnabledPartyCompanyKeys]);
+  const coreMissingRequiredKeys = useMemo(
+    () => requiredMissingKeys.filter((key) => !isDeferredRequiredKey(key)),
+    [requiredMissingKeys],
+  );
+  const deferredMissingRequiredKeys = useMemo(
+    () => requiredMissingKeys.filter((key) => isDeferredRequiredKey(key)),
+    [requiredMissingKeys],
+  );
   const totalMissingRequiredCount = requiredMissingKeys.length;
+  const coreMissingRequiredCount = coreMissingRequiredKeys.length;
+  const deferredMissingRequiredCount = deferredMissingRequiredKeys.length;
   const canExportPdf = totalMissingRequiredCount === 0;
   const requiredMissingItems = useMemo(() => {
     const staticMap: Record<string, { section: string; label: string }> = {
@@ -7412,16 +7713,16 @@ useEffect(() => {
             <Link href="/menu" className="workspace-link subtle workspace-link-back mobile-menu-back-link" onClick={() => setMobileMenuOpen(false)}>メニューへ戻る</Link>
           </div>
         </aside>
-        {isEditorMode && hasSelectedProject && totalMissingRequiredCount > 0 ? (
+        {isEditorMode && hasSelectedProject && coreMissingRequiredCount > 0 ? (
           <button
             type="button"
             className="btn missing-jump-fab"
             onClick={() => setMissingPanelOpen(true)}
-            title={`未入力項目 ${totalMissingRequiredCount} 件の一覧を開く`}
+            title={`今すぐ入力したい未入力項目 ${coreMissingRequiredCount} 件の一覧を開く`}
           >
             <span className="btn-icon"><UiIcon name="down" /></span>
             <span>未入力一覧</span>
-            <span className="missing-jump-fab-count">{totalMissingRequiredCount}件</span>
+            <span className="missing-jump-fab-count">{coreMissingRequiredCount}件</span>
           </button>
         ) : null}
 
@@ -7436,7 +7737,10 @@ useEffect(() => {
               <div className="missing-panel-head">
                 <div>
                   <h3>未入力一覧</h3>
-                  <p className="mini">漏れなく埋めるために、項目ごとにそのまま移動できます。</p>
+                  <p className="mini">
+                    まず埋めたい基本項目を先に案内します。
+                    {deferredMissingRequiredCount > 0 ? ` 写真・体制表・配置図など、PDF出力前に必要な項目は別で ${deferredMissingRequiredCount} 件あります。` : ""}
+                  </p>
                 </div>
                 <button type="button" className="btn btn-subtle" onClick={() => setMissingPanelOpen(false)}>
                   <span className="btn-icon"><UiIcon name="clear" /></span>
@@ -7492,6 +7796,7 @@ useEffect(() => {
           applyCsvRowsToProjects={applyCsvRowsToProjects}
           csvDraftRows={csvDraftRows}
           exportCsvEditor={exportCsvEditor}
+          exportCsvEditorForExcel={exportCsvEditorForExcel}
           addCsvRow={addCsvRow}
           deleteSelectedCsvRows={deleteSelectedCsvRows}
           csvSelectedRows={csvSelectedRows}
@@ -8229,6 +8534,33 @@ useEffect(() => {
               </div>
             </article>
           </CardPreview>
+          <div className="inline-row wrap">
+            <label className="field csv-small-field">
+              <span>承認事項テンプレート</span>
+              <select
+                className="control"
+                value={selectedApprovalNoteTemplateId}
+                onChange={(event) => setSelectedApprovalNoteTemplateId(event.target.value)}
+                disabled={!approvalNoteTemplates.length}
+              >
+                {!approvalNoteTemplates.length ? <option value="">テンプレート未登録</option> : null}
+                {approvalNoteTemplates.map((template) => (
+                  <option key={`approval_note_template_${template.id}`} value={template.id}>
+                    {template.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button type="button" className="btn btn-subtle" onClick={applyApprovalNoteTemplate} disabled={!selectedApprovalNoteTemplate}>
+              <span className="btn-icon"><UiIcon name="apply" /></span>テンプレ適用
+            </button>
+            <button type="button" className="btn btn-subtle" onClick={saveApprovalNoteTemplate} disabled={!canEdit}>
+              <span className="btn-icon"><UiIcon name="save" /></span>今の文面を登録
+            </button>
+            <button type="button" className="btn btn-danger" onClick={deleteApprovalNoteTemplate} disabled={!canEdit || !selectedApprovalNoteTemplateId}>
+              <span className="btn-icon"><UiIcon name="delete" /></span>削除
+            </button>
+          </div>
           <label className="field">
             <span>承認事項 追記</span>
             <textarea className="control textarea" value={selectedProject.noteApprovalExtra} onChange={(event) => handleProjectField("noteApprovalExtra", event.target.value)} />

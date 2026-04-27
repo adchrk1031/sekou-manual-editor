@@ -16,8 +16,13 @@ const NOTICE_PHASE_LABELS: Record<NoticeAdvicePhase, string> = {
 };
 const NOTICE_WORK_TYPE_OPTIONS: NoticeWorkType[] = ["事前工事", "本工事", "事後工事"];
 const NOTICE_OUTAGE_STATE_OPTIONS: NoticeOutageState[] = ["停電なし", "停電あり"];
+const NOTICE_PROVIDER_OPTIONS = ["rezil", "nttae"] as const;
 const NOTICE_SECOND_PAGE_NOTE =
   "停電時に発生したお客さまの家電製品及び設備の不具合についての原因方法等は、取扱説明書をご確認いただくか、お客さまからメーカーへ直接お問い合わせいただきますようお願いいたします。";
+const NOTICE_PROVIDER_LABELS: Record<(typeof NOTICE_PROVIDER_OPTIONS)[number], string> = {
+  rezil: "レジル物件",
+  nttae: "NTTAE物件",
+};
 
 type NoticeProjectOption = {
   projectId: string;
@@ -41,6 +46,13 @@ type NoticeWorkspaceProps = {
 type NoticePrintDocumentProps = {
   project: Project;
   preview?: boolean;
+};
+
+type NoticeScenarioProvider = (typeof NOTICE_PROVIDER_OPTIONS)[number];
+type NoticeScenarioOptions = {
+  provider: NoticeScenarioProvider;
+  meterReplacement: boolean;
+  unitInspectionEnabled: boolean;
 };
 
 function splitMultilineText(value: string): string[] {
@@ -151,6 +163,7 @@ function buildNoticeDefaultsFromProject(project: Project): Pick<
   | "noticeOutageDate"
   | "noticeOutageTimeStart"
   | "noticeOutageTimeEnd"
+  | "noticeUnitInspectionEnabled"
   | "noticeScheduleRows"
   | "noticePrivateAreaText"
   | "noticeCommonAreaText"
@@ -184,6 +197,7 @@ function buildNoticeDefaultsFromProject(project: Project): Pick<
     noticeOutageDate: project.outageDateStart || seeded.noticeOutageDate,
     noticeOutageTimeStart: project.outageTimeStart || seeded.noticeOutageTimeStart,
     noticeOutageTimeEnd: project.outageTimeEnd || seeded.noticeOutageTimeEnd,
+    noticeUnitInspectionEnabled: project.noticeUnitInspectionEnabled,
     noticeScheduleRows: seeded.noticeScheduleRows,
     noticePrivateAreaText: seeded.noticePrivateAreaText,
     noticeCommonAreaText: seeded.noticeCommonAreaText,
@@ -195,6 +209,61 @@ function buildNoticeDefaultsFromProject(project: Project): Pick<
     noticeContactHours: seeded.noticeContactHours,
     noticeAdviceItems: seeded.noticeAdviceItems,
   };
+}
+
+function inferNoticeScenarioProvider(project: Project): NoticeScenarioProvider {
+  const source = `${project.noticeSenderCompany} ${project.noticeContactCompany}`.toLowerCase();
+  return source.includes("ntt") ? "nttae" : "rezil";
+}
+
+function buildNoticeScenarioPatch(project: Project, options: NoticeScenarioOptions): Partial<Project> {
+  const defaults = buildNoticeDefaultsFromProject(project);
+  const companyName = options.provider === "nttae" ? "NTTアノードエナジー株式会社" : "レジル株式会社";
+  const workLabel = options.meterReplacement ? "メーター交換および電気設備点検" : "電気設備点検";
+  const introLines = [
+    "平素より弊社サービスをご利用いただき誠にありがとうございます。",
+    `この度、以下日程にて${workLabel}を実施いたします。`,
+    options.unitInspectionEnabled
+      ? "停電当日に在宅をご希望される方を対象に、各戸の点検もあわせて実施いたします。"
+      : "今回は共用部および設備点検のみの実施で、各戸点検はございません。",
+    "お客さまにはご不便をお掛け致しますが、ご理解とご協力のほどよろしくお願い申し上げます。",
+  ];
+
+  const privateAreaText = options.meterReplacement
+    ? "【専有部】家電製品（電気で作動するもの全て）、水道、電力量計まわり\n※専有部についてのご注意は裏面をご覧ください"
+    : defaults.noticePrivateAreaText;
+
+  const commonAreaText = options.meterReplacement
+    ? "【共用部】エレベーター、オートロック式ドア、インターホン、宅配ボックス、機械式駐車場、共用計器類など\n※上記設備は停電中ご利用いただけませんのでご注意ください"
+    : defaults.noticeCommonAreaText;
+
+  const nextScheduleRows = defaults.noticeScheduleRows.map((row, index) => {
+    if (index > 0 || !options.meterReplacement) {
+      return row;
+    }
+    return {
+      ...row,
+      note: row.note ? `${row.note} / メーター交換あり` : "メーター交換あり",
+    };
+  });
+
+  return {
+    noticeSenderCompany: companyName,
+    noticeContactCompany: companyName,
+    noticeHeadline: `${workLabel}に伴う全館停電のお知らせ`,
+    noticeIntroText: introLines.join("\n"),
+    noticePrivateAreaText: privateAreaText,
+    noticeCommonAreaText: commonAreaText,
+    noticeUnitInspectionEnabled: options.unitInspectionEnabled,
+    noticeScheduleRows: nextScheduleRows,
+  };
+}
+
+function getNoticeInspectionNote(project: Project): string {
+  if (project.noticeUnitInspectionEnabled) {
+    return "停電当日に、在宅をご希望される方を対象に、宅内分電盤の点検をいたします。";
+  }
+  return "今回は共用部および設備点検のみの実施で、宅内分電盤の各戸点検はございません。";
 }
 
 function NoticePrintMarkup({ project, preview = false }: NoticePrintDocumentProps) {
@@ -240,7 +309,7 @@ function NoticePrintMarkup({ project, preview = false }: NoticePrintDocumentProp
             <strong>{formatNoticeTimeRange(project.noticeOutageTimeStart, project.noticeOutageTimeEnd)}</strong>
           </div>
           <p className="notice-print-outage-note">
-            停電当日に、在宅をご希望される方を対象に、宅内分電盤の点検をいたします。
+            {getNoticeInspectionNote(project)}
           </p>
         </section>
 
@@ -350,6 +419,9 @@ export function NoticeWorkspace({
   const [noticeSearchText, setNoticeSearchText] = useState("");
   const deferredNoticeSearchText = useDeferredValue(noticeSearchText);
   const [printErrorMessage, setPrintErrorMessage] = useState("");
+  const [noticeScenarioProvider, setNoticeScenarioProvider] = useState<NoticeScenarioProvider>(() => inferNoticeScenarioProvider(selectedProject));
+  const [noticeScenarioMeterReplacement, setNoticeScenarioMeterReplacement] = useState(false);
+  const [noticeScenarioUnitInspection, setNoticeScenarioUnitInspection] = useState<boolean>(selectedProject.noticeUnitInspectionEnabled);
   const noticeMissingFields = useMemo(
     () => [
       { key: "noticePropertyName", label: "物件名", missing: !selectedProject.noticePropertyName.trim() },
@@ -410,6 +482,17 @@ export function NoticeWorkspace({
       setPrintErrorMessage(`未入力があるため出力できません。${noticeMissingFields.map((field) => field.label).join(" / ")} を入力してください。`);
     }
   }, [noticeMissingFields, printErrorMessage]);
+
+  useEffect(() => {
+    setNoticeScenarioProvider(inferNoticeScenarioProvider(selectedProject));
+    setNoticeScenarioMeterReplacement(selectedProject.noticeHeadline.includes("メーター交換"));
+    setNoticeScenarioUnitInspection(selectedProject.noticeUnitInspectionEnabled);
+  }, [
+    selectedProject.noticeContactCompany,
+    selectedProject.noticeHeadline,
+    selectedProject.noticeSenderCompany,
+    selectedProject.noticeUnitInspectionEnabled,
+  ]);
 
   function updateNoticeField<K extends keyof Project>(field: K, value: Project[K]) {
     updateSelectedProject((project) => ({ ...project, [field]: value }));
@@ -509,6 +592,17 @@ export function NoticeWorkspace({
     updateSelectedProject((project) => ({
       ...project,
       ...buildNoticeDefaultsFromProject(project),
+    }));
+  }
+
+  function applyNoticeScenario() {
+    updateSelectedProject((project) => ({
+      ...project,
+      ...buildNoticeScenarioPatch(project, {
+        provider: noticeScenarioProvider,
+        meterReplacement: noticeScenarioMeterReplacement,
+        unitInspectionEnabled: noticeScenarioUnitInspection,
+      }),
     }));
   }
 
@@ -642,6 +736,51 @@ export function NoticeWorkspace({
               )}
             </div>
           </section>
+        </div>
+      </section>
+
+      <section className="sub-panel notice-search-panel">
+        <div className="panel-head">
+          <div>
+            <h4>案内文パターン</h4>
+            <p className="mini">メーター交換あり、各戸点検有無、レジル / NTTAE 物件の条件で文面を整えられます。</p>
+          </div>
+          <button type="button" className="btn btn-subtle" onClick={applyNoticeScenario} disabled={!canEditSelectedProject}>
+            <span className="btn-icon"><UiIcon name="apply" /></span>この条件を反映
+          </button>
+        </div>
+        <div className="notice-search-grid">
+          <label className="field">
+            <span>物件種別</span>
+            <select
+              className="control"
+              value={noticeScenarioProvider}
+              onChange={(event) => setNoticeScenarioProvider(event.target.value as NoticeScenarioProvider)}
+              disabled={!canEditSelectedProject}
+            >
+              {NOTICE_PROVIDER_OPTIONS.map((option) => (
+                <option key={`notice_provider_${option}`} value={option}>{NOTICE_PROVIDER_LABELS[option]}</option>
+              ))}
+            </select>
+          </label>
+          <label className="check-pill">
+            <input
+              type="checkbox"
+              checked={noticeScenarioMeterReplacement}
+              onChange={(event) => setNoticeScenarioMeterReplacement(event.target.checked)}
+              disabled={!canEditSelectedProject}
+            />
+            <span>メーター交換ありバージョン</span>
+          </label>
+          <label className="check-pill">
+            <input
+              type="checkbox"
+              checked={noticeScenarioUnitInspection}
+              onChange={(event) => setNoticeScenarioUnitInspection(event.target.checked)}
+              disabled={!canEditSelectedProject}
+            />
+            <span>各戸点検ありとして案内する</span>
+          </label>
         </div>
       </section>
 

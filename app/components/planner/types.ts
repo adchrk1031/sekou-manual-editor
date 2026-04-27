@@ -281,6 +281,7 @@ export type Project = {
   noticeOutageDate: string;
   noticeOutageTimeStart: string;
   noticeOutageTimeEnd: string;
+  noticeUnitInspectionEnabled: boolean;
   noticeScheduleRows: NoticeScheduleRow[];
   noticePrivateAreaText: string;
   noticeCommonAreaText: string;
@@ -328,6 +329,7 @@ export type ProjectSnapshot = Pick<
   | "noticeOutageDate"
   | "noticeOutageTimeStart"
   | "noticeOutageTimeEnd"
+  | "noticeUnitInspectionEnabled"
   | "noticeScheduleRows"
   | "noticePrivateAreaText"
   | "noticeCommonAreaText"
