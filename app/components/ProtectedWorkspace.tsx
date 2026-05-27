@@ -2,7 +2,9 @@
 
 import { ReactNode, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getSessionUser, touchSessionActivity } from "./auth";
+import { getSessionState, touchSessionActivity } from "./auth";
+
+export const AUTH_REDIRECT_REASON_STORAGE_KEY = "sekou-auth-redirect-reason-v1";
 
 export default function ProtectedWorkspace({ children }: { children: ReactNode }) {
   const router = useRouter();
@@ -10,8 +12,13 @@ export default function ProtectedWorkspace({ children }: { children: ReactNode }
 
   useEffect(() => {
     const checkSession = (): void => {
-      const user = getSessionUser();
-      if (!user) {
+      const sessionState = getSessionState();
+      if (!sessionState.user) {
+        try {
+          window.sessionStorage.setItem(AUTH_REDIRECT_REASON_STORAGE_KEY, sessionState.reason);
+        } catch {
+          // ignore sessionStorage write errors
+        }
         setReady(false);
         router.replace("/");
         return;

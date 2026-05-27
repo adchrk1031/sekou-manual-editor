@@ -171,6 +171,7 @@ export type RelatedParty = {
 export type UserRole = "system_admin" | "admin" | "editor" | "viewer";
 export type UserApprovalStatus = "approved" | "pending" | "rejected";
 export type RelatedPartyKey = "owner" | "utility" | "contractor" | "management" | "residents";
+export type ProjectAccessScope = "shared" | "private";
 
 export type UserAccount = {
   id: string;
@@ -228,8 +229,27 @@ export type NoticeAdviceItem = {
   body: string;
 };
 
+export type ApprovalRequestTemplate = {
+  id: string;
+  title: string;
+  category: string;
+  body: string;
+};
+
+export type ApprovalRequestItem = {
+  id: string;
+  templateId: string;
+  title: string;
+  body: string;
+  category: string;
+};
+
 export type Project = {
   projectId: string;
+  accessScope: ProjectAccessScope;
+  ownerUserId: string;
+  ownerUserName: string;
+  projectPresetId: ProjectPresetId;
   propertyName: string;
   propertyAddress: string;
   titleSubject: string;
@@ -244,6 +264,7 @@ export type Project = {
   selectedWorkCodes: WorkCode[];
   noteSpecial: string;
   noteApprovalExtra: string;
+  approvalRequestItems: ApprovalRequestItem[];
   coverRecipientSuffix: string;
   pdfTemplateId: PdfTemplateId;
   pdfCompanyName: string;
@@ -257,6 +278,7 @@ export type Project = {
   layoutAnnotations: LayoutAnnotation[];
   layoutAnnotationsV2: LayoutAnnotationV2[];
   scheduleRows: ScheduleRow[];
+  deletedScheduleRowIds: string[];
   detailPhotos: PhotoSlots;
   layoutPhotos: PhotoSlots;
   relatedParties: {
@@ -272,6 +294,7 @@ export type Project = {
   approvedAt: string;
   pdfExportCount: number;
   pdfLastExportedAt: string;
+  noticeTemplateId: NoticeTemplateId;
   noticePropertyName: string;
   noticeRecipientName: string;
   noticeSenderCompany: string;
@@ -296,6 +319,7 @@ export type Project = {
 
 export type ProjectSnapshot = Pick<
   Project,
+  | "projectPresetId"
   | "propertyName"
   | "propertyAddress"
   | "titleSubject"
@@ -309,6 +333,7 @@ export type ProjectSnapshot = Pick<
   | "selectedWorkCodes"
   | "noteSpecial"
   | "noteApprovalExtra"
+  | "approvalRequestItems"
   | "coverRecipientSuffix"
   | "pdfTemplateId"
   | "pdfCompanyName"
@@ -320,6 +345,7 @@ export type ProjectSnapshot = Pick<
   | "pdfFax"
   | "pdfExportCount"
   | "pdfLastExportedAt"
+  | "noticeTemplateId"
   | "noticePropertyName"
   | "noticeRecipientName"
   | "noticeSenderCompany"
@@ -343,6 +369,7 @@ export type ProjectSnapshot = Pick<
   | "layoutAnnotations"
   | "layoutAnnotationsV2"
   | "scheduleRows"
+  | "deletedScheduleRowIds"
   | "relatedParties"
 >;
 
@@ -363,6 +390,32 @@ export type WorkMaster = {
   name: string;
   detailText: string;
   defaultText: string;
+};
+
+export type ProjectPresetId =
+  | "custom"
+  | "kouatsu_cable"
+  | "pas"
+  | "ugs"
+  | "pas_ugs"
+  | "digital_meter"
+  | "ntt_ae";
+
+export type NoticeTemplateId =
+  | "default"
+  | "rezil_basic"
+  | "rezil_meter"
+  | "nttae_basic"
+  | "nttae_meter";
+
+export type ProjectPreset = {
+  id: ProjectPresetId;
+  label: string;
+  workCodes: WorkCode[];
+  scheduleProcedureTemplateId?: string;
+  detailPhotoLabels?: string[];
+  layoutPhotoLabels?: string[];
+  noticeTemplateId?: NoticeTemplateId;
 };
 
 export type ScheduleProcedureTemplateStep = {
