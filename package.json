@@ -9,11 +9,14 @@
     "safety:check:deep": "node scripts/safety/verify-deep-safety.mjs",
     "safety:scope": "node scripts/safety/verify-change-scope.mjs",
     "smoke:routes": "node scripts/safety/smoke-routes.mjs",
-    "safety:full": "npm run safety:check && npm run safety:check:deep && npm run safety:scope && npm run build && npm run smoke:routes",
+    "safety:full": "npm run safety:check && npm run safety:check:deep && npm run safety:scope && npm run build && npm run smoke:routes && npm run test:harness",
     "hooks:install": "git config core.hooksPath .githooks",
     "start": "next start",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev"
+    "prisma:migrate": "prisma migrate dev",
+    "test:api-contract": "node --test --test-concurrency=1 tests/api-contract/*.test.mjs",
+    "test:conflicts": "node --test --test-concurrency=1 tests/conflicts/*.test.mjs",
+    "test:harness": "npm run test:api-contract && npm run test:conflicts"
   },
   "dependencies": {
     "@prisma/client": "^6.7.0",

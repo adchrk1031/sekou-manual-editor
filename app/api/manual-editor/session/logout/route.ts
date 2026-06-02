@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server.js";
 import { clearManualEditorSessionCookie } from "../../../../../lib/manualEditorServerAuth";
 
 export async function POST(_request: NextRequest) {

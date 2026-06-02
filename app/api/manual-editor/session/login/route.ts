@@ -1,8 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server.js";
 import {
   applyManualEditorSessionCookie,
   pickPreferredCandidate,
+  redactAuthUsers,
+  redactAuthUser,
   readAuthUsersState,
+  verifyManualEditorPassword,
   writeAuthUsersState,
 } from "../../../../../lib/manualEditorServerAuth";
 
@@ -39,9 +42,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, reason: "not_registered" }, { status: 401 });
   }
 
-  const passwordMatched = candidates.filter((user) => user.password === password);
+  const passwordMatched = candidates.filter((user) => verifyManualEditorPassword(password, user.password));
   const user = pickPreferredCandidate(passwordMatched.length ? passwordMatched : candidates);
-  if (!user || user.password !== password) {
+  if (!user || !verifyManualEditorPassword(password, user.password)) {
     return NextResponse.json({ ok: false, reason: "invalid_password" }, { status: 401 });
   }
   if (!user.active) {
@@ -65,11 +68,11 @@ export async function POST(request: NextRequest) {
 
   const response = NextResponse.json({
     ok: true,
-    user: persistedUser,
+    user: redactAuthUser(persistedUser),
     users:
       persistedUser.role === "system_admin" || persistedUser.role === "admin"
-        ? persistedUsers
-        : [persistedUser],
+        ? redactAuthUsers(persistedUsers)
+        : [redactAuthUser(persistedUser)],
   });
   applyManualEditorSessionCookie(response, persistedUser.id);
   return response;

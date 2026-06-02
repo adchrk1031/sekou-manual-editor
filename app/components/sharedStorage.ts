@@ -39,6 +39,7 @@ const SHARED_KEY_PREFIXES = [
   "sekou-",
 ];
 const SHARED_KEY_EXCLUDES = new Set([
+  "sekou-local-save-meta-v1",
   "sekou-tool-session-v1",
   "sekou-tool-users-v1",
   "sekou-auth-login-guard-v1",
@@ -350,6 +351,7 @@ export function collectSharedStorageSnapshot(): SharedStatePayload {
   if (typeof window === "undefined") {
     return { items: {} };
   }
+  sharedSnapshotCacheItems = rebuildSharedSnapshotCache();
   return normalizeSharedStatePayload({ items: { ...ensureSharedSnapshotCache() } });
 }
 

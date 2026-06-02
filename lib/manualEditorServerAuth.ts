@@ -1,5 +1,5 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
-import { NextRequest, NextResponse } from "next/server";
+import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { NextRequest, NextResponse } from "next/server.js";
 import { readManualEditorState, writeManualEditorState } from "./manualEditorStateStore";
 
 export type AuthRole = "system_admin" | "admin" | "editor" | "viewer";
@@ -34,6 +34,8 @@ type SessionClaims = {
 const AUTH_USERS_STATE_ID = "auth_users_v1";
 const SESSION_COOKIE_NAME = "sekou_manual_editor_session";
 const SESSION_TTL_MS = 1000 * 60 * 60 * 12;
+const PASSWORD_HASH_PREFIX = "scrypt_v1";
+const PASSWORD_HASH_BYTES = 64;
 const KNOWN_USER_NAME_BY_EMAIL: Record<string, string> = {
   "h.adachi@denryoku.co.jp": "安達広樹",
 };
@@ -91,6 +93,75 @@ function getUserPriorityScore(user: AuthUser): number {
   return getRolePriority(user.role) + getApprovalPriority(user.approvalStatus) + (user.active ? 5 : 0);
 }
 
+function constantTimeStringEquals(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left, "utf8");
+  const rightBuffer = Buffer.from(right, "utf8");
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function isPasswordHash(value: string): boolean {
+  return value.startsWith(`${PASSWORD_HASH_PREFIX}$`);
+}
+
+function hashPassword(password: string): string {
+  const salt = randomBytes(16).toString("base64url");
+  const digest = scryptSync(password, salt, PASSWORD_HASH_BYTES).toString("base64url");
+  return `${PASSWORD_HASH_PREFIX}$${salt}$${digest}`;
+}
+
+function normalizeStoredPassword(inputPassword: string, previousPassword: string): string {
+  const trimmedInput = inputPassword.trim();
+  if (trimmedInput) {
+    return isPasswordHash(trimmedInput) ? trimmedInput : hashPassword(trimmedInput);
+  }
+  if (!previousPassword) {
+    return "";
+  }
+  return isPasswordHash(previousPassword) ? previousPassword : hashPassword(previousPassword);
+}
+
+function resolvePreviousUser(previousUsers: AuthUser[], nextUser: Partial<AuthUser>): AuthUser | undefined {
+  const byId = typeof nextUser.id === "string" && nextUser.id
+    ? previousUsers.find((user) => user.id === nextUser.id)
+    : undefined;
+  if (byId) {
+    return byId;
+  }
+  const normalizedEmail = normalizeEmail(typeof nextUser.email === "string" ? nextUser.email : "");
+  if (!normalizedEmail) {
+    return undefined;
+  }
+  return previousUsers.find((user) => normalizeEmail(user.email) === normalizedEmail);
+}
+
+export function verifyManualEditorPassword(password: string, storedPassword: string): boolean {
+  const normalizedPassword = password.trim();
+  if (!normalizedPassword || !storedPassword) {
+    return false;
+  }
+  if (!isPasswordHash(storedPassword)) {
+    return constantTimeStringEquals(storedPassword, normalizedPassword);
+  }
+  const [, salt, digest] = storedPassword.split("$");
+  if (!salt || !digest) {
+    return false;
+  }
+  const expected = Buffer.from(digest, "base64url");
+  const actual = Buffer.from(scryptSync(normalizedPassword, salt, PASSWORD_HASH_BYTES).toString("base64url"), "base64url");
+  return expected.length === actual.length && timingSafeEqual(expected, actual);
+}
+
+export function redactAuthUser(user: AuthUser): AuthUser {
+  return {
+    ...user,
+    password: "",
+  };
+}
+
+export function redactAuthUsers(users: AuthUser[]): AuthUser[] {
+  return users.map((user) => redactAuthUser(user));
+}
+
 export function pickPreferredCandidate(candidates: AuthUser[]): AuthUser | null {
   if (!candidates.length) {
     return null;
@@ -108,12 +179,13 @@ export function pickPreferredCandidate(candidates: AuthUser[]): AuthUser | null 
   })[0] ?? null;
 }
 
-function sanitizeUsers(users: AuthUser[]): AuthUser[] {
+function sanitizeUsers(users: AuthUser[], previousUsers: AuthUser[] = []): AuthUser[] {
   if (!Array.isArray(users)) {
     return [];
   }
   const sanitized = users.map((user) => {
     const normalizedEmail = normalizeEmail(typeof user.email === "string" ? user.email : "");
+    const previousUser = resolvePreviousUser(previousUsers, user);
     const normalizedRole: AuthRole =
       user.role === "system_admin" || user.role === "admin" || user.role === "editor" || user.role === "viewer"
         ? user.role
@@ -127,7 +199,10 @@ function sanitizeUsers(users: AuthUser[]): AuthUser[] {
       ...user,
       name: canonicalizeKnownPersonName(typeof user.name === "string" ? user.name : "", normalizedEmail || user.email),
       email: normalizedEmail || user.email,
-      password: typeof user.password === "string" ? user.password : "",
+      password: normalizeStoredPassword(
+        typeof user.password === "string" ? user.password : "",
+        typeof previousUser?.password === "string" ? previousUser.password : "",
+      ),
       active: normalizedRole === "system_admin" ? true : (typeof user.active === "boolean" ? user.active : true),
       role: normalizedRole,
       approvalStatus: normalizedApproval,
@@ -219,7 +294,13 @@ export async function readAuthUsersState() {
 }
 
 export async function writeAuthUsersState(payload: AuthUsersPayload, baseUpdatedAt: string | null) {
-  return writeManualEditorState(AUTH_USERS_STATE_ID, { users: sanitizeUsers(payload.users) }, baseUpdatedAt, isAuthUsersPayload);
+  const existing = await readAuthUsersState();
+  return writeManualEditorState(
+    AUTH_USERS_STATE_ID,
+    { users: sanitizeUsers(payload.users, existing.payload.users) },
+    baseUpdatedAt,
+    isAuthUsersPayload,
+  );
 }
 
 function getSessionSecret(): string {

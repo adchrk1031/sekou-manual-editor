@@ -8,6 +8,14 @@ dist
 .env.local
 .env.*.local
 .vercel
+.pnpm-store/
+.tmp/
+.tmp-tests/
+.tools/
+test-results/
+playwright-report/
+prisma/dev.db
+tsconfig.tsbuildinfo
 node_modules/
 .next/
 out/
