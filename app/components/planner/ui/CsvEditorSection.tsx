@@ -1,6 +1,8 @@
 import type { CSSProperties, ChangeEvent, Dispatch, SetStateAction } from "react";
 import { CSV_PAGE_SIZE_OPTIONS, getCsvHeaderLabel } from "../constants";
 import type { CsvExportFilter, CsvRecord, UserCreateNotice } from "../types";
+import type { StatusSummaryItem } from "./StatusSummaryPanel";
+import { StatusSummaryPanel } from "./StatusSummaryPanel";
 import { VirtualizedCsvTable } from "../../features/csv/VirtualizedCsvTable";
 import type { CsvVisibleRow } from "../../features/csv/useCsvTableView";
 import { UiIcon } from "./UiIcon";
@@ -50,6 +52,8 @@ type CsvEditorSectionProps = {
   csvPage: number;
   setCsvPage: Dispatch<SetStateAction<number>>;
   csvTotalPages: number;
+  workspaceStatusItems: StatusSummaryItem[];
+  workspaceStatusFootnote: string;
 };
 
 export function CsvEditorSection({
@@ -97,6 +101,8 @@ export function CsvEditorSection({
   csvPage,
   setCsvPage,
   csvTotalPages,
+  workspaceStatusItems,
+  workspaceStatusFootnote,
 }: CsvEditorSectionProps) {
   if (!isCsvMode) {
     return null;
@@ -110,11 +116,18 @@ export function CsvEditorSection({
           <h3 className="section-title"><span className="section-icon"><UiIcon name="template" /></span>CSV編集スペース</h3>
           <p className="mini">取込後にこの画面で修正し、案件データへ再反映できます。反映後は `/notice` で停電案内文も起こせます。</p>
         </div>
+        <StatusSummaryPanel
+          compact
+          title="保存状態"
+          lead="CSV下書きは端末保存され、オンライン時は共有同期も行います。"
+          items={workspaceStatusItems}
+          footnote={<p className="mini">{workspaceStatusFootnote}</p>}
+        />
         <details className="csv-mapping-guide">
           <summary>CSVカラム対応表（ここだけ埋めれば、ほぼ自動でPDF化）</summary>
           <div className="csv-mapping-body">
             <p className="mini">必須: <code>project_id（または 案件ID）</code></p>
-            <p className="mini">推奨: <code>案件名 / 物件名</code>、<code>件名</code>、<code>工事開始日・工事終了日</code>、<code>停電開始日・停電終了日・停電開始時間・停電終了時間</code>、工事項目フラグ</p>
+            <p className="mini">推奨: <code>案件名 / 物件名</code>、<code>件名</code>、<code>工事開始日・工事終了日</code>、<code>停電開始日・停電終了日・停電開始時間・停電終了時間</code>、工事項目フラグ、<code>工事テンプレート</code>、<code>案内文テンプレート</code></p>
             <div className="table-wrap">
               <table className="schedule-table csv-mapping-table">
                 <thead>
@@ -133,6 +146,9 @@ export function CsvEditorSection({
                   <tr><td>停電時間</td><td><code>outage_time_start</code>, <code>outage_time_end</code>, <code>停電開始時間</code>, <code>停電終了時間</code></td></tr>
                   <tr><td>停電バー表示</td><td><code>outage_enabled</code>, <code>停電あり</code>, <code>停電有無</code>（例: 1/0, true/false, 有/無）</td></tr>
                   <tr><td>工事項目</td><td><code>flag_kouatsu_cable</code>, <code>flag_ugs</code>, <code>flag_pas</code>, <code>flag_ground_a</code>, <code>flag_ground_b</code>, <code>flag_ground_c</code> または <code>工事項目</code>（カンマ区切り）</td></tr>
+                  <tr><td>工事テンプレート</td><td><code>project_preset_id</code>, <code>工事テンプレート</code>, <code>工事種別</code>（例: 高圧ケーブル交換工事 / PAS交換工事 / UGS交換工事 / PAS / UGS更新工事 / デジタルメーター / NTTアノードエナジー）</td></tr>
+                  <tr><td>案内文テンプレート</td><td><code>notice_template_id</code>, <code>案内文テンプレート</code>, <code>案内文パターン</code>（例: レジル / 設備改修 / メーター交換あり / NTTアノードエナジー）</td></tr>
+                  <tr><td>各戸点検有無</td><td><code>notice_unit_inspection_enabled</code>, <code>各戸点検有無</code>, <code>各戸点検あり</code>（例: 1/0, true/false, 有/無）</td></tr>
                   <tr><td>特記事項・承認事項</td><td><code>note_special</code>, <code>note_approval_extra</code></td></tr>
                   <tr><td>PDF連絡先</td><td><code>pdf_company_name</code>, <code>pdf_team</code>, <code>pdf_contact_person</code>, <code>pdf_address</code>, <code>pdf_email</code>, <code>pdf_tel</code>, <code>pdf_fax</code></td></tr>
                 </tbody>
@@ -141,19 +157,12 @@ export function CsvEditorSection({
           </div>
         </details>
         <div className="csv-editor-toolbar">
-          <div className="inline-row wrap">
+          <div className="inline-row wrap csv-toolbar-primary">
             <label className="btn btn-subtle file-btn">
               <span className="btn-icon"><UiIcon name="upload" /></span>
               CSV取込
               <input type="file" accept=".csv,text/csv" onChange={handleCsvImport} disabled={!canEdit} />
             </label>
-            <a
-              className="btn btn-subtle"
-              href="/test-data/sekou_csv_test_200.csv"
-              download="sekou_csv_test_200.csv"
-            >
-              <span className="btn-icon"><UiIcon name="save" /></span>200件テストCSVをダウンロード
-            </a>
             <button type="button" className="btn btn-accent" onClick={() => applyCsvRowsToProjects(csvDraftRows, "editor")} disabled={!canEdit || !csvDraftRows.length}>
               <span className="btn-icon"><UiIcon name="apply" /></span>この編集内容を案件に反映
             </button>
@@ -169,9 +178,23 @@ export function CsvEditorSection({
             <button type="button" className="btn btn-danger" onClick={deleteSelectedCsvRows} disabled={!canEdit || !csvSelectedRows.length}>
               <span className="btn-icon"><UiIcon name="delete" /></span>選択削除
             </button>
-            <button type="button" className="btn btn-danger" onClick={deleteAllCsvRows} disabled={!canEdit || !csvDraftRows.length}>
-              <span className="btn-icon"><UiIcon name="clear" /></span>一括削除
-            </button>
+            <details className="secondary-action-details csv-secondary-actions">
+              <summary>
+                <span className="btn-icon"><UiIcon name="menu" /></span>その他
+              </summary>
+              <div className="secondary-action-content csv-secondary-content">
+                <a
+                  className="btn btn-subtle"
+                  href="/test-data/sekou_csv_test_200.csv"
+                  download="sekou_csv_test_200.csv"
+                >
+                  <span className="btn-icon"><UiIcon name="save" /></span>200件テストCSV
+                </a>
+                <button type="button" className="btn btn-danger" onClick={deleteAllCsvRows} disabled={!canEdit || !csvDraftRows.length}>
+                  <span className="btn-icon"><UiIcon name="clear" /></span>CSVを一括削除
+                </button>
+              </div>
+            </details>
           </div>
           <div className="inline-row wrap">
             <label className="field csv-small-field">
@@ -196,90 +219,95 @@ export function CsvEditorSection({
             </label>
           </div>
         </div>
-        <div className="csv-editor-toolbar">
-          <div className="inline-row wrap csv-column-add-row">
-            <label className="field csv-small-field">
-              <span>列追加（任意）</span>
-              <input className="control" value={newCsvColumn} onChange={(event) => setNewCsvColumn(event.target.value)} placeholder="new_column" />
-            </label>
-            <button type="button" className="btn btn-subtle" onClick={addCsvColumn} disabled={!canEdit || !newCsvColumn.trim()}>
-              <span className="btn-icon"><UiIcon name="plus" /></span>列追加
-            </button>
-            <label className="field csv-small-field">
-              <span>列削除（任意）</span>
-              <select
-                className="control"
-                value={csvDeleteHeader}
-                onChange={(event) => {
-                  setCsvDeleteHeader(event.target.value);
-                  setCsvBulkNotice(null);
-                }}
-                disabled={!canEdit || !csvHeaders.length}
-              >
-                {!csvHeaders.length ? <option value="">削除できる列がありません</option> : null}
-                {csvHeaders.map((header) => (
-                  <option key={`delete_col_${header}`} value={header}>
-                    {getCsvHeaderLabel(header)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              type="button"
-              className="btn btn-danger"
-              onClick={deleteCsvColumn}
-              disabled={!canEdit || !csvHeaders.length || !csvDeleteHeader}
-            >
-              <span className="btn-icon"><UiIcon name="delete" /></span>列削除
-            </button>
-          </div>
-          <div className="inline-row wrap csv-bulk-edit-row">
-            <label className="field csv-small-field">
-              <span>選択編集（列）</span>
-              <select
-                className="control"
-                value={csvBulkHeader}
-                onChange={(event) => {
-                  setCsvBulkHeader(event.target.value);
-                  setCsvBulkNotice(null);
-                }}
-                disabled={!canEdit || !csvHeaders.length}
-              >
-                {csvHeaders.map((header) => (
-                  <option key={`bulk_col_${header}`} value={header}>
-                    {getCsvHeaderLabel(header)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field csv-small-field">
-              <span>一括入力する値</span>
-              <input
-                className="control"
-                value={csvBulkValue}
-                onChange={(event) => {
-                  setCsvBulkValue(event.target.value);
-                  setCsvBulkNotice(null);
-                }}
-                placeholder="選択行に入力する値"
-                disabled={!canEdit}
-              />
-            </label>
-            <div className="field csv-bulk-action-field">
-              <span className="csv-bulk-action-label">実行</span>
+        <details className="csv-advanced-tools">
+          <summary>
+            <span className="btn-icon"><UiIcon name="settings" /></span>列編集・一括編集
+          </summary>
+          <div className="csv-editor-toolbar csv-advanced-toolbar">
+            <div className="inline-row wrap csv-column-add-row">
+              <label className="field csv-small-field">
+                <span>列追加（任意）</span>
+                <input className="control" value={newCsvColumn} onChange={(event) => setNewCsvColumn(event.target.value)} placeholder="new_column" />
+              </label>
+              <button type="button" className="btn btn-subtle" onClick={addCsvColumn} disabled={!canEdit || !newCsvColumn.trim()}>
+                <span className="btn-icon"><UiIcon name="plus" /></span>列追加
+              </button>
+              <label className="field csv-small-field">
+                <span>列削除（任意）</span>
+                <select
+                  className="control"
+                  value={csvDeleteHeader}
+                  onChange={(event) => {
+                    setCsvDeleteHeader(event.target.value);
+                    setCsvBulkNotice(null);
+                  }}
+                  disabled={!canEdit || !csvHeaders.length}
+                >
+                  {!csvHeaders.length ? <option value="">削除できる列がありません</option> : null}
+                  {csvHeaders.map((header) => (
+                    <option key={`delete_col_${header}`} value={header}>
+                      {getCsvHeaderLabel(header)}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <button
                 type="button"
-                className="btn btn-subtle csv-bulk-action-btn"
-                onClick={applyBulkCsvEdit}
-                disabled={!canEdit || !csvSelectedRows.length || !csvHeaders.length}
+                className="btn btn-danger"
+                onClick={deleteCsvColumn}
+                disabled={!canEdit || !csvHeaders.length || !csvDeleteHeader}
               >
-                <span className="btn-icon"><UiIcon name="apply" /></span>選択行へ一括反映
+                <span className="btn-icon"><UiIcon name="delete" /></span>列削除
               </button>
             </div>
+            <div className="inline-row wrap csv-bulk-edit-row">
+              <label className="field csv-small-field">
+                <span>選択編集（列）</span>
+                <select
+                  className="control"
+                  value={csvBulkHeader}
+                  onChange={(event) => {
+                    setCsvBulkHeader(event.target.value);
+                    setCsvBulkNotice(null);
+                  }}
+                  disabled={!canEdit || !csvHeaders.length}
+                >
+                  {csvHeaders.map((header) => (
+                    <option key={`bulk_col_${header}`} value={header}>
+                      {getCsvHeaderLabel(header)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field csv-small-field">
+                <span>一括入力する値</span>
+                <input
+                  className="control"
+                  value={csvBulkValue}
+                  onChange={(event) => {
+                    setCsvBulkValue(event.target.value);
+                    setCsvBulkNotice(null);
+                  }}
+                  placeholder="選択行に入力する値"
+                  disabled={!canEdit}
+                />
+              </label>
+              <div className="field csv-bulk-action-field">
+                <span className="csv-bulk-action-label">実行</span>
+                <button
+                  type="button"
+                  className="btn btn-subtle csv-bulk-action-btn"
+                  onClick={applyBulkCsvEdit}
+                  disabled={!canEdit || !csvSelectedRows.length || !csvHeaders.length}
+                >
+                  <span className="btn-icon"><UiIcon name="apply" /></span>選択行へ一括反映
+                </button>
+              </div>
+            </div>
+            {csvBulkNotice ? <p className={`mini ${csvBulkNotice.type === "error" ? "error-text" : "ok-text"}`}>{csvBulkNotice.text}</p> : null}
+            <p className="mini">行: {csvDraftRows.length} / 列: {csvHeaders.length} / 選択: {csvSelectedRows.length}</p>
           </div>
-          {csvBulkNotice ? <p className={`mini ${csvBulkNotice.type === "error" ? "error-text" : "ok-text"}`}>{csvBulkNotice.text}</p> : null}
-          <p className="mini">行: {csvDraftRows.length} / 列: {csvHeaders.length} / 選択: {csvSelectedRows.length}</p>
-        </div>
+        </details>
 
         {!csvHeaders.length ? (
           <p className="mini">CSVを取り込むと、ここで編集できるようになります。</p>
