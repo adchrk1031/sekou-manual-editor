@@ -94,6 +94,8 @@ npm run dev
   - `npm run smoke:routes`
 - full local safety gate:
   - `npm run safety:full`
+- API / conflict harness:
+  - `npm run test:harness`
 - 推奨運用:
   - `main` へ直接 push しない
   - feature branch で作業する
