@@ -1,7 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server.js";
 import {
   applyManualEditorSessionCookie,
   pickPreferredCandidate,
+  redactAuthUsers,
+  redactAuthUser,
   readAuthUsersState,
   writeAuthUsersState,
 } from "../../../../../lib/manualEditorServerAuth";
@@ -88,11 +90,11 @@ export async function POST(request: NextRequest) {
 
   const response = NextResponse.json({
     ok: true,
-    user: persistedUser,
+    user: redactAuthUser(persistedUser),
     users:
       persistedUser.role === "system_admin" || persistedUser.role === "admin"
-        ? persistedUsers
-        : [persistedUser],
+        ? redactAuthUsers(persistedUsers)
+        : [redactAuthUser(persistedUser)],
   });
   applyManualEditorSessionCookie(response, persistedUser.id);
   return response;

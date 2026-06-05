@@ -44,6 +44,7 @@ function buildWorkCodeFlags(selectedWorkCodes: WorkCode[]): Record<WorkCode, boo
 
 export function buildProjectSnapshot(project: Project): ProjectSnapshot {
   return clonePlain({
+    projectPresetId: project.projectPresetId,
     propertyName: project.propertyName,
     propertyAddress: project.propertyAddress,
     titleSubject: project.titleSubject,
@@ -57,6 +58,7 @@ export function buildProjectSnapshot(project: Project): ProjectSnapshot {
     selectedWorkCodes: [...project.selectedWorkCodes],
     noteSpecial: project.noteSpecial,
     noteApprovalExtra: project.noteApprovalExtra,
+    approvalRequestItems: project.approvalRequestItems,
     coverRecipientSuffix: project.coverRecipientSuffix,
     pdfTemplateId: project.pdfTemplateId,
     pdfCompanyName: project.pdfCompanyName,
@@ -68,6 +70,7 @@ export function buildProjectSnapshot(project: Project): ProjectSnapshot {
     pdfFax: project.pdfFax,
     pdfExportCount: project.pdfExportCount,
     pdfLastExportedAt: project.pdfLastExportedAt,
+    noticeTemplateId: project.noticeTemplateId,
     noticePropertyName: project.noticePropertyName,
     noticeRecipientName: project.noticeRecipientName,
     noticeSenderCompany: project.noticeSenderCompany,
@@ -91,6 +94,7 @@ export function buildProjectSnapshot(project: Project): ProjectSnapshot {
     layoutAnnotations: project.layoutAnnotations,
     layoutAnnotationsV2: project.layoutAnnotationsV2,
     scheduleRows: project.scheduleRows,
+    deletedScheduleRowIds: project.deletedScheduleRowIds,
     relatedParties: project.relatedParties,
   } satisfies ProjectSnapshot);
 }

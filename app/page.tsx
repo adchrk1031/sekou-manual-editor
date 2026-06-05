@@ -1,34 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   getLoginFailureMessage,
+  getSessionStateMessage,
   getSessionUser,
   loginWithCredentials,
-  loginWithGoogleEmail,
   pullAuthUsersSnapshot,
   registerInitialAdmin,
   registerSelfUser,
 } from "./components/auth";
+import { AUTH_REDIRECT_REASON_STORAGE_KEY } from "./components/ProtectedWorkspace";
 import { pullSharedStorageSnapshot } from "./components/sharedStorage";
-
-type AuthTab = "register" | "login";
-
-const GOOGLE_ERROR_MESSAGES: Record<string, string> = {
-  config: "Googleログイン設定が未完了です。管理者へ設定確認を依頼してください。",
-  state: "Googleログインの確認情報が一致しませんでした。もう一度お試しください。",
-  token: "Googleログイン用の認証トークン取得に失敗しました。時間をおいて再試行してください。",
-  userinfo: "Googleプロフィールの取得に失敗しました。時間をおいて再試行してください。",
-  email: "Googleアカウントの確認済みメールアドレスを取得できませんでした。",
-};
-
-function getGoogleLoginErrorMessage(code: string | null): string {
-  if (!code) {
-    return "Googleログインに失敗しました。時間をおいて再試行してください。";
-  }
-  return GOOGLE_ERROR_MESSAGES[code] ?? "Googleログインに失敗しました。時間をおいて再試行してください。";
-}
 
 async function notifyAdminPendingApproval(user: { name: string; email: string }): Promise<boolean> {
   try {
@@ -88,37 +72,22 @@ const AUTH_PRIMARY_BUTTON_STYLE = {
 export default function Page() {
   const router = useRouter();
   const [hydrated, setHydrated] = useState(false);
-  const [authTab, setAuthTab] = useState<AuthTab>("login");
   const [hasUsers, setHasUsers] = useState(false);
   const [authBootstrapReady, setAuthBootstrapReady] = useState(false);
-  const [googleAuthBusy, setGoogleAuthBusy] = useState(false);
-
-  const [loginEmail, setLoginEmail] = useState("");
-  const [loginPassword, setLoginPassword] = useState("");
-  const [showLoginPassword, setShowLoginPassword] = useState(false);
 
   const [registerName, setRegisterName] = useState("");
   const [registerEmail, setRegisterEmail] = useState("");
   const [registerPassword, setRegisterPassword] = useState("");
   const [registerPasswordConfirm, setRegisterPasswordConfirm] = useState("");
   const [showRegisterPassword, setShowRegisterPassword] = useState(false);
+  const [activePane, setActivePane] = useState<"login" | "register">("login");
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [loginBusy, setLoginBusy] = useState(false);
 
   const [message, setMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
   const isInitialSetup = useMemo(() => authBootstrapReady && !hasUsers, [authBootstrapReady, hasUsers]);
-  const googleFlowHandledRef = useRef(false);
-
-  const clearGoogleQueryState = (): void => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    const url = new URL(window.location.href);
-    url.searchParams.delete("google");
-    url.searchParams.delete("email");
-    url.searchParams.delete("name");
-    url.searchParams.delete("google_error");
-    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
-  };
-
   useEffect(() => {
     let cancelled = false;
     const bootstrap = async () => {
@@ -131,12 +100,25 @@ export default function Page() {
         : true;
       setAuthBootstrapReady(true);
       setHasUsers(nextHasUsers);
-      setAuthTab(nextHasUsers ? "login" : "register");
       if (getSessionUser()) {
         router.replace("/menu");
         return;
       }
       setHydrated(true);
+      try {
+        const redirectReasonRaw = window.sessionStorage.getItem(AUTH_REDIRECT_REASON_STORAGE_KEY);
+        if (redirectReasonRaw) {
+          window.sessionStorage.removeItem(AUTH_REDIRECT_REASON_STORAGE_KEY);
+          if (redirectReasonRaw !== "missing") {
+            setMessage({
+              type: "error",
+              text: getSessionStateMessage(redirectReasonRaw as Parameters<typeof getSessionStateMessage>[0]),
+            });
+          }
+        }
+      } catch {
+        // ignore sessionStorage read errors
+      }
       if (!authUsersResult.ok) {
         setMessage({
           type: "error",
@@ -152,18 +134,6 @@ export default function Page() {
 
   function warmSharedStateAfterAuth(): void {
     void pullSharedStorageSnapshot({ force: true });
-  }
-
-  async function onLogin(): Promise<void> {
-    setMessage(null);
-    const result = await loginWithCredentials(loginEmail, loginPassword, "login_page");
-    if (result.user) {
-      setHasUsers(true);
-      warmSharedStateAfterAuth();
-      router.push("/menu");
-      return;
-    }
-    setMessage({ type: "error", text: getLoginFailureMessage(result.reason) });
   }
 
   async function onRegister(): Promise<void> {
@@ -214,77 +184,34 @@ export default function Page() {
         : "ユーザー登録を受け付けました。管理者承認後にログインできます（Slack通知は未設定または送信失敗）。",
     });
     setHasUsers(true);
-    setAuthTab("login");
-    setLoginEmail(created.user.email);
-    setLoginPassword("");
     setRegisterName("");
     setRegisterEmail("");
     setRegisterPassword("");
     setRegisterPasswordConfirm("");
+    setActivePane("login");
   }
 
-  useEffect(() => {
-    if (!hydrated || googleFlowHandledRef.current) {
+  async function onLogin(): Promise<void> {
+    setMessage(null);
+    const email = loginEmail.trim().toLowerCase();
+    if (!email || !loginPassword.trim()) {
+      setMessage({ type: "error", text: "メールアドレスとパスワードを入力してください。" });
       return;
     }
-
-    if (typeof window === "undefined") {
-      return;
-    }
-    const params = new URLSearchParams(window.location.search);
-    const googleStatus = params.get("google");
-    const googleError = params.get("google_error");
-    const googleEmail = params.get("email");
-    const googleName = params.get("name");
-
-    if (!googleStatus && !googleError) {
-      return;
-    }
-
-    googleFlowHandledRef.current = true;
-
-    if (googleError) {
-      setAuthTab("login");
-      setMessage({ type: "error", text: getGoogleLoginErrorMessage(googleError) });
-      clearGoogleQueryState();
-      return;
-    }
-
-    if (googleStatus !== "ok" || !googleEmail) {
-      setAuthTab("login");
-      setMessage({ type: "error", text: getGoogleLoginErrorMessage(null) });
-      clearGoogleQueryState();
-      return;
-    }
-
-    const handleGoogleLogin = async () => {
-      setGoogleAuthBusy(true);
-      setMessage(null);
-      setAuthTab("login");
-      const result = await loginWithGoogleEmail(googleEmail, "login_page", googleName?.trim() || googleEmail);
+    setLoginBusy(true);
+    try {
+      const result = await loginWithCredentials(email, loginPassword, "login_page");
       if (!result.user) {
-        setLoginEmail(googleEmail.trim().toLowerCase());
         setMessage({ type: "error", text: getLoginFailureMessage(result.reason) });
-        clearGoogleQueryState();
-        setGoogleAuthBusy(false);
         return;
       }
-
-      setHasUsers(true);
+      await pullAuthUsersSnapshot();
       warmSharedStateAfterAuth();
-      clearGoogleQueryState();
-      router.replace("/menu");
-    };
-
-    void handleGoogleLogin();
-  }, [hydrated, router]);
-
-  const startGoogleLogin = (): void => {
-    setMessage(null);
-    if (typeof window !== "undefined") {
-      window.location.assign("/api/auth/google/start");
+      router.push("/menu");
+    } finally {
+      setLoginBusy(false);
     }
-  };
+  }
 
   if (!hydrated) {
     return (
@@ -304,47 +231,92 @@ export default function Page() {
             <img className="auth-brand-logo" src="/header-logo.svg" alt="REZIL ロゴ" />
           </div>
           <p className="auth-kicker">施工計画書自動発行ツール</p>
-          <h1>ログイン画面</h1>
-          <p className="auth-note">初めて利用する方は登録、登録済みの方はログインを選択してください。</p>
+          <h1>{isInitialSetup ? "初期管理者登録" : "ログイン / 利用申請"}</h1>
+          <p className="auth-note">
+            {isInitialSetup
+              ? "最初の管理者アカウントを登録してください。"
+              : "登録済みの方はログイン、初めて利用する方は利用申請を選択してください。"}
+          </p>
         </div>
 
-        <div className="auth-switch" role="tablist" aria-label="認証タブ">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={authTab === "register"}
-            className={`auth-switch-btn ${authTab === "register" ? "is-active" : ""}`}
-            onClick={() => setAuthTab("register")}
-          >
-            初めて利用する方
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={authTab === "login"}
-            className={`auth-switch-btn ${authTab === "login" ? "is-active" : ""}`}
-            onClick={() => setAuthTab("login")}
-          >
-            登録済みの方はこちら（ログイン）
-          </button>
-        </div>
+        {!isInitialSetup ? (
+          <div className="auth-switch" role="tablist" aria-label="認証メニュー">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activePane === "login"}
+              className={`auth-switch-btn ${activePane === "login" ? "is-active" : ""}`}
+              onClick={() => setActivePane("login")}
+            >
+              登録済みの方
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activePane === "register"}
+              className={`auth-switch-btn ${activePane === "register" ? "is-active" : ""}`}
+              onClick={() => setActivePane("register")}
+            >
+              初めて利用する方
+            </button>
+          </div>
+        ) : null}
 
-        {authTab === "register" ? (
-          <section className="auth-form" aria-label="ユーザー登録">
-            <p className="auth-section-title">{isInitialSetup ? "初期管理者登録" : "初めて利用する方（ユーザー登録）"}</p>
-            {isInitialSetup ? (
-              <>
+        {!isInitialSetup && activePane === "login" ? (
+          <section className="auth-form" aria-label="登録済みユーザー" role="tabpanel">
+            <p className="auth-section-title">登録済みの方はこちら</p>
+            <div className="auth-pending-box">
+              <p className="auth-pending-title">ログイン</p>
+              <p className="mini">登録済みのメールアドレスとパスワードで続行してください。</p>
+            </div>
+            <label className="field">
+              <span>メールアドレス</span>
+              <input
+                className="control"
+                type="email"
+                value={loginEmail}
+                onChange={(event) => setLoginEmail(event.target.value)}
+              />
+            </label>
+            <label className="field">
+              <span>パスワード</span>
+              <div className="password-control-wrap">
+                <input
+                  className="control password-control"
+                  type={showLoginPassword ? "text" : "password"}
+                  value={loginPassword}
+                  onChange={(event) => setLoginPassword(event.target.value)}
+                />
                 <button
                   type="button"
-                  className="auth-google-btn"
-                  onClick={startGoogleLogin}
-                  disabled={googleAuthBusy || !authBootstrapReady}
+                  className="password-visibility-btn"
+                  onClick={() => setShowLoginPassword((prev) => !prev)}
+                  aria-label={showLoginPassword ? "パスワードを非表示" : "パスワードを表示"}
                 >
-                  <span className="auth-google-icon" aria-hidden="true">G</span>
-                  Googleで初期管理者を開始
+                  <EyeIcon open={showLoginPassword} />
                 </button>
-                <div className="auth-divider"><span>または手入力で登録</span></div>
-              </>
+              </div>
+            </label>
+            <button
+              type="button"
+              className="btn btn-accent auth-login-btn"
+              style={AUTH_PRIMARY_BUTTON_STYLE}
+              onClick={onLogin}
+              disabled={loginBusy}
+            >
+              {loginBusy ? "確認中..." : "ログインして続行"}
+            </button>
+          </section>
+        ) : null}
+
+        {(isInitialSetup || activePane === "register") ? (
+          <section className="auth-form" aria-label="ユーザー登録" role="tabpanel">
+            <p className="auth-section-title">{isInitialSetup ? "初期管理者登録" : "初めて利用する方（ユーザー登録）"}</p>
+            {!isInitialSetup ? (
+              <div className="auth-pending-box">
+                <p className="auth-pending-title">利用申請はこちら</p>
+                <p className="mini">利用が必要な方は、ここから申請してください。承認後にログインできるようになります。</p>
+              </div>
             ) : null}
             <label className="field">
               <span>ユーザー名（フルネーム）</span>
@@ -389,7 +361,7 @@ export default function Page() {
               className="btn btn-accent auth-login-btn"
               style={AUTH_PRIMARY_BUTTON_STYLE}
               onClick={onRegister}
-              disabled={!authBootstrapReady || googleAuthBusy}
+              disabled={!authBootstrapReady}
             >
               {isInitialSetup ? "初期管理者を登録する" : "登録する"}
             </button>
@@ -400,53 +372,7 @@ export default function Page() {
               </div>
             ) : null}
           </section>
-        ) : (
-          <section className="auth-form" aria-label="ログイン">
-            <p className="auth-section-title">ログイン（登録済みユーザー）</p>
-            <button
-              type="button"
-              className="auth-google-btn"
-              onClick={startGoogleLogin}
-              disabled={googleAuthBusy}
-            >
-              <span className="auth-google-icon" aria-hidden="true">G</span>
-              Googleでログイン
-            </button>
-            <div className="auth-divider"><span>またはメールとパスワードでログイン</span></div>
-            <label className="field">
-              <span>メールアドレス</span>
-              <input className="control" type="email" value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} />
-            </label>
-            <label className="field">
-              <span>パスワード</span>
-              <div className="password-control-wrap">
-                <input
-                  className="control password-control"
-                  type={showLoginPassword ? "text" : "password"}
-                  value={loginPassword}
-                  onChange={(event) => setLoginPassword(event.target.value)}
-                />
-                <button
-                  type="button"
-                  className="password-visibility-btn"
-                  onClick={() => setShowLoginPassword((prev) => !prev)}
-                  aria-label={showLoginPassword ? "パスワードを非表示" : "パスワードを表示"}
-                >
-                  <EyeIcon open={showLoginPassword} />
-                </button>
-              </div>
-            </label>
-            <button
-              type="button"
-              className="btn btn-accent auth-login-btn"
-              style={AUTH_PRIMARY_BUTTON_STYLE}
-              onClick={onLogin}
-              disabled={!authBootstrapReady || !loginEmail.trim() || !loginPassword.trim() || googleAuthBusy}
-            >
-              {googleAuthBusy ? "Googleログインを処理中..." : "ログインして続行"}
-            </button>
-          </section>
-        )}
+        ) : null}
 
         {message ? <p className={`mini ${message.type === "error" ? "error-text" : "ok-text"}`}>{message.text}</p> : null}
       </section>

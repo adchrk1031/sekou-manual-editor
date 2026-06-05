@@ -50,7 +50,7 @@ if (existsSync(packageJsonPath)) {
   if (!packageJson.scripts || packageJson.scripts["smoke:routes"] !== "node scripts/safety/smoke-routes.mjs") {
     errors.push('package.json must define "smoke:routes": "node scripts/safety/smoke-routes.mjs"');
   }
-  if (!packageJson.scripts || packageJson.scripts["safety:full"] !== "npm run safety:check && npm run safety:check:deep && npm run safety:scope && npm run build && npm run smoke:routes") {
+  if (!packageJson.scripts || packageJson.scripts["safety:full"] !== "npm run safety:check && npm run safety:check:deep && npm run safety:scope && npm run build && npm run smoke:routes && npm run test:harness") {
     errors.push('package.json must define "safety:full" with the full safety gate command');
   }
 }
@@ -63,6 +63,7 @@ if (existsSync(readmePath)) {
     "PR build workflow",
     "現在の安全対策ステータス",
     "npm run safety:full",
+    "npm run test:harness",
     "safety:scope",
   ];
   for (const snippet of requiredReadmeSnippets) {

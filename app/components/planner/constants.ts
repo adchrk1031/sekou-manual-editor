@@ -1,6 +1,7 @@
 import { sanitizeCsvHeader } from "./utils/csv";
 import type {
   PartyCompanyTemplatePreset,
+  ProjectPreset,
   PdfTemplateId,
   PdfTemplatePreset,
   Project,
@@ -17,11 +18,14 @@ export const STORAGE_KEY = "sekou-tool-projects-v5";
 export const PROJECT_INDEX_STORAGE_KEY = "sekou-project-index-v1";
 export const PROJECT_DATA_STORAGE_PREFIX = "sekou-project-data-v1:";
 export const CSV_EDITOR_STORAGE_KEY = "sekou-csv-editor-v1";
+export const CSV_INTERNAL_ROW_ID_KEY = "__row_id";
+export const LOCAL_SAVE_META_STORAGE_KEY = "sekou-local-save-meta-v1";
 export const USERS_STORAGE_KEY = "sekou-tool-users-v1";
 export const TEST_EDITOR_SEED_STORAGE_KEY = "sekou-tool-test-editors-seeded-v2";
 export const AUDIT_STORAGE_KEY = "sekou-tool-audit-v1";
 export const REVISION_STORAGE_KEY = "sekou-tool-revision-v1";
 export const APPROVAL_NOTE_TEMPLATE_STORAGE_KEY = "sekou-tool-template-approval-note-v1";
+export const NOTICE_TEMPLATE_STORAGE_KEY = "sekou-tool-template-notice-v1";
 export const SCHEDULE_TEMPLATE_STORAGE_KEY = "sekou-tool-template-schedule-v1";
 export const SCHEDULE_PROCEDURE_TEMPLATE_STORAGE_KEY = "sekou-tool-template-schedule-procedures-v1";
 export const DETAIL_PHOTO_TEMPLATE_STORAGE_KEY = "sekou-tool-template-detail-photos-v1";
@@ -103,6 +107,61 @@ export const WORK_MASTER: WorkMaster[] = [
   { code: "GROUND_C", name: "C種接地是正", detailText: "C種接地抵抗値測定と是正工事を実施", defaultText: "C種接地是正" },
 ];
 
+export const PROJECT_PRESETS: ProjectPreset[] = [
+  {
+    id: "kouatsu_cable",
+    label: "高圧ケーブル交換工事",
+    workCodes: ["KOUATSU_CABLE"],
+    scheduleProcedureTemplateId: "proc_kouatsu_standard",
+    detailPhotoLabels: ["写真A（既設ケーブル）", "写真B（撤去状況）", "写真C（新設後）", "写真D（端末処理）"],
+    layoutPhotoLabels: ["写真A（配置図）", "写真B（ケーブルルート）", "写真C（端末盤）", "写真D（完了状況）"],
+    noticeTemplateId: "rezil_basic",
+  },
+  {
+    id: "pas",
+    label: "PAS交換工事",
+    workCodes: ["PAS"],
+    scheduleProcedureTemplateId: "proc_pas_ugs_standard",
+    detailPhotoLabels: ["写真A（既設PAS）", "写真B（撤去状況）", "写真C（新設PAS）", "写真D（動作確認）"],
+    layoutPhotoLabels: ["写真A（配置図）", "写真B（PAS周辺）", "写真C（引込設備）", "写真D（完了状況）"],
+    noticeTemplateId: "rezil_basic",
+  },
+  {
+    id: "ugs",
+    label: "UGS交換工事",
+    workCodes: ["UGS"],
+    scheduleProcedureTemplateId: "proc_pas_ugs_standard",
+    detailPhotoLabels: ["写真A（既設UGS）", "写真B（撤去状況）", "写真C（新設UGS）", "写真D（端末処理）"],
+    layoutPhotoLabels: ["写真A（配置図）", "写真B（UGS周辺）", "写真C（配管経路）", "写真D（完了状況）"],
+    noticeTemplateId: "rezil_basic",
+  },
+  {
+    id: "pas_ugs",
+    label: "PAS / UGS更新工事",
+    workCodes: ["PAS", "UGS"],
+    scheduleProcedureTemplateId: "proc_pas_ugs_standard",
+    detailPhotoLabels: ["写真A（既設設備）", "写真B（撤去状況）", "写真C（新設設備）", "写真D（復電確認）"],
+    layoutPhotoLabels: ["写真A（配置図）", "写真B（PAS設備）", "写真C（UGS設備）", "写真D（完了状況）"],
+    noticeTemplateId: "rezil_basic",
+  },
+  {
+    id: "digital_meter",
+    label: "デジタルメーター交換",
+    workCodes: [],
+    detailPhotoLabels: ["写真A（既設メーター）", "写真B（交換作業中）", "写真C（新設メーター）", "写真D（封印確認）"],
+    layoutPhotoLabels: ["写真A（配置図）", "写真B（メーター位置）", "写真C（共用部動線）", "写真D（完了状況）"],
+    noticeTemplateId: "rezil_meter",
+  },
+  {
+    id: "ntt_ae",
+    label: "NTTアノードエナジー案件",
+    workCodes: [],
+    detailPhotoLabels: ["写真A（着工前）", "写真B（施工中）", "写真C（施工後）", "写真D（その他）"],
+    layoutPhotoLabels: ["写真A（配置図）", "写真B（設備位置）", "写真C（共用部）", "写真D（完了状況）"],
+    noticeTemplateId: "nttae_basic",
+  },
+];
+
 export const DEFAULT_SCHEDULE_PROCEDURE_TEMPLATES: ScheduleProcedureTemplate[] = [
   {
     id: "proc_kouatsu_standard",
@@ -155,6 +214,7 @@ export const CSV_WORK_COLUMN_ALIASES: Record<WorkCode, string[]> = {
 
 export const CSV_PROJECT_FIELD_ALIASES = {
   projectId: ["project_id", "projectid", "案件ID", "案件id", "物件ID", "物件id", "pj_id"],
+  projectPresetId: ["project_preset_id", "project_preset", "工事テンプレート", "工事種別", "工事パターン"],
   propertyName: ["property_name", "propertyname", "物件名", "案件名", "建物名", "施設名"],
   propertyAddress: ["property_address", "propertyaddress", "住所", "所在地", "物件住所", "工事場所"],
   titleSubject: ["title_subject", "titlesubject", "件名", "工事件名", "工事名", "タイトル"],
@@ -179,6 +239,8 @@ export const CSV_PROJECT_FIELD_ALIASES = {
   pdfExportCount: ["pdf_export_count", "pdf_count", "PDF出力回数", "出力回数"],
   pdfLastExportedAt: ["pdf_last_exported_at", "last_pdf_exported_at", "PDF最終出力日時", "最終出力日時"],
   workList: ["工事項目", "作業項目", "selected_work_codes", "selected_works"],
+  noticeTemplateId: ["notice_template_id", "notice_template", "案内文テンプレート", "案内文パターン", "案内文種別"],
+  noticeUnitInspectionEnabled: ["notice_unit_inspection_enabled", "各戸点検有無", "各戸点検あり", "宅内点検有無", "専有部点検有無"],
   photoSlotALabel: ["photo_slot_a_label", "写真Aラベル"],
   photoSlotBLabel: ["photo_slot_b_label", "写真Bラベル"],
   photoSlotCLabel: ["photo_slot_c_label", "写真Cラベル"],
@@ -191,6 +253,7 @@ export const CSV_PROJECT_FIELD_ALIASES = {
 
 export const CSV_HEADER_JA_LABELS: Record<string, string> = {
   project_id: "案件ID",
+  project_preset_id: "工事テンプレート",
   property_name: "物件名",
   property_address: "住所",
   title_subject: "件名",
@@ -213,6 +276,8 @@ export const CSV_HEADER_JA_LABELS: Record<string, string> = {
   pdf_fax: "連絡先FAX",
   pdf_export_count: "PDF出力回数",
   pdf_last_exported_at: "PDF最終出力日時",
+  notice_template_id: "案内文テンプレート",
+  notice_unit_inspection_enabled: "各戸点検有無",
   photo_slot_a_label: "写真Aラベル",
   photo_slot_b_label: "写真Bラベル",
   photo_slot_c_label: "写真Cラベル",

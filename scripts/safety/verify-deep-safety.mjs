@@ -71,6 +71,7 @@ assertFileIncludes(".github/workflows/vercel-production.yml", [
   "npm run safety:scope",
   "npm run build",
   "npm run smoke:routes",
+  "npm run test:harness",
 ]);
 
 assertFileIncludes(".githooks/pre-push", [

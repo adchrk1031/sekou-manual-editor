@@ -3,6 +3,8 @@ import type { LoginAttemptLog } from "../../auth";
 import { ROLE_LABELS, USER_LIST_VISIBLE_COUNT } from "../constants";
 import { formatAuditAction, formatAuditDetail, formatAuditDetailForNonAdmin, formatAuditScreen, formatUserApprovedByLabel } from "../utils/audit";
 import type { AuditLog, ProjectRevision, UserAccount, UserApprovalStatus, UserCreateNotice, UserRole } from "../types";
+import type { StatusSummaryItem } from "./StatusSummaryPanel";
+import { StatusSummaryPanel } from "./StatusSummaryPanel";
 import { UiIcon } from "./UiIcon";
 
 type UserStats = {
@@ -54,7 +56,13 @@ type TrackingSectionProps = {
   accessLogs: LoginAttemptLog[];
   operationLogUserFilter: string;
   setOperationLogUserFilter: Dispatch<SetStateAction<string>>;
+  operationLogScreenFilter: string;
+  setOperationLogScreenFilter: Dispatch<SetStateAction<string>>;
+  operationLogActionFilter: string;
+  setOperationLogActionFilter: Dispatch<SetStateAction<string>>;
   adminAuditUserOptions: UserOption[];
+  adminAuditScreenOptions: string[];
+  adminAuditActionOptions: string[];
   saveManualRevision: () => void;
   exportLocalStorageData: () => void;
   importFileInputRef: MutableRefObject<HTMLInputElement | null>;
@@ -71,6 +79,11 @@ type TrackingSectionProps = {
   setOperationLogExpanded: Dispatch<SetStateAction<boolean>>;
   userScopedProjectAuditLogs: AuditLog[];
   userScopedGlobalAuditLogs: AuditLog[];
+  operationStatusItems: StatusSummaryItem[];
+  operationStatusFootnote: string;
+  operationRiskNotes: string[];
+  workspaceStatusItems: StatusSummaryItem[];
+  workspaceStatusFootnote: string;
 };
 
 export function TrackingSection({
@@ -108,7 +121,13 @@ export function TrackingSection({
   accessLogs,
   operationLogUserFilter,
   setOperationLogUserFilter,
+  operationLogScreenFilter,
+  setOperationLogScreenFilter,
+  operationLogActionFilter,
+  setOperationLogActionFilter,
   adminAuditUserOptions,
+  adminAuditScreenOptions,
+  adminAuditActionOptions,
   saveManualRevision,
   exportLocalStorageData,
   importFileInputRef,
@@ -125,6 +144,11 @@ export function TrackingSection({
   setOperationLogExpanded,
   userScopedProjectAuditLogs,
   userScopedGlobalAuditLogs,
+  operationStatusItems,
+  operationStatusFootnote,
+  operationRiskNotes,
+  workspaceStatusItems,
+  workspaceStatusFootnote,
 }: TrackingSectionProps) {
   if (!isTrackingMode) {
     return null;
@@ -160,6 +184,27 @@ export function TrackingSection({
           </div>
         )}
         {canAdmin ? <p className="mini">管理者/システム管理者はこの画面で、ユーザー管理・バックアップ保存・復元・操作履歴確認ができます。</p> : null}
+        <StatusSummaryPanel
+          compact
+          title="運用目安"
+          lead="このツールは localStorage 中心のため、人数・件数・画像量が増えるほど容量の影響を受けます。"
+          items={operationStatusItems}
+          footnote={
+            <>
+              <p className="mini">{operationStatusFootnote}</p>
+              {operationRiskNotes.map((note) => (
+                <p key={note} className="mini warn-text">{note}</p>
+              ))}
+            </>
+          }
+        />
+        <StatusSummaryPanel
+          compact
+          title="保存 / 復元状態"
+          lead="端末保存・サーバーバックアップ・共有同期のどこまで反映済みかをここで確認できます。"
+          items={workspaceStatusItems}
+          footnote={<p className="mini">{workspaceStatusFootnote}</p>}
+        />
 
         {canAdmin ? (
           <section className="sub-panel user-admin-panel">
@@ -329,18 +374,40 @@ export function TrackingSection({
                     ))}
                   </select>
                 </label>
+                <label className="field tracking-revision-select tracking-filter-select">
+                  <span>画面で絞り込み</span>
+                  <select className="control" value={operationLogScreenFilter} onChange={(event) => setOperationLogScreenFilter(event.target.value)}>
+                    <option value="all">全画面</option>
+                    {adminAuditScreenOptions.map((option) => (
+                      <option key={`operation_log_screen_${option}`} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field tracking-revision-select tracking-filter-select">
+                  <span>操作で絞り込み</span>
+                  <select className="control" value={operationLogActionFilter} onChange={(event) => setOperationLogActionFilter(event.target.value)}>
+                    <option value="all">全操作</option>
+                    {adminAuditActionOptions.map((option) => (
+                      <option key={`operation_log_action_${option}`} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <button type="button" className="btn btn-subtle tracking-history-action-btn" onClick={saveManualRevision} disabled={!canEditSelectedProject}>
                   <span className="btn-icon"><UiIcon name="save" /></span>現在内容を履歴保存
                 </button>
               </div>
               <div className="tracking-history-row">
-                <div className="mini">この端末のlocalStorage全データをJSONでダウンロードします。</div>
+                <div className="mini">この端末の業務データをJSONでダウンロードします。ログイン状態などの一時情報は含めません。</div>
                 <button type="button" className="btn btn-subtle tracking-history-action-btn" onClick={exportLocalStorageData}>
                   <span className="btn-icon"><UiIcon name="save" /></span>データをエクスポート
                 </button>
               </div>
               <div className="tracking-history-row">
-                <div className="mini">エクスポート済みJSONを読み込み、localStorageへ上書き保存します。</div>
+                <div className="mini">エクスポート済みJSONを読み込み、localStorageへ上書き保存します。実行前に現在データの自動バックアップをダウンロードし、失敗時は元の状態へ戻します。</div>
                 <div>
                   <input
                     ref={importFileInputRef}

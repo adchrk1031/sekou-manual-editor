@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { CSSProperties, ChangeEvent, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { clearSession, ensureUsers, getLoginAttempts, getLoginFailureMessage, getSessionUser, loginWithCredentials, pullAuthUsersSnapshot, pushAuthUsersSnapshot, type LoginAttemptLog } from "./auth";
+import { LOGIN_GUARD_STORAGE_KEY as AUTH_LOGIN_GUARD_STORAGE_KEY, SESSION_STORAGE_KEY as AUTH_SESSION_STORAGE_KEY, clearSession, createUserByAdmin, ensureUsers, getLoginAttempts, getLoginFailureMessage, getSessionUser, loginWithCredentials, pullAuthUsersSnapshot, pushAuthUsersSnapshot, type LoginAttemptLog } from "./auth";
 import {
   SHARED_STORAGE_RESYNC_INTERVAL_MS,
   SHARED_STORAGE_UPDATED_EVENT,
@@ -19,7 +19,7 @@ import {
   APPROVAL_NOTE_TEMPLATE_STORAGE_KEY,
   AUDIT_STORAGE_KEY,
   CSV_EDITOR_STORAGE_KEY,
-  CSV_PAGE_SIZE_OPTIONS,
+  CSV_INTERNAL_ROW_ID_KEY,
   CSV_PROJECT_FIELD_ALIASES,
   CSV_SAVE_DEBOUNCE_MS,
   CSV_WORK_COLUMN_ALIASES,
@@ -43,6 +43,7 @@ import {
   LAYOUT_TEMPLATE_STORAGE_KEY,
   LAYOUT_TEXT_FONT_OPTIONS,
   LEGACY_DATE_TRACE_DEBUG_KEY,
+  LOCAL_SAVE_META_STORAGE_KEY,
   MAX_ANNOTATION_HISTORY,
   MAX_AUDIT_LOGS,
   MAX_REVISIONS,
@@ -57,6 +58,7 @@ import {
   PDF_TEMPLATE_PRESETS,
   PDF_TEMPLATE_PRESET_MAP,
   PROJECT_DATA_STORAGE_PREFIX,
+  PROJECT_PRESETS,
   PROJECT_INDEX_STORAGE_KEY,
   PROJECT_SAVE_DEBOUNCE_MS,
   REVISION_STORAGE_KEY,
@@ -74,7 +76,55 @@ import {
   USER_LIST_VISIBLE_COUNT,
   WORK_MASTER,
 } from "./planner/constants";
-import { createCsvValueGetter, inferCsvHeaders, normalizeCsvRows, parseCsv, recordsToCsv } from "./planner/utils/csv";
+import { PdfApprovalPrintPages, PdfApprovalSection } from "./features/pdf/PdfApprovalSection";
+import { PdfLayoutPhotoPreview, PdfLayoutPhotoPrintPages } from "./features/pdf/PdfLayoutPhotoSection";
+import { PdfOrganizationPrintPages, PdfOrganizationSection } from "./features/pdf/PdfOrganizationSection";
+import { APPROVAL_REQUEST_TEMPLATE_MAP } from "./planner/approvalTemplates";
+import {
+  chunkItems,
+  formatByteSize,
+  getUsageTone,
+  OPERATION_LIMITS,
+  PDF_LAYOUT_LIMITS,
+} from "./planner/operationPolicy";
+import {
+  applyConfigSnapshotToLocalStorage,
+  fetchConfigSnapshot,
+  getLocalConfigSnapshotSignature,
+  hasLocalConfigData,
+  saveConfigSnapshot,
+  buildConfigPersistencePayloadFromLocalStorage,
+} from "./planner/configPersistence";
+import {
+  applyWorkspaceSnapshotToLocalStorage,
+  buildWorkspacePersistencePayload,
+  fetchWorkspaceSnapshot,
+  hasLocalWorkspaceData,
+  saveWorkspaceSnapshot,
+} from "./planner/workspacePersistence";
+import {
+  appendAuditLogEntry,
+  appendRevisionEntry,
+  buildCsvHeaderSyncEntry,
+  buildCsvRowSyncEntries,
+  buildProjectItemSyncEntries,
+  buildTemplateItemSyncEntriesFromLocalStorage,
+  deleteCsvRow as deleteCsvRowItem,
+  deleteProjectItem,
+  deleteTemplateItem,
+  saveCsvHeaders,
+  saveCsvRow,
+  saveProjectItem,
+  saveTemplateItem,
+} from "./planner/itemPersistence";
+import {
+  buildRestoreStatusValue,
+  readRestoreStatus,
+  writeRestoreStatus,
+  type RestoreStatus,
+  type RestoreSource,
+} from "./planner/restoreStatus";
+import { createCsvValueGetter, decodeCsvFile, inferCsvHeaders, normalizeCsvRows, parseCsv, recordsToCsv, repairCsvSnapshot, type CsvRepairStats } from "./planner/utils/csv";
 import { DAY_TOTAL_MINUTES, addDays, buildTimelineTicks, diffDays, formatDateRange, formatDateTimeRange, formatDateWithWeekday, formatShortDate, fromTimelineOffset, normalizeDate, normalizeDateTimeValue, normalizeTime, startOfDay, tickLabel, toBoolean, toHHMM, toMinutes, toTimelineOffset, todayLocalISO } from "./planner/utils/dateTime";
 import { parseStorageJson, stringifyForStorage } from "./planner/utils/storage";
 import {
@@ -138,8 +188,10 @@ import type {
   LayoutTemplatePayload,
   LocalStorageExportItem,
   LocalStorageExportPayload,
+  ApprovalRequestItem,
   NoticeAdviceItem,
   NoticeAdvicePhase,
+  NoticeTemplateId,
   NoticeOutageState,
   NoticeScheduleRow,
   NoticeWorkType,
@@ -151,6 +203,8 @@ import type {
   PhotoSlot,
   PhotoSlots,
   Project,
+  ProjectPreset,
+  ProjectPresetId,
   ProjectRevision,
   ProjectSnapshot,
   RelatedParty,
@@ -178,6 +232,7 @@ import { CsvEditorSection } from "./planner/ui/CsvEditorSection";
 import { TrackingSection } from "./planner/ui/TrackingSection";
 import { PdfCoverAndTocSection } from "./planner/ui/PdfCoverAndTocSection";
 import { PdfWorkOverviewPreview } from "./planner/ui/PdfWorkOverviewPreview";
+import { StatusSummaryPanel, type StatusSummaryItem } from "./planner/ui/StatusSummaryPanel";
 import { NoticePrintDocument, NoticeWorkspace } from "./features/notice/NoticeWorkspace";
 import { useCsvTableView } from "./features/csv/useCsvTableView";
 
@@ -463,6 +518,10 @@ function clonePhotoSlots(slots: PhotoSlots): PhotoSlots {
 
 function cloneLayoutAnnotations(annotations: LayoutAnnotation[]): LayoutAnnotation[] {
   return annotations.map((annotation) => ({ ...annotation }));
+}
+
+function cloneApprovalRequestItems(items: ApprovalRequestItem[]): ApprovalRequestItem[] {
+  return items.map((item) => ({ ...item }));
 }
 
 function cloneLayoutAnnotationsV2(annotations: LayoutAnnotationV2[]): LayoutAnnotationV2[] {
@@ -1316,6 +1375,23 @@ function fitOutageIntoRange(
   };
 }
 
+function shiftScheduleRowsByDateDelta(
+  rows: ScheduleRow[],
+  previousStart: string,
+  nextStart: string,
+  nextEnd: string,
+): ScheduleRow[] {
+  if (!previousStart || !nextStart || previousStart === nextStart) {
+    return rows.map((row) => fitRowIntoRange(row, nextStart, nextEnd));
+  }
+  const deltaDays = diffDays(previousStart, nextStart);
+  return rows.map((row) => fitRowIntoRange({
+    ...row,
+    startDate: addDays(row.startDate, deltaDays),
+    endDate: addDays(row.endDate, deltaDays),
+  }, nextStart, nextEnd));
+}
+
 function syncProjectWorkRange(project: Project): Project {
   const dates = [
     project.workDateStart,
@@ -1342,6 +1418,117 @@ function floorToStep(value: number, step: number): number {
 
 function ceilToStep(value: number, step: number): number {
   return Math.ceil(value / step) * step;
+}
+
+type LocalSaveState = "idle" | "dirty" | "saving" | "saved" | "error";
+type RemoteSyncState = "idle" | "pending" | "syncing" | "synced" | "error";
+
+type LocalSaveMeta = {
+  projectLastSavedAt?: string;
+  csvLastSavedAt?: string;
+};
+
+type SharedBootstrapRestoreFlags = {
+  workspace: boolean;
+  config: boolean;
+};
+
+function currentTimeLabel(): string {
+  return new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function formatSyncTimestampLabel(value: string | null | undefined): string {
+  if (!value) {
+    return "-";
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "-";
+  }
+  return parsed.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function readLocalSaveMeta(): LocalSaveMeta {
+  if (typeof window === "undefined") {
+    return {};
+  }
+  const parsed = parseStorageJson<LocalSaveMeta>(window.localStorage.getItem(LOCAL_SAVE_META_STORAGE_KEY));
+  if (!parsed || typeof parsed !== "object") {
+    return {};
+  }
+  return {
+    projectLastSavedAt: typeof parsed.projectLastSavedAt === "string" ? parsed.projectLastSavedAt : undefined,
+    csvLastSavedAt: typeof parsed.csvLastSavedAt === "string" ? parsed.csvLastSavedAt : undefined,
+  };
+}
+
+function writeLocalSaveMeta(patch: Partial<LocalSaveMeta>): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const current = readLocalSaveMeta();
+  const next = {
+    ...current,
+    ...patch,
+  };
+  window.localStorage.setItem(LOCAL_SAVE_META_STORAGE_KEY, JSON.stringify(next));
+}
+
+function buildRestoreStatusNote(workspaceSource: RestoreSource, configSource: RestoreSource): string {
+  if (workspaceSource === "json_import" || configSource === "json_import") {
+    return "JSONインポートした内容をこのタブで採用中です。";
+  }
+  if (workspaceSource === "server_backup" || configSource === "server_backup") {
+    return "この端末に保存が無かったため、サーバーバックアップから復元しました。";
+  }
+  if (workspaceSource === "shared_sync" || configSource === "shared_sync") {
+    return "共有同期で届いた内容をこの端末へ反映しました。";
+  }
+  if (workspaceSource === "browser_local" || configSource === "browser_local") {
+    return "この端末に保存されていた内容を優先して開いています。";
+  }
+  return "まだ復元対象のデータはありません。";
+}
+
+function canUserAccessProject(project: Project, user: UserAccount | null): boolean {
+  if (!user) {
+    return false;
+  }
+  if (isAdminLikeRole(user.role)) {
+    return true;
+  }
+  if (project.accessScope !== "private") {
+    return true;
+  }
+  return project.ownerUserId === user.id;
+}
+
+function canUserManageProjectAccess(project: Project, user: UserAccount | null): boolean {
+  if (!user) {
+    return false;
+  }
+  if (isAdminLikeRole(user.role)) {
+    return true;
+  }
+  return project.ownerUserId === user.id;
+}
+
+function canUserEditProject(project: Project, user: UserAccount | null): boolean {
+  if (!user || user.role === "viewer") {
+    return false;
+  }
+  if (isAdminLikeRole(user.role)) {
+    return true;
+  }
+  if (project.accessScope !== "private") {
+    return true;
+  }
+  return project.ownerUserId === user.id;
+}
+
+function describeProjectAccess(project: Project): string {
+  const ownerLabel = project.ownerUserName.trim() || "未設定";
+  return project.accessScope === "private" ? `自分専用 / 所有者: ${ownerLabel}` : `共有案件 / 所有者: ${ownerLabel}`;
 }
 
 function createScheduleFromWorks(project: Project): ScheduleRow[] {
@@ -1378,6 +1565,100 @@ function createScheduleFromWorks(project: Project): ScheduleRow[] {
       note: "",
     };
   });
+}
+
+function buildNoticeTemplatePatch(project: Project, noticeTemplateId: NoticeTemplateId): Partial<Project> {
+  const scenario = NOTICE_TEMPLATE_SCENARIOS[noticeTemplateId] ?? NOTICE_TEMPLATE_SCENARIOS.default;
+  const companyName = scenario.provider === "nttae" ? "NTTアノードエナジー株式会社" : "レジル株式会社";
+  const workLabel = scenario.meterReplacement ? "メーター交換および電気設備点検" : "電気設備点検";
+  const introLines = [
+    "平素より弊社サービスをご利用いただき誠にありがとうございます。",
+    `この度、以下日程にて${workLabel}を実施いたします。`,
+    scenario.unitInspectionEnabled
+      ? "停電当日に在宅をご希望される方を対象に、各戸の点検もあわせて実施いたします。"
+      : "今回は共用部および設備点検のみの実施で、各戸点検はございません。",
+    "お客さまにはご不便をお掛け致しますが、ご理解とご協力のほどよろしくお願い申し上げます。",
+  ];
+  const nextScheduleRows = createBlankProject({
+    workDateStart: project.workDateStart,
+    outageDateStart: project.outageDateStart,
+    outageTimeStart: project.outageTimeStart,
+    outageTimeEnd: project.outageTimeEnd,
+  }).noticeScheduleRows.map((row, index) => {
+    if (index > 0 || !scenario.meterReplacement) {
+      return row;
+    }
+    return {
+      ...row,
+      note: row.note ? `${row.note} / メーター交換あり` : "メーター交換あり",
+    };
+  });
+
+  return {
+    noticeTemplateId,
+    noticeSenderCompany: companyName,
+    noticeContactCompany: companyName,
+    noticeHeadline: `${workLabel}に伴う全館停電のお知らせ`,
+    noticeIntroText: introLines.join("\n"),
+    noticeUnitInspectionEnabled: scenario.unitInspectionEnabled,
+    noticePrivateAreaText: scenario.meterReplacement
+      ? "【専有部】家電製品（電気で作動するもの全て）、水道、電力量計まわり\n※専有部についてのご注意は裏面をご覧ください"
+      : project.noticePrivateAreaText,
+    noticeCommonAreaText: scenario.meterReplacement
+      ? "【共用部】エレベーター、オートロック式ドア、インターホン、宅配ボックス、機械式駐車場、共用計器類など\n※上記設備は停電中ご利用いただけませんのでご注意ください"
+      : project.noticeCommonAreaText,
+    noticeScheduleRows: nextScheduleRows,
+  };
+}
+
+function applyPhotoLabels(slots: PhotoSlots, labels: string[]): PhotoSlots {
+  return slots.map((slot, index) => ({
+    ...slot,
+    label: labels[index] || slot.label,
+  }));
+}
+
+function applyProjectPreset(
+  project: Project,
+  presetId: ProjectPresetId,
+  options: { overwriteScheduleRows?: boolean; overwriteNotice?: boolean } = {},
+): Project {
+  const preset = PROJECT_PRESET_MAP.get(presetId);
+  if (!preset) {
+    return {
+      ...project,
+      projectPresetId: "custom",
+      noticeTemplateId: project.noticeTemplateId || "default",
+    };
+  }
+
+  const scheduleTemplate = preset.scheduleProcedureTemplateId
+    ? DEFAULT_SCHEDULE_PROCEDURE_TEMPLATES.find((template) => template.id === preset.scheduleProcedureTemplateId)
+    : undefined;
+  const nextWorkCodes = preset.workCodes.length ? preset.workCodes : project.selectedWorkCodes;
+  const nextProjectBase: Project = {
+    ...project,
+    projectPresetId: preset.id,
+    selectedWorkCodes: nextWorkCodes,
+    detailPhotos: preset.detailPhotoLabels ? applyPhotoLabels(project.detailPhotos, preset.detailPhotoLabels) : project.detailPhotos,
+    layoutPhotos: preset.layoutPhotoLabels ? applyPhotoLabels(project.layoutPhotos, preset.layoutPhotoLabels) : project.layoutPhotos,
+    noticeTemplateId: preset.noticeTemplateId ?? project.noticeTemplateId,
+  };
+  const shouldReplaceScheduleRows = options.overwriteScheduleRows || nextProjectBase.scheduleRows.length === 0;
+  const nextWithSchedule = shouldReplaceScheduleRows
+    ? {
+        ...nextProjectBase,
+        scheduleRows: scheduleTemplate ? buildRowsFromProcedureTemplate(nextProjectBase, scheduleTemplate) : createScheduleFromWorks(nextProjectBase),
+      }
+    : nextProjectBase;
+
+  if (!preset.noticeTemplateId || !options.overwriteNotice) {
+    return nextWithSchedule;
+  }
+  return {
+    ...nextWithSchedule,
+    ...buildNoticeTemplatePatch(nextWithSchedule, preset.noticeTemplateId),
+  };
 }
 
 function mergeUniqueWorkCodes(baseCodes: WorkCode[], additionalCodes: WorkCode[]): WorkCode[] {
@@ -1480,6 +1761,75 @@ function normalizeWorkToken(value: string): string {
   return String(value ?? "").trim().toLowerCase().replace(/[ \t　_\-\/]/g, "");
 }
 
+function normalizeProjectPresetId(value: string): ProjectPresetId {
+  const normalized = normalizeWorkToken(value);
+  if (
+    normalized === "kouatsucable"
+    || normalized === "高圧ケーブル交換工事"
+    || normalized === "高圧ケーブル交換"
+    || normalized === "ケーブル交換工事"
+    || normalized === "設備改修ケーブル交換工事"
+  ) {
+    return "kouatsu_cable";
+  }
+  if (normalized === "pas" || normalized === "pas交換工事" || normalized === "パス交換工事" || normalized === "設備改修pas") {
+    return "pas";
+  }
+  if (normalized === "ugs" || normalized === "ugs交換工事" || normalized === "設備改修ugs") {
+    return "ugs";
+  }
+  if (normalized === "pasugs" || normalized === "pas/ugs更新工事" || normalized === "pasugs更新工事") {
+    return "pas_ugs";
+  }
+  if (normalized === "digitalmeter" || normalized === "デジタルメーター" || normalized === "デジタルメーター交換") {
+    return "digital_meter";
+  }
+  if (normalized === "nttae" || normalized === "nttアノードエナジー" || normalized === "nttanodeenergy") {
+    return "ntt_ae";
+  }
+  return "custom";
+}
+
+function normalizeNoticeTemplateId(value: string): NoticeTemplateId {
+  const normalized = normalizeWorkToken(value);
+  if (
+    normalized === "rezilmeter"
+    || normalized === "メーター交換あり"
+    || normalized === "メーター交換ありバージョン"
+    || normalized === "デジタルメーター"
+  ) {
+    return "rezil_meter";
+  }
+  if (normalized === "nttaebasic" || normalized === "nttae" || normalized === "nttアノードエナジー") {
+    return "nttae_basic";
+  }
+  if (normalized === "nttaemeter") {
+    return "nttae_meter";
+  }
+  if (normalized === "rezilbasic" || normalized === "レジル" || normalized === "設備改修") {
+    return "rezil_basic";
+  }
+  return "default";
+}
+
+function applyNoticeUnitInspectionSetting(project: Project, enabled: boolean): Project {
+  const withFlag = {
+    ...project,
+    noticeUnitInspectionEnabled: enabled,
+  };
+  const positiveLine = "停電当日に在宅をご希望される方を対象に、各戸の点検もあわせて実施いたします。";
+  const negativeLine = "今回は共用部および設備点検のみの実施で、各戸点検はございません。";
+  const nextIntroText = withFlag.noticeIntroText.includes(positiveLine)
+    ? withFlag.noticeIntroText.replace(positiveLine, enabled ? positiveLine : negativeLine)
+    : withFlag.noticeIntroText.includes(negativeLine)
+      ? withFlag.noticeIntroText.replace(negativeLine, enabled ? positiveLine : negativeLine)
+      : withFlag.noticeIntroText;
+  return {
+    ...withFlag,
+    noticeIntroText: nextIntroText,
+  };
+}
+
 function parseSelectedWorkCodes(getField: (...keys: string[]) => string): WorkCode[] {
   const selected = new Set<WorkCode>();
   (Object.entries(CSV_WORK_COLUMN_ALIASES) as [WorkCode, string[]][]).forEach(([code, aliases]) => {
@@ -1518,6 +1868,12 @@ function projectFromCsv(record: CsvRecord): Project | null {
   const outageDateStart = normalizeDate(getField(...CSV_PROJECT_FIELD_ALIASES.outageDateStart)) || startDate;
   const outageDateEnd = normalizeDate(getField(...CSV_PROJECT_FIELD_ALIASES.outageDateEnd)) || outageDateStart;
   const selectedWorkCodes = parseSelectedWorkCodes(getField);
+  const projectPresetId = normalizeProjectPresetId(getField(...CSV_PROJECT_FIELD_ALIASES.projectPresetId));
+  const csvNoticeTemplateId = normalizeNoticeTemplateId(getField(...CSV_PROJECT_FIELD_ALIASES.noticeTemplateId));
+  const hasCsvNoticeUnitInspection = hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.noticeUnitInspectionEnabled);
+  const csvNoticeUnitInspectionEnabled = hasCsvNoticeUnitInspection
+    ? toBoolean(getField(...CSV_PROJECT_FIELD_ALIASES.noticeUnitInspectionEnabled))
+    : undefined;
   const parsedExportCount = Number(getField(...CSV_PROJECT_FIELD_ALIASES.pdfExportCount));
   const normalizedExportCount = Number.isFinite(parsedExportCount) ? Math.max(0, Math.floor(parsedExportCount)) : 0;
   const parsedLastExportedAt = getField(...CSV_PROJECT_FIELD_ALIASES.pdfLastExportedAt).trim();
@@ -1535,6 +1891,7 @@ function projectFromCsv(record: CsvRecord): Project | null {
 
   const project = createBlankProject({
     projectId,
+    projectPresetId,
     propertyName: normalizedPropertyName || "新規案件",
     propertyAddress: getField(...CSV_PROJECT_FIELD_ALIASES.propertyAddress),
     titleSubject: getField(...CSV_PROJECT_FIELD_ALIASES.titleSubject) || "電気設備更新工事",
@@ -1562,6 +1919,7 @@ function projectFromCsv(record: CsvRecord): Project | null {
     pdfFax: getField(...CSV_PROJECT_FIELD_ALIASES.pdfFax),
     pdfExportCount: normalizedExportCount,
     pdfLastExportedAt: parsedLastExportedAt,
+    noticeTemplateId: csvNoticeTemplateId,
     layoutImageDataUrl: "",
     detailPhotos: createPhotoSlots([
       getField(...CSV_PROJECT_FIELD_ALIASES.photoSlotALabel) || "写真A（着工前）",
@@ -1589,7 +1947,21 @@ function projectFromCsv(record: CsvRecord): Project | null {
 
   project.flags = flags;
   project.scheduleRows = createScheduleFromWorks(project);
-  return project;
+  const resolvedNoticeTemplateId = csvNoticeTemplateId !== "default"
+    ? csvNoticeTemplateId
+    : (PROJECT_PRESET_MAP.get(projectPresetId)?.noticeTemplateId ?? "default");
+  const withPreset = projectPresetId !== "custom"
+    ? applyProjectPreset(project, projectPresetId, { overwriteScheduleRows: true, overwriteNotice: resolvedNoticeTemplateId !== "default" })
+    : project;
+  const withNoticeTemplate = resolvedNoticeTemplateId !== "default"
+    ? {
+        ...withPreset,
+        ...buildNoticeTemplatePatch(withPreset, resolvedNoticeTemplateId),
+      }
+    : withPreset;
+  return typeof csvNoticeUnitInspectionEnabled === "boolean"
+    ? applyNoticeUnitInspectionSetting(withNoticeTemplate, csvNoticeUnitInspectionEnabled)
+    : withNoticeTemplate;
 }
 
 function hasCsvValue(getField: (...keys: string[]) => string, aliases: readonly string[]): boolean {
@@ -1622,6 +1994,7 @@ function mergeProjectFromCsvRecord(existing: Project, record: CsvRecord): Projec
   const getField = createCsvValueGetter(record);
   const hasWorkDateStart = hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.workDateStart);
   const hasWorkDateEnd = hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.workDateEnd);
+  const hasProjectPreset = hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.projectPresetId);
   const hasOutageDateStart = hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.outageDateStart);
   const hasOutageDateEnd = hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.outageDateEnd);
   const hasOutageTimeStart = hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.outageTimeStart);
@@ -1630,11 +2003,13 @@ function mergeProjectFromCsvRecord(existing: Project, record: CsvRecord): Projec
   const hasSelectedWorks =
     hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.workList)
     || (Object.values(CSV_WORK_COLUMN_ALIASES) as string[][]).some((aliases) => hasCsvValue(getField, aliases));
+  const hasNoticeTemplate = hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.noticeTemplateId);
   const hasPdfExportCount = hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.pdfExportCount);
   const hasPdfLastExportedAt = hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.pdfLastExportedAt);
 
   const nextProject: Project = {
     ...existing,
+    projectPresetId: hasProjectPreset ? imported.projectPresetId : existing.projectPresetId,
     propertyName: hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.propertyName) ? imported.propertyName : existing.propertyName,
     propertyAddress: hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.propertyAddress) ? imported.propertyAddress : existing.propertyAddress,
     titleSubject: hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.titleSubject) ? imported.titleSubject : existing.titleSubject,
@@ -1660,6 +2035,7 @@ function mergeProjectFromCsvRecord(existing: Project, record: CsvRecord): Projec
     pdfFax: hasCsvValue(getField, CSV_PROJECT_FIELD_ALIASES.pdfFax) ? imported.pdfFax : existing.pdfFax,
     pdfExportCount: hasPdfExportCount ? imported.pdfExportCount : existing.pdfExportCount,
     pdfLastExportedAt: hasPdfLastExportedAt ? imported.pdfLastExportedAt : existing.pdfLastExportedAt,
+    noticeTemplateId: hasNoticeTemplate ? imported.noticeTemplateId : existing.noticeTemplateId,
     detailPhotos: patchPhotoSlotLabelsFromCsv(existing.detailPhotos, getField, [
       CSV_PROJECT_FIELD_ALIASES.photoSlotALabel,
       CSV_PROJECT_FIELD_ALIASES.photoSlotBLabel,
@@ -1725,6 +2101,20 @@ function mergeProjectFromCsvRecord(existing: Project, record: CsvRecord): Projec
     nextProject.noticeOutageTimeEnd = imported.noticeOutageTimeEnd;
   }
 
+  if (hasProjectPreset && imported.projectPresetId !== "custom") {
+    return applyProjectPreset(nextProject, imported.projectPresetId, {
+      overwriteScheduleRows: existing.scheduleRows.length === 0,
+      overwriteNotice: hasNoticeTemplate || imported.noticeTemplateId !== "default",
+    });
+  }
+
+  if (hasNoticeTemplate && imported.noticeTemplateId !== "default") {
+    return {
+      ...nextProject,
+      ...buildNoticeTemplatePatch(nextProject, imported.noticeTemplateId),
+    };
+  }
+
   return nextProject;
 }
 
@@ -1764,8 +2154,9 @@ function isDeferredRequiredKey(key: string): boolean {
 }
 
 function mergeProjectForNoticeFromCsv(existing: Project, imported: Project): Project {
-  return {
+  const merged = {
     ...existing,
+    projectPresetId: imported.projectPresetId,
     propertyName: imported.propertyName,
     propertyAddress: imported.propertyAddress,
     titleSubject: imported.titleSubject,
@@ -1800,6 +2191,7 @@ function mergeProjectForNoticeFromCsv(existing: Project, imported: Project): Pro
     noticePropertyName: imported.noticePropertyName,
     noticeRecipientName: imported.noticeRecipientName,
     noticeSenderCompany: imported.noticeSenderCompany,
+    noticeTemplateId: imported.noticeTemplateId,
     noticeHeadline: imported.noticeHeadline,
     noticeIntroText: imported.noticeIntroText,
     noticeMainWorkDate: imported.noticeMainWorkDate,
@@ -1818,10 +2210,78 @@ function mergeProjectForNoticeFromCsv(existing: Project, imported: Project): Pro
     noticeContactHours: imported.noticeContactHours,
     noticeAdviceItems: imported.noticeAdviceItems,
   };
+  if (imported.projectPresetId !== "custom") {
+    return applyProjectPreset(merged, imported.projectPresetId, {
+      overwriteScheduleRows: true,
+      overwriteNotice: imported.noticeTemplateId !== "default",
+    });
+  }
+  return imported.noticeTemplateId !== "default"
+    ? {
+        ...merged,
+        ...buildNoticeTemplatePatch(merged, imported.noticeTemplateId),
+      }
+    : merged;
 }
 
 const seedProjects: Project[] = [
 ];
+
+type MobileEditorSection = "pdf1" | "pdf2" | "pdf3" | "pdf4" | "pdf5" | "pdf6" | "pdf7";
+type NoticeScenarioProvider = "rezil" | "nttae";
+
+const MOBILE_EDITOR_SECTION_OPTIONS: Array<{ key: MobileEditorSection; label: string }> = [
+  { key: "pdf1", label: "PDF1 表紙" },
+  { key: "pdf2", label: "PDF2 目次" },
+  { key: "pdf3", label: "PDF3 工事概要" },
+  { key: "pdf4", label: "PDF4 写真" },
+  { key: "pdf5", label: "PDF5 承認" },
+  { key: "pdf6", label: "PDF6 体制" },
+  { key: "pdf7", label: "PDF7 配置図" },
+];
+
+const PROJECT_PRESET_MAP = new Map<ProjectPresetId, ProjectPreset>(
+  PROJECT_PRESETS.map((preset) => [preset.id, preset]),
+);
+
+const NOTICE_TEMPLATE_SCENARIOS: Record<
+  NoticeTemplateId,
+  { provider: NoticeScenarioProvider; meterReplacement: boolean; unitInspectionEnabled: boolean }
+> = {
+  default: { provider: "rezil", meterReplacement: false, unitInspectionEnabled: true },
+  rezil_basic: { provider: "rezil", meterReplacement: false, unitInspectionEnabled: true },
+  rezil_meter: { provider: "rezil", meterReplacement: true, unitInspectionEnabled: true },
+  nttae_basic: { provider: "nttae", meterReplacement: false, unitInspectionEnabled: true },
+  nttae_meter: { provider: "nttae", meterReplacement: true, unitInspectionEnabled: true },
+};
+
+const NOTICE_TEMPLATE_LABELS: Record<NoticeTemplateId, string> = {
+  default: "標準",
+  rezil_basic: "レジル / 標準",
+  rezil_meter: "レジル / メーター交換",
+  nttae_basic: "NTTアノードエナジー / 標準",
+  nttae_meter: "NTTアノードエナジー / メーター交換",
+};
+
+function isMobileFieldViewport(): boolean {
+  return typeof window !== "undefined" && window.matchMedia("(max-width: 1023px)").matches;
+}
+
+function getMobileEditorSectionForRequiredKey(key: string): MobileEditorSection {
+  if (key === "propertyName" || key === "coverRecipientSuffix" || key === "titleSubject") {
+    return "pdf1";
+  }
+  if (key === "detailPhotos") {
+    return "pdf4";
+  }
+  if (key === "relatedPartiesEnabled" || key.startsWith("relatedPartyCompany:")) {
+    return "pdf6";
+  }
+  if (key === "layoutAssets") {
+    return "pdf7";
+  }
+  return "pdf3";
+}
 
 export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv" | "tracking" | "notice" }) {
   const router = useRouter();
@@ -1830,15 +2290,28 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   const [projectSearchText, setProjectSearchText] = useState<string>("");
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [mobileEditorSection, setMobileEditorSection] = useState<MobileEditorSection>("pdf1");
   const [missingPanelOpen, setMissingPanelOpen] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [sharedStorageReady, setSharedStorageReady] = useState(false);
-  const [sharedSyncState, setSharedSyncState] = useState<"idle" | "pending" | "syncing" | "synced" | "error">("idle");
+  const [sharedSyncState, setSharedSyncState] = useState<RemoteSyncState>("idle");
+  const [workspaceDbSyncState, setWorkspaceDbSyncState] = useState<RemoteSyncState>("idle");
+  const [configDbSyncState, setConfigDbSyncState] = useState<RemoteSyncState>("idle");
   const [projectEditLock, setProjectEditLock] = useState<ProjectEditLock | null>(null);
   const [projectEditLockStatus, setProjectEditLockStatus] = useState<ProjectEditLockSyncResult["status"]>("idle");
   const [projectEditLockNotice, setProjectEditLockNotice] = useState("");
+  const [projectSaveState, setProjectSaveState] = useState<LocalSaveState>("idle");
+  const [csvSaveState, setCsvSaveState] = useState<LocalSaveState>("idle");
+  const [projectSaveError, setProjectSaveError] = useState("");
+  const [csvSaveError, setCsvSaveError] = useState("");
+  const [workspaceDbError, setWorkspaceDbError] = useState("");
+  const [configDbError, setConfigDbError] = useState("");
   const [lastSavedAt, setLastSavedAt] = useState("-");
+  const [lastCsvSavedAt, setLastCsvSavedAt] = useState("-");
   const [lastSharedSyncAt, setLastSharedSyncAt] = useState("-");
+  const [lastWorkspaceDbSavedAt, setLastWorkspaceDbSavedAt] = useState("-");
+  const [lastConfigDbSavedAt, setLastConfigDbSavedAt] = useState("-");
+  const [restoreStatus, setRestoreStatus] = useState<RestoreStatus | null>(() => readRestoreStatus());
   const [isOnline, setIsOnline] = useState<boolean>(() => (typeof navigator === "undefined" ? true : navigator.onLine));
   const [importStatus, setImportStatus] = useState("CSV未取込");
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
@@ -1898,6 +2371,8 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   const [accessLogExpanded, setAccessLogExpanded] = useState(false);
   const [operationLogExpanded, setOperationLogExpanded] = useState(false);
   const [operationLogUserFilter, setOperationLogUserFilter] = useState("all");
+  const [operationLogScreenFilter, setOperationLogScreenFilter] = useState("all");
+  const [operationLogActionFilter, setOperationLogActionFilter] = useState("all");
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [revisions, setRevisions] = useState<ProjectRevision[]>([]);
   const [selectedRevisionId, setSelectedRevisionId] = useState("");
@@ -1953,8 +2428,30 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   const projectSerializedCacheRef = useRef<Record<string, string>>({});
   const saveTimerRef = useRef<number | null>(null);
   const csvSaveTimerRef = useRef<number | null>(null);
+  const workspaceDbSaveTimerRef = useRef<number | null>(null);
+  const configDbSaveTimerRef = useRef<number | null>(null);
   const csvSerializedCacheRef = useRef("");
+  const projectAutosaveReadyRef = useRef(false);
+  const csvAutosaveReadyRef = useRef(false);
+  const workspaceDbAutosaveReadyRef = useRef(false);
+  const configDbAutosaveReadyRef = useRef(false);
+  const workspaceDbPrimeSyncRef = useRef(false);
+  const configDbPrimeSyncRef = useRef(false);
+  const skipNextProjectAutosaveRef = useRef(false);
+  const skipNextCsvAutosaveRef = useRef(false);
+  const skipNextWorkspaceDbAutosaveRef = useRef(false);
+  const skipNextConfigDbAutosaveRef = useRef(false);
   const sharedSyncTimerRef = useRef<number | null>(null);
+  const workspaceDbUpdatedAtRef = useRef<string | null>(null);
+  const configDbUpdatedAtRef = useRef<string | null>(null);
+  const configSnapshotSignatureRef = useRef("");
+  const projectItemDbSyncRef = useRef<Record<string, { serialized: string; updatedAt: string | null; sortOrder: number }>>({});
+  const csvRowDbSyncRef = useRef<Record<string, { serialized: string; updatedAt: string | null; rowOrder: number }>>({});
+  const csvHeaderDbSyncRef = useRef<{ serialized: string; updatedAt: string | null }>({ serialized: "", updatedAt: null });
+  const templateItemDbSyncRef = useRef<Record<string, { serialized: string; updatedAt: string | null }>>({});
+  const projectItemDbSeededRef = useRef(false);
+  const csvItemDbSeededRef = useRef(false);
+  const templateItemDbSeededRef = useRef(false);
   const outageTraceSeqRef = useRef(0);
   const layoutEditorSvgRef = useRef<SVGSVGElement | null>(null);
   const layoutEditorStageRef = useRef<HTMLDivElement | null>(null);
@@ -1963,11 +2460,12 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
   const layoutEditorHistorySuppressRef = useRef(false);
   const projectPickerRef = useRef<HTMLDivElement | null>(null);
   const importFileInputRef = useRef<HTMLInputElement | null>(null);
+  const sharedBootstrapRestoreRef = useRef<SharedBootstrapRestoreFlags>({ workspace: false, config: false });
   const projectsRef = useRef<Project[]>(projects);
   const csvHeadersRef = useRef<string[]>(csvHeaders);
   const csvDraftRowsRef = useRef<CsvRecord[]>(csvDraftRows);
 
-  const persistProjectsToStorage = useCallback((targetProjects: Project[]): void => {
+  const persistProjectsToStorage = useCallback((targetProjects: Project[]): boolean => {
     try {
       const nextRefCache: Record<string, Project> = {};
       const nextSerializedCache: Record<string, string> = {};
@@ -1996,11 +2494,358 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
       removeSharedStorageItem(STORAGE_KEY);
       projectRefCacheRef.current = nextRefCache;
       projectSerializedCacheRef.current = nextSerializedCache;
-      setLastSavedAt(new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
+      const savedAt = currentTimeLabel();
+      setLastSavedAt(savedAt);
+      writeLocalSaveMeta({ projectLastSavedAt: savedAt });
+      return true;
     } catch {
-      // ignore storage write errors
+      return false;
     }
   }, []);
+
+  const persistCsvEditorToStorage = useCallback((headers: string[], rows: CsvRecord[]): boolean => {
+    try {
+      const serialized = stringifyForStorage({ headers, rows });
+      if (serialized !== csvSerializedCacheRef.current) {
+        writeSharedStorageItem(CSV_EDITOR_STORAGE_KEY, serialized);
+        csvSerializedCacheRef.current = serialized;
+      }
+      const savedAt = currentTimeLabel();
+      setLastCsvSavedAt(savedAt);
+      writeLocalSaveMeta({ csvLastSavedAt: savedAt });
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const buildCurrentWorkspaceBackupPayload = useCallback(() => {
+    const projectIndex: string[] = [];
+    const projectDataById: Record<string, string> = {};
+
+    projectsRef.current.forEach((project) => {
+      projectIndex.push(project.projectId);
+      const cachedSerialized = projectSerializedCacheRef.current[project.projectId];
+      const cachedProject = projectRefCacheRef.current[project.projectId];
+      projectDataById[project.projectId] = cachedSerialized && cachedProject === project
+        ? cachedSerialized
+        : stringifyForStorage(project);
+    });
+
+    const csvEditorRaw = csvSerializedCacheRef.current || stringifyForStorage({
+      headers: csvHeadersRef.current,
+      rows: csvDraftRowsRef.current,
+    });
+
+    return buildWorkspacePersistencePayload(projectIndex, projectDataById, csvEditorRaw);
+  }, []);
+
+  const persistWorkspaceSnapshotNow = useCallback(async (
+    options?: { keepalive?: boolean },
+  ): Promise<boolean> => {
+    if (!hydrated || !currentUserId) {
+      return false;
+    }
+    if (!isOnline) {
+      setWorkspaceDbSyncState("pending");
+      return false;
+    }
+
+    setWorkspaceDbSyncState("syncing");
+    setWorkspaceDbError("");
+    const result = await saveWorkspaceSnapshot(
+      buildCurrentWorkspaceBackupPayload(),
+      workspaceDbUpdatedAtRef.current,
+      options,
+    );
+
+    if (!result.ok) {
+      setWorkspaceDbSyncState("error");
+      setWorkspaceDbError(
+        result.error === "conflict"
+          ? "別の端末で更新されたため、案件/CSVのサーバーバックアップを保留しました。"
+          : "案件/CSVのサーバーバックアップに失敗しました。",
+      );
+      return false;
+    }
+
+    workspaceDbUpdatedAtRef.current = result.updatedAt;
+    setLastWorkspaceDbSavedAt(formatSyncTimestampLabel(result.updatedAt));
+    setWorkspaceDbSyncState("synced");
+    setWorkspaceDbError("");
+    return true;
+  }, [buildCurrentWorkspaceBackupPayload, currentUserId, hydrated, isOnline]);
+
+  const persistConfigSnapshotNow = useCallback(async (
+    options?: { keepalive?: boolean },
+  ): Promise<boolean> => {
+    if (!hydrated || !currentUserId) {
+      return false;
+    }
+    if (!isOnline) {
+      setConfigDbSyncState("pending");
+      return false;
+    }
+
+    setConfigDbSyncState("syncing");
+    setConfigDbError("");
+    const result = await saveConfigSnapshot(
+      buildConfigPersistencePayloadFromLocalStorage(),
+      configDbUpdatedAtRef.current,
+      options,
+    );
+
+    if (!result.ok) {
+      setConfigDbSyncState("error");
+      setConfigDbError(
+        result.error === "conflict"
+          ? "別の端末で更新されたため、テンプレート/履歴のサーバーバックアップを保留しました。"
+          : "テンプレート/履歴のサーバーバックアップに失敗しました。",
+      );
+      return false;
+    }
+
+    configDbUpdatedAtRef.current = result.updatedAt;
+    configSnapshotSignatureRef.current = getLocalConfigSnapshotSignature();
+    setLastConfigDbSavedAt(formatSyncTimestampLabel(result.updatedAt));
+    setConfigDbSyncState("synced");
+    setConfigDbError("");
+    return true;
+  }, [currentUserId, hydrated, isOnline]);
+
+  const persistStructuredProjectItemsNow = useCallback(async (): Promise<boolean> => {
+    if (!hydrated || !currentUserId) {
+      return false;
+    }
+    if (!isOnline) {
+      setWorkspaceDbSyncState("pending");
+      return false;
+    }
+
+    const workspacePayload = buildCurrentWorkspaceBackupPayload();
+    const nextEntries = buildProjectItemSyncEntries(
+      workspacePayload.projectIndex,
+      workspacePayload.projectDataById,
+    );
+    const nextEntryMap = new Map(nextEntries.map((entry) => [entry.projectId, entry]));
+    const previousEntries = projectItemDbSyncRef.current;
+    const deletedProjectIds = Object.keys(previousEntries).filter((projectId) => !nextEntryMap.has(projectId));
+
+    if (!nextEntries.some((entry) => {
+      const previous = previousEntries[entry.projectId];
+      return !previous || previous.serialized !== entry.rawProject || previous.sortOrder !== entry.sortOrder;
+    }) && !deletedProjectIds.length) {
+      return true;
+    }
+
+    setWorkspaceDbSyncState("syncing");
+    setWorkspaceDbError("");
+    let resolvedConflict = false;
+
+    for (const entry of nextEntries) {
+      const previous = previousEntries[entry.projectId];
+      if (previous && previous.serialized === entry.rawProject && previous.sortOrder === entry.sortOrder) {
+        continue;
+      }
+      const result = await saveProjectItem(
+        entry,
+        previous?.updatedAt ?? workspaceDbUpdatedAtRef.current ?? null,
+      );
+      if (!result.ok) {
+        setWorkspaceDbSyncState("error");
+        setWorkspaceDbError("案件の構造化保存に失敗しました。ネットワークまたは競合状態をご確認ください。");
+        return false;
+      }
+      previousEntries[entry.projectId] = {
+        serialized: result.payload?.rawProject ?? entry.rawProject,
+        updatedAt: result.updatedAt,
+        sortOrder: entry.sortOrder,
+      };
+      resolvedConflict = resolvedConflict || result.resolvedConflict;
+    }
+
+    for (const projectId of deletedProjectIds) {
+      const previous = previousEntries[projectId];
+      const result = await deleteProjectItem(projectId, previous?.updatedAt ?? workspaceDbUpdatedAtRef.current ?? null);
+      if (!result.ok) {
+        setWorkspaceDbSyncState("error");
+        setWorkspaceDbError("削除した案件の構造化保存反映に失敗しました。");
+        return false;
+      }
+      delete previousEntries[projectId];
+      resolvedConflict = resolvedConflict || result.resolvedConflict;
+    }
+
+    setLastWorkspaceDbSavedAt(currentTimeLabel());
+    setWorkspaceDbSyncState("synced");
+    setWorkspaceDbError(resolvedConflict ? "他端末更新と重なった案件は自動マージして保存しました。" : "");
+    return true;
+  }, [
+    buildCurrentWorkspaceBackupPayload,
+    currentUserId,
+    hydrated,
+    isOnline,
+  ]);
+
+  const persistStructuredCsvItemsNow = useCallback(async (): Promise<boolean> => {
+    if (!hydrated || !currentUserId) {
+      return false;
+    }
+    if (!isOnline) {
+      setWorkspaceDbSyncState("pending");
+      return false;
+    }
+
+    const nextHeaderEntry = buildCsvHeaderSyncEntry(csvHeadersRef.current);
+    const nextHeaderSerialized = JSON.stringify(nextHeaderEntry.headers);
+    const nextRows = buildCsvRowSyncEntries(csvDraftRowsRef.current);
+    const nextRowMap = new Map(nextRows.map((entry) => [entry.rowId, entry]));
+    const previousRows = csvRowDbSyncRef.current;
+    const previousHeader = csvHeaderDbSyncRef.current;
+    const deletedRowIds = Object.keys(previousRows).filter((rowId) => !nextRowMap.has(rowId));
+    const hasHeaderChange = previousHeader.serialized !== nextHeaderSerialized;
+    const hasRowChange = nextRows.some((entry) => {
+      const previous = previousRows[entry.rowId];
+      return !previous || previous.serialized !== entry.rawJson || previous.rowOrder !== entry.rowOrder;
+    });
+
+    if (!hasHeaderChange && !hasRowChange && !deletedRowIds.length) {
+      return true;
+    }
+
+    setWorkspaceDbSyncState("syncing");
+    setWorkspaceDbError("");
+    let resolvedConflict = false;
+
+    if (nextHeaderEntry.headers.length) {
+      const headerResult = await saveCsvHeaders(
+        nextHeaderEntry,
+        previousHeader.updatedAt ?? workspaceDbUpdatedAtRef.current ?? null,
+      );
+      if (!headerResult.ok) {
+        setWorkspaceDbSyncState("error");
+        setWorkspaceDbError("CSVヘッダの構造化保存に失敗しました。");
+        return false;
+      }
+      csvHeaderDbSyncRef.current = {
+        serialized: JSON.stringify(headerResult.payload?.headers ?? nextHeaderEntry.headers),
+        updatedAt: headerResult.updatedAt,
+      };
+      resolvedConflict = resolvedConflict || headerResult.resolvedConflict;
+    }
+
+    for (const entry of nextRows) {
+      const previous = previousRows[entry.rowId];
+      if (previous && previous.serialized === entry.rawJson && previous.rowOrder === entry.rowOrder) {
+        continue;
+      }
+      const result = await saveCsvRow(
+        entry,
+        previous?.updatedAt ?? csvHeaderDbSyncRef.current.updatedAt ?? workspaceDbUpdatedAtRef.current ?? null,
+      );
+      if (!result.ok) {
+        setWorkspaceDbSyncState("error");
+        setWorkspaceDbError("CSV行の構造化保存に失敗しました。ネットワークまたは競合状態をご確認ください。");
+        return false;
+      }
+      previousRows[entry.rowId] = {
+        serialized: result.payload?.rawJson ?? entry.rawJson,
+        updatedAt: result.updatedAt,
+        rowOrder: entry.rowOrder,
+      };
+      resolvedConflict = resolvedConflict || result.resolvedConflict;
+    }
+
+    for (const rowId of deletedRowIds) {
+      const previous = previousRows[rowId];
+      const result = await deleteCsvRowItem(
+        rowId,
+        previous?.updatedAt ?? csvHeaderDbSyncRef.current.updatedAt ?? workspaceDbUpdatedAtRef.current ?? null,
+      );
+      if (!result.ok) {
+        setWorkspaceDbSyncState("error");
+        setWorkspaceDbError("削除したCSV行の構造化保存反映に失敗しました。");
+        return false;
+      }
+      delete previousRows[rowId];
+      resolvedConflict = resolvedConflict || result.resolvedConflict;
+    }
+
+    setLastWorkspaceDbSavedAt(currentTimeLabel());
+    setWorkspaceDbSyncState("synced");
+    setWorkspaceDbError(resolvedConflict ? "他端末更新と重なったCSV行は自動マージして保存しました。" : "");
+    return true;
+  }, [currentUserId, hydrated, isOnline]);
+
+  const persistStructuredTemplateItemsNow = useCallback(async (): Promise<boolean> => {
+    if (!hydrated || !currentUserId) {
+      return false;
+    }
+    if (!isOnline) {
+      setConfigDbSyncState("pending");
+      return false;
+    }
+
+    const nextEntries = buildTemplateItemSyncEntriesFromLocalStorage();
+    const nextEntryMap = new Map(nextEntries.map((entry) => [`${entry.storageKey}::${entry.itemId}`, entry]));
+    const previousEntries = templateItemDbSyncRef.current;
+    const deletedKeys = Object.keys(previousEntries).filter((key) => !nextEntryMap.has(key));
+
+    if (!nextEntries.some((entry) => {
+      const key = `${entry.storageKey}::${entry.itemId}`;
+      const previous = previousEntries[key];
+      return !previous || previous.serialized !== entry.rawJson;
+    }) && !deletedKeys.length) {
+      return true;
+    }
+
+    setConfigDbSyncState("syncing");
+    setConfigDbError("");
+    let resolvedConflict = false;
+
+    for (const entry of nextEntries) {
+      const key = `${entry.storageKey}::${entry.itemId}`;
+      const previous = previousEntries[key];
+      if (previous && previous.serialized === entry.rawJson) {
+        continue;
+      }
+      const result = await saveTemplateItem(
+        entry,
+        previous?.updatedAt ?? configDbUpdatedAtRef.current ?? null,
+      );
+      if (!result.ok) {
+        setConfigDbSyncState("error");
+        setConfigDbError("テンプレートの構造化保存に失敗しました。ネットワークまたは競合状態をご確認ください。");
+        return false;
+      }
+      previousEntries[key] = {
+        serialized: result.payload?.rawJson ?? entry.rawJson,
+        updatedAt: result.updatedAt,
+      };
+      resolvedConflict = resolvedConflict || result.resolvedConflict;
+    }
+
+    for (const key of deletedKeys) {
+      const previous = previousEntries[key];
+      const [storageKey, itemId] = key.split("::");
+      if (!storageKey || !itemId) {
+        continue;
+      }
+      const result = await deleteTemplateItem(storageKey, itemId, previous?.updatedAt ?? configDbUpdatedAtRef.current ?? null);
+      if (!result.ok) {
+        setConfigDbSyncState("error");
+        setConfigDbError("削除したテンプレートの構造化保存反映に失敗しました。");
+        return false;
+      }
+      delete previousEntries[key];
+      resolvedConflict = resolvedConflict || result.resolvedConflict;
+    }
+
+    setLastConfigDbSavedAt(currentTimeLabel());
+    setConfigDbSyncState("synced");
+    setConfigDbError(resolvedConflict ? "他端末更新と重なったテンプレートは自動マージして保存しました。" : "");
+    return true;
+  }, [currentUserId, hydrated, isOnline]);
 
   useEffect(() => {
     projectsRef.current = projects;
@@ -2010,6 +2855,67 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
     csvHeadersRef.current = csvHeaders;
     csvDraftRowsRef.current = csvDraftRows;
   }, [csvHeaders, csvDraftRows]);
+
+  useEffect(() => {
+    if (!hydrated || projectItemDbSeededRef.current) {
+      return;
+    }
+    const workspacePayload = buildCurrentWorkspaceBackupPayload();
+    const nextEntries = buildProjectItemSyncEntries(
+      workspacePayload.projectIndex,
+      workspacePayload.projectDataById,
+    );
+    projectItemDbSyncRef.current = Object.fromEntries(
+      nextEntries.map((entry) => [
+        entry.projectId,
+        {
+          serialized: entry.rawProject,
+          updatedAt: workspaceDbUpdatedAtRef.current,
+          sortOrder: entry.sortOrder,
+        },
+      ]),
+    );
+    projectItemDbSeededRef.current = true;
+  }, [buildCurrentWorkspaceBackupPayload, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated || csvItemDbSeededRef.current) {
+      return;
+    }
+    const nextRows = buildCsvRowSyncEntries(csvDraftRows);
+    csvRowDbSyncRef.current = Object.fromEntries(
+      nextRows.map((entry) => [
+        entry.rowId,
+        {
+          serialized: entry.rawJson,
+          updatedAt: workspaceDbUpdatedAtRef.current,
+          rowOrder: entry.rowOrder,
+        },
+      ]),
+    );
+    csvHeaderDbSyncRef.current = {
+      serialized: JSON.stringify(csvHeaders),
+      updatedAt: workspaceDbUpdatedAtRef.current,
+    };
+    csvItemDbSeededRef.current = true;
+  }, [csvDraftRows, csvHeaders, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated || templateItemDbSeededRef.current) {
+      return;
+    }
+    const nextEntries = buildTemplateItemSyncEntriesFromLocalStorage();
+    templateItemDbSyncRef.current = Object.fromEntries(
+      nextEntries.map((entry) => [
+        `${entry.storageKey}::${entry.itemId}`,
+        {
+          serialized: entry.rawJson,
+          updatedAt: configDbUpdatedAtRef.current,
+        },
+      ]),
+    );
+    templateItemDbSeededRef.current = true;
+  }, [hydrated]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -2032,9 +2938,26 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
 
   useEffect(() => {
     if (sharedSyncState === "synced") {
-      setLastSharedSyncAt(new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
+      setLastSharedSyncAt(currentTimeLabel());
     }
   }, [sharedSyncState]);
+
+  useEffect(() => {
+    const meta = readLocalSaveMeta();
+    if (meta.projectLastSavedAt) {
+      setLastSavedAt(meta.projectLastSavedAt);
+      setProjectSaveState("saved");
+    }
+    if (meta.csvLastSavedAt) {
+      setLastCsvSavedAt(meta.csvLastSavedAt);
+      setCsvSaveState("saved");
+    }
+  }, []);
+
+  const commitRestoreStatus = useCallback((nextStatus: RestoreStatus) => {
+    setRestoreStatus(nextStatus);
+    writeRestoreStatus(nextStatus);
+  }, []);
 
   const loadWorkspaceStateFromStorage = useCallback((preserveSelection: boolean): void => {
     try {
@@ -2081,6 +3004,7 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
       }
 
       if (loadedProjects.length > 0) {
+        skipNextProjectAutosaveRef.current = true;
         setProjects(loadedProjects);
         setSelectedId((prev) => {
           if (!preserveSelection) {
@@ -2108,16 +3032,28 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
         const parsed = parseStorageJson<{ headers?: string[]; rows?: CsvRecord[] }>(csvEditorRaw);
         if (parsed && Array.isArray(parsed.headers) && Array.isArray(parsed.rows)) {
           const headers = parsed.headers.filter((header) => typeof header === "string" && header.trim().length > 0);
-          const rows = normalizeCsvRows(parsed.rows, headers);
-          setCsvHeaders(headers);
+          const repairedSnapshot = repairCsvSnapshot(headers, parsed.rows);
+          const rows = normalizeCsvRows(repairedSnapshot.records, repairedSnapshot.headers);
+          skipNextCsvAutosaveRef.current = true;
+          setCsvHeaders(repairedSnapshot.headers);
           setCsvDraftRows(rows);
-          csvSerializedCacheRef.current = csvEditorRaw;
+          csvSerializedCacheRef.current = stringifyForStorage({
+            headers: repairedSnapshot.headers,
+            rows,
+          });
+          if (repairedSnapshot.stats.repairedCount > 0) {
+            setImportStatus(`旧CSV保存データの文字化けを ${repairedSnapshot.stats.repairedCount} 箇所補正しました。`);
+          } else if (repairedSnapshot.stats.unrecoverableCount > 0) {
+            setImportStatus(`旧CSV保存データに復元できない文字化けが ${repairedSnapshot.stats.unrecoverableCount} 箇所残っています。CSVを再取込してください。`);
+          }
         } else {
+          skipNextCsvAutosaveRef.current = true;
           setCsvHeaders([]);
           setCsvDraftRows([]);
           csvSerializedCacheRef.current = "";
         }
       } else {
+        skipNextCsvAutosaveRef.current = true;
         setCsvHeaders([]);
         setCsvDraftRows([]);
         csvSerializedCacheRef.current = "";
@@ -2184,8 +3120,14 @@ export default function PlannerApp({ mode = "editor" }: { mode?: "editor" | "csv
 useEffect(() => {
   let cancelled = false;
   const bootstrapSharedStorage = async () => {
+    const hadWorkspaceBeforePull = hasLocalWorkspaceData();
+    const hadConfigBeforePull = hasLocalConfigData();
     const pulled = await pullSharedStorageSnapshot();
     if (!cancelled) {
+      sharedBootstrapRestoreRef.current = {
+        workspace: pulled && !hadWorkspaceBeforePull && hasLocalWorkspaceData(),
+        config: pulled && !hadConfigBeforePull && hasLocalConfigData(),
+      };
       setSharedSyncState(pulled ? "synced" : "idle");
       setSharedStorageReady(true);
     }
@@ -2200,23 +3142,146 @@ useEffect(() => {
     if (!sharedStorageReady) {
       return;
     }
-    loadWorkspaceStateFromStorage(false);
-    setHydrated(true);
-  }, [sharedStorageReady, loadWorkspaceStateFromStorage]);
+    let cancelled = false;
+
+    const hydrateWorkspace = async (): Promise<void> => {
+      const sessionUser = getSessionUser();
+      const localWorkspaceExists = hasLocalWorkspaceData();
+      const localConfigExists = hasLocalConfigData();
+      let workspaceRestoreSource: RestoreSource = localWorkspaceExists
+        ? (sharedBootstrapRestoreRef.current.workspace ? "shared_sync" : "browser_local")
+        : "empty";
+      let configRestoreSource: RestoreSource = localConfigExists
+        ? (sharedBootstrapRestoreRef.current.config ? "shared_sync" : "browser_local")
+        : "empty";
+
+      if (sessionUser) {
+        if (!isOnline) {
+          workspaceDbPrimeSyncRef.current = localWorkspaceExists;
+          configDbPrimeSyncRef.current = localConfigExists;
+          setWorkspaceDbSyncState(localWorkspaceExists ? "pending" : "idle");
+          setConfigDbSyncState(localConfigExists ? "pending" : "idle");
+        } else {
+          setWorkspaceDbSyncState("syncing");
+          const snapshot = await fetchWorkspaceSnapshot();
+          if (cancelled) {
+            return;
+          }
+          if (snapshot.ok) {
+            workspaceDbUpdatedAtRef.current = snapshot.updatedAt;
+            setLastWorkspaceDbSavedAt(formatSyncTimestampLabel(snapshot.updatedAt));
+            if (!localWorkspaceExists && snapshot.exists && snapshot.payload) {
+              applyWorkspaceSnapshotToLocalStorage(snapshot.payload);
+              workspaceRestoreSource = "server_backup";
+              skipNextProjectAutosaveRef.current = true;
+              skipNextCsvAutosaveRef.current = true;
+              skipNextWorkspaceDbAutosaveRef.current = true;
+              projectItemDbSeededRef.current = false;
+              csvItemDbSeededRef.current = false;
+            }
+            workspaceDbPrimeSyncRef.current = localWorkspaceExists && !snapshot.exists;
+            setWorkspaceDbSyncState(snapshot.exists ? "synced" : (localWorkspaceExists ? "pending" : "idle"));
+            setWorkspaceDbError("");
+          } else {
+            workspaceDbPrimeSyncRef.current = localWorkspaceExists;
+            setWorkspaceDbSyncState(localWorkspaceExists ? "pending" : "error");
+            setWorkspaceDbError(
+              localWorkspaceExists
+                ? "サーバー状態を確認できなかったため、次回保存時に案件/CSVを再送します。"
+                : "案件/CSVのサーバーバックアップを読み込めませんでした。",
+            );
+          }
+
+          setConfigDbSyncState("syncing");
+          const configSnapshot = await fetchConfigSnapshot();
+          if (cancelled) {
+            return;
+          }
+          if (configSnapshot.ok) {
+            configDbUpdatedAtRef.current = configSnapshot.updatedAt;
+            setLastConfigDbSavedAt(formatSyncTimestampLabel(configSnapshot.updatedAt));
+            if (!localConfigExists && configSnapshot.exists && configSnapshot.payload) {
+              applyConfigSnapshotToLocalStorage(configSnapshot.payload);
+              configRestoreSource = "server_backup";
+              skipNextConfigDbAutosaveRef.current = true;
+              templateItemDbSeededRef.current = false;
+            }
+            configDbPrimeSyncRef.current = localConfigExists && !configSnapshot.exists;
+            setConfigDbSyncState(configSnapshot.exists ? "synced" : (localConfigExists ? "pending" : "idle"));
+            setConfigDbError("");
+          } else {
+            configDbPrimeSyncRef.current = localConfigExists;
+            setConfigDbSyncState(localConfigExists ? "pending" : "error");
+            setConfigDbError(
+              localConfigExists
+                ? "サーバー状態を確認できなかったため、次回保存時にテンプレート/履歴を再送します。"
+                : "テンプレート/履歴のサーバーバックアップを読み込めませんでした。",
+            );
+          }
+        }
+      }
+
+      loadWorkspaceStateFromStorage(false);
+      configSnapshotSignatureRef.current = getLocalConfigSnapshotSignature();
+      if (!cancelled) {
+        const computedRestoreStatus: RestoreStatus = {
+          version: 1,
+          recordedAt: currentTimeLabel(),
+          workspaceSource: workspaceRestoreSource,
+          configSource: configRestoreSource,
+          note: buildRestoreStatusNote(workspaceRestoreSource, configRestoreSource),
+          detail: `${buildRestoreStatusValue({
+            version: 1,
+            recordedAt: "",
+            workspaceSource: workspaceRestoreSource,
+            configSource: configRestoreSource,
+            note: "",
+          })} を採用しました。`,
+        };
+        const previousRestoreStatus = readRestoreStatus();
+        const shouldPreserveImportRestoreStatus = Boolean(
+          previousRestoreStatus
+          && (previousRestoreStatus.workspaceSource === "json_import" || previousRestoreStatus.configSource === "json_import")
+          && computedRestoreStatus.workspaceSource === "browser_local"
+          && computedRestoreStatus.configSource === "browser_local",
+        );
+        commitRestoreStatus(shouldPreserveImportRestoreStatus ? previousRestoreStatus as RestoreStatus : computedRestoreStatus);
+        setHydrated(true);
+      }
+    };
+
+    void hydrateWorkspace();
+    return () => {
+      cancelled = true;
+    };
+  }, [commitRestoreStatus, isOnline, loadWorkspaceStateFromStorage, sharedStorageReady]);
 
 useEffect(() => {
   if (!hydrated) {
     return;
   }
   const handleSharedStorageUpdated = () => {
+    skipNextWorkspaceDbAutosaveRef.current = true;
+    projectItemDbSeededRef.current = false;
+    csvItemDbSeededRef.current = false;
+    templateItemDbSeededRef.current = false;
     loadWorkspaceStateFromStorage(true);
+    configSnapshotSignatureRef.current = getLocalConfigSnapshotSignature();
     setSharedSyncState("synced");
+    commitRestoreStatus({
+      version: 1,
+      recordedAt: currentTimeLabel(),
+      workspaceSource: "shared_sync",
+      configSource: "shared_sync",
+      note: buildRestoreStatusNote("shared_sync", "shared_sync"),
+      detail: "共有同期で届いた内容をこの端末へ反映しました。",
+    });
   };
   window.addEventListener(SHARED_STORAGE_UPDATED_EVENT, handleSharedStorageUpdated);
   return () => {
       window.removeEventListener(SHARED_STORAGE_UPDATED_EVENT, handleSharedStorageUpdated);
     };
-  }, [hydrated, loadWorkspaceStateFromStorage]);
+  }, [commitRestoreStatus, hydrated, loadWorkspaceStateFromStorage]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2308,49 +3373,119 @@ useEffect(() => {
       window.clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
     }
-    persistProjectsToStorage(projectsRef.current);
+    setProjectSaveState("saving");
+    const projectSaved = persistProjectsToStorage(projectsRef.current);
+    setProjectSaveState(projectSaved ? "saved" : "error");
+    setProjectSaveError(projectSaved ? "" : "案件データの端末保存に失敗しました。容量またはブラウザ設定をご確認ください。");
 
     if (csvSaveTimerRef.current) {
       window.clearTimeout(csvSaveTimerRef.current);
       csvSaveTimerRef.current = null;
     }
-    const serializedCsv = stringifyForStorage({ headers: csvHeadersRef.current, rows: csvDraftRowsRef.current });
-    if (serializedCsv !== csvSerializedCacheRef.current) {
-      writeSharedStorageItem(CSV_EDITOR_STORAGE_KEY, serializedCsv);
-      csvSerializedCacheRef.current = serializedCsv;
-    }
+    setCsvSaveState("saving");
+    const csvSaved = persistCsvEditorToStorage(csvHeadersRef.current, csvDraftRowsRef.current);
+    setCsvSaveState(csvSaved ? "saved" : "error");
+    setCsvSaveError(csvSaved ? "" : "CSV下書きの端末保存に失敗しました。容量またはブラウザ設定をご確認ください。");
 
     if (sharedSyncTimerRef.current) {
       window.clearTimeout(sharedSyncTimerRef.current);
       sharedSyncTimerRef.current = null;
     }
+    if (workspaceDbSaveTimerRef.current) {
+      window.clearTimeout(workspaceDbSaveTimerRef.current);
+      workspaceDbSaveTimerRef.current = null;
+    }
+    if (configDbSaveTimerRef.current) {
+      window.clearTimeout(configDbSaveTimerRef.current);
+      configDbSaveTimerRef.current = null;
+    }
+
+    if (!projectSaved || !csvSaved) {
+      setSharedSyncState("error");
+      setWorkspaceDbSyncState("error");
+      return false;
+    }
+
+    let projectItemsOk = false;
+    if (currentUserId) {
+      projectItemsOk = await persistStructuredProjectItemsNow();
+    }
+
+    let csvItemsOk = false;
+    if (currentUserId) {
+      csvItemsOk = await persistStructuredCsvItemsNow();
+    }
+
+    let templateItemsOk = false;
+    if (currentUserId) {
+      templateItemsOk = await persistStructuredTemplateItemsNow();
+    }
+
+    let workspaceBackupOk = false;
+    if (currentUserId) {
+      workspaceBackupOk = await persistWorkspaceSnapshotNow();
+    }
+    let configBackupOk = false;
+    if (currentUserId) {
+      configBackupOk = await persistConfigSnapshotNow();
+    }
 
     if (!isOnline) {
       setSharedSyncState("pending");
-      return false;
+      return projectItemsOk && csvItemsOk && templateItemsOk && workspaceBackupOk && configBackupOk;
     }
 
     setSharedSyncState("syncing");
     const pushed = await pushSharedStorageSnapshot({ force: true });
     setSharedSyncState(pushed ? "synced" : "error");
-    return pushed;
-  }, [ensureSelectedProjectWriteLock, hydrated, isOnline, persistProjectsToStorage]);
+    return pushed && (!currentUserId || (projectItemsOk && csvItemsOk && templateItemsOk && workspaceBackupOk && configBackupOk));
+  }, [
+    currentUserId,
+    ensureSelectedProjectWriteLock,
+    hydrated,
+    isOnline,
+    persistCsvEditorToStorage,
+    persistConfigSnapshotNow,
+    persistStructuredCsvItemsNow,
+    persistStructuredProjectItemsNow,
+    persistStructuredTemplateItemsNow,
+    persistProjectsToStorage,
+    persistWorkspaceSnapshotNow,
+  ]);
 
   useEffect(() => {
     if (!hydrated) {
       return;
     }
+    if (!projectAutosaveReadyRef.current) {
+      projectAutosaveReadyRef.current = true;
+      if (skipNextProjectAutosaveRef.current) {
+        skipNextProjectAutosaveRef.current = false;
+        return;
+      }
+    }
+    if (skipNextProjectAutosaveRef.current) {
+      skipNextProjectAutosaveRef.current = false;
+      return;
+    }
+    setProjectSaveState("dirty");
+    setProjectSaveError("");
     if (saveTimerRef.current) {
       window.clearTimeout(saveTimerRef.current);
     }
     saveTimerRef.current = window.setTimeout(() => {
       void (async () => {
+        setProjectSaveState("saving");
         const lockOk = await ensureSelectedProjectWriteLock();
         if (!lockOk) {
           saveTimerRef.current = null;
+          setProjectSaveState("error");
+          setProjectSaveError("ほかのユーザーが編集中のため、案件データを保存できませんでした。");
           return;
         }
-        persistProjectsToStorage(projects);
+        const saved = persistProjectsToStorage(projects);
+        setProjectSaveState(saved ? "saved" : "error");
+        setProjectSaveError(saved ? "" : "案件データの端末保存に失敗しました。容量またはブラウザ設定をご確認ください。");
         saveTimerRef.current = null;
       })();
     }, PROJECT_SAVE_DEBOUNCE_MS);
@@ -2408,27 +3543,51 @@ useEffect(() => {
         window.clearTimeout(saveTimerRef.current);
         saveTimerRef.current = null;
       }
-      persistProjectsToStorage(projectsRef.current);
+      const projectSaved = persistProjectsToStorage(projectsRef.current);
+      setProjectSaveState(projectSaved ? "saved" : "error");
+      setProjectSaveError(projectSaved ? "" : "案件データの端末保存に失敗しました。容量またはブラウザ設定をご確認ください。");
       if (csvSaveTimerRef.current) {
         window.clearTimeout(csvSaveTimerRef.current);
         csvSaveTimerRef.current = null;
       }
-      const serialized = stringifyForStorage({ headers: csvHeadersRef.current, rows: csvDraftRowsRef.current });
-      if (serialized !== csvSerializedCacheRef.current) {
-        writeSharedStorageItem(CSV_EDITOR_STORAGE_KEY, serialized);
-        csvSerializedCacheRef.current = serialized;
+      const csvSaved = persistCsvEditorToStorage(csvHeadersRef.current, csvDraftRowsRef.current);
+      setCsvSaveState(csvSaved ? "saved" : "error");
+      setCsvSaveError(csvSaved ? "" : "CSV下書きの端末保存に失敗しました。容量またはブラウザ設定をご確認ください。");
+      if (sharedSyncTimerRef.current) {
+        window.clearTimeout(sharedSyncTimerRef.current);
+        sharedSyncTimerRef.current = null;
       }
-    if (sharedSyncTimerRef.current) {
-      window.clearTimeout(sharedSyncTimerRef.current);
-      sharedSyncTimerRef.current = null;
-    }
-    setSharedSyncState("syncing");
-    void pushSharedStorageSnapshot({ keepalive: true, force: true, timeoutMs: 1500 }).then((ok) => {
-      setSharedSyncState(ok ? "synced" : "error");
-    });
-  };
-  const handleVisibilityChange = () => {
-    if (document.visibilityState === "hidden") {
+      if (workspaceDbSaveTimerRef.current) {
+        window.clearTimeout(workspaceDbSaveTimerRef.current);
+        workspaceDbSaveTimerRef.current = null;
+      }
+      if (configDbSaveTimerRef.current) {
+        window.clearTimeout(configDbSaveTimerRef.current);
+        configDbSaveTimerRef.current = null;
+      }
+      if (!projectSaved || !csvSaved) {
+        setSharedSyncState("error");
+        setWorkspaceDbSyncState("error");
+        setConfigDbSyncState("error");
+        return;
+      }
+      if (currentUserId && isOnline) {
+        void persistStructuredProjectItemsNow();
+        void persistStructuredCsvItemsNow();
+        void persistStructuredTemplateItemsNow();
+        void persistWorkspaceSnapshotNow({ keepalive: true });
+        void persistConfigSnapshotNow({ keepalive: true });
+      } else if (currentUserId) {
+        setWorkspaceDbSyncState("pending");
+        setConfigDbSyncState("pending");
+      }
+      setSharedSyncState("syncing");
+      void pushSharedStorageSnapshot({ keepalive: true, force: true, timeoutMs: 1500 }).then((ok) => {
+        setSharedSyncState(ok ? "synced" : "error");
+      });
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
         flushNow();
       }
     };
@@ -2443,7 +3602,7 @@ useEffect(() => {
       window.removeEventListener("beforeunload", flushNow);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-}, [hydrated, persistProjectsToStorage]);
+  }, [currentUserId, hydrated, isOnline, persistConfigSnapshotNow, persistCsvEditorToStorage, persistProjectsToStorage, persistStructuredCsvItemsNow, persistStructuredProjectItemsNow, persistStructuredTemplateItemsNow, persistWorkspaceSnapshotNow]);
 
 useEffect(() => {
   if (!hydrated) {
@@ -2529,15 +3688,27 @@ useEffect(() => {
     if (!hydrated) {
       return;
     }
+    if (!csvAutosaveReadyRef.current) {
+      csvAutosaveReadyRef.current = true;
+      if (skipNextCsvAutosaveRef.current) {
+        skipNextCsvAutosaveRef.current = false;
+        return;
+      }
+    }
+    if (skipNextCsvAutosaveRef.current) {
+      skipNextCsvAutosaveRef.current = false;
+      return;
+    }
+    setCsvSaveState("dirty");
+    setCsvSaveError("");
     if (csvSaveTimerRef.current) {
       window.clearTimeout(csvSaveTimerRef.current);
     }
     csvSaveTimerRef.current = window.setTimeout(() => {
-      const serialized = stringifyForStorage({ headers: csvHeaders, rows: csvDraftRows });
-      if (serialized !== csvSerializedCacheRef.current) {
-        writeSharedStorageItem(CSV_EDITOR_STORAGE_KEY, serialized);
-        csvSerializedCacheRef.current = serialized;
-      }
+      setCsvSaveState("saving");
+      const saved = persistCsvEditorToStorage(csvHeaders, csvDraftRows);
+      setCsvSaveState(saved ? "saved" : "error");
+      setCsvSaveError(saved ? "" : "CSV下書きの端末保存に失敗しました。容量またはブラウザ設定をご確認ください。");
       csvSaveTimerRef.current = null;
     }, CSV_SAVE_DEBOUNCE_MS);
     return () => {
@@ -2546,7 +3717,199 @@ useEffect(() => {
         csvSaveTimerRef.current = null;
       }
     };
-  }, [csvHeaders, csvDraftRows, hydrated]);
+  }, [csvDraftRows, csvHeaders, hydrated, persistCsvEditorToStorage]);
+
+  useEffect(() => {
+    if (!hydrated || !currentUserId) {
+      return;
+    }
+    if (!workspaceDbAutosaveReadyRef.current) {
+      workspaceDbAutosaveReadyRef.current = true;
+      if (!workspaceDbPrimeSyncRef.current) {
+        return;
+      }
+    }
+    if (skipNextWorkspaceDbAutosaveRef.current) {
+      skipNextWorkspaceDbAutosaveRef.current = false;
+      return;
+    }
+
+    workspaceDbPrimeSyncRef.current = false;
+    setWorkspaceDbSyncState("pending");
+    setWorkspaceDbError("");
+
+    if (!isOnline) {
+      return;
+    }
+
+    if (workspaceDbSaveTimerRef.current) {
+      window.clearTimeout(workspaceDbSaveTimerRef.current);
+    }
+    workspaceDbSaveTimerRef.current = window.setTimeout(() => {
+      void (async () => {
+        await persistStructuredProjectItemsNow();
+        await persistStructuredCsvItemsNow();
+        await persistWorkspaceSnapshotNow();
+      })();
+      workspaceDbSaveTimerRef.current = null;
+    }, 1200);
+
+    return () => {
+      if (workspaceDbSaveTimerRef.current) {
+        window.clearTimeout(workspaceDbSaveTimerRef.current);
+        workspaceDbSaveTimerRef.current = null;
+      }
+    };
+  }, [
+    csvDraftRows,
+    csvHeaders,
+    currentUserId,
+    hydrated,
+    isOnline,
+    persistStructuredCsvItemsNow,
+    persistStructuredProjectItemsNow,
+    persistWorkspaceSnapshotNow,
+    projects,
+    users,
+    auditLogs,
+    revisions,
+    scheduleTemplates,
+    detailPhotoTemplates,
+    partyTemplates,
+    partyCompanyTemplates,
+    layoutTemplates,
+    approvalNoteTemplates,
+  ]);
+
+  useEffect(() => {
+    if (!hydrated || !currentUserId || !isOnline || workspaceDbSyncState !== "pending") {
+      return;
+    }
+    if (workspaceDbSaveTimerRef.current) {
+      return;
+    }
+    workspaceDbSaveTimerRef.current = window.setTimeout(() => {
+      void (async () => {
+        await persistStructuredProjectItemsNow();
+        await persistStructuredCsvItemsNow();
+        await persistWorkspaceSnapshotNow();
+      })();
+      workspaceDbSaveTimerRef.current = null;
+    }, 400);
+  }, [currentUserId, hydrated, isOnline, persistStructuredCsvItemsNow, persistStructuredProjectItemsNow, persistWorkspaceSnapshotNow, workspaceDbSyncState]);
+
+  useEffect(() => {
+    if (!hydrated || !currentUserId) {
+      return;
+    }
+    if (!configDbAutosaveReadyRef.current) {
+      configDbAutosaveReadyRef.current = true;
+      if (!configDbPrimeSyncRef.current) {
+        return;
+      }
+    }
+    if (skipNextConfigDbAutosaveRef.current) {
+      skipNextConfigDbAutosaveRef.current = false;
+      configSnapshotSignatureRef.current = getLocalConfigSnapshotSignature();
+      return;
+    }
+
+    const nextSignature = getLocalConfigSnapshotSignature();
+    if (nextSignature === configSnapshotSignatureRef.current) {
+      return;
+    }
+
+    configDbPrimeSyncRef.current = false;
+    setConfigDbSyncState("pending");
+    setConfigDbError("");
+
+    if (!isOnline) {
+      return;
+    }
+
+    if (configDbSaveTimerRef.current) {
+      window.clearTimeout(configDbSaveTimerRef.current);
+    }
+    configDbSaveTimerRef.current = window.setTimeout(() => {
+      void (async () => {
+        await persistStructuredTemplateItemsNow();
+        await persistConfigSnapshotNow();
+      })();
+      configDbSaveTimerRef.current = null;
+    }, 1200);
+
+    return () => {
+      if (configDbSaveTimerRef.current) {
+        window.clearTimeout(configDbSaveTimerRef.current);
+        configDbSaveTimerRef.current = null;
+      }
+    };
+  }, [
+    approvalNoteTemplates,
+    auditLogs,
+    currentUserId,
+    detailPhotoTemplates,
+    hydrated,
+    isOnline,
+    layoutTemplates,
+    partyCompanyTemplates,
+    partyTemplates,
+    persistConfigSnapshotNow,
+    persistStructuredTemplateItemsNow,
+    revisions,
+    scheduleProcedureTemplates,
+    scheduleTemplates,
+  ]);
+
+  useEffect(() => {
+    if (!hydrated || !currentUserId || !isOnline || configDbSyncState !== "pending") {
+      return;
+    }
+    if (configDbSaveTimerRef.current) {
+      return;
+    }
+    configDbSaveTimerRef.current = window.setTimeout(() => {
+      void (async () => {
+        await persistStructuredTemplateItemsNow();
+        await persistConfigSnapshotNow();
+      })();
+      configDbSaveTimerRef.current = null;
+    }, 400);
+  }, [configDbSyncState, currentUserId, hydrated, isOnline, persistConfigSnapshotNow, persistStructuredTemplateItemsNow]);
+
+  useEffect(() => {
+    if (!hydrated || !currentUserId) {
+      return;
+    }
+
+    const inspectLocalConfigSnapshot = () => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+      const nextSignature = getLocalConfigSnapshotSignature();
+      if (nextSignature === configSnapshotSignatureRef.current) {
+        return;
+      }
+      setConfigDbSyncState("pending");
+      setConfigDbError("");
+      if (isOnline && !configDbSaveTimerRef.current) {
+        configDbSaveTimerRef.current = window.setTimeout(() => {
+          void (async () => {
+            await persistStructuredTemplateItemsNow();
+            await persistConfigSnapshotNow();
+          })();
+          configDbSaveTimerRef.current = null;
+        }, 1200);
+      }
+    };
+
+    const interval = window.setInterval(inspectLocalConfigSnapshot, 2500);
+    document.addEventListener("visibilitychange", inspectLocalConfigSnapshot);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", inspectLocalConfigSnapshot);
+    };
+  }, [currentUserId, hydrated, isOnline, persistConfigSnapshotNow, persistStructuredTemplateItemsNow]);
 
   useEffect(() => {
     try {
@@ -2681,22 +4044,30 @@ useEffect(() => {
     setPartyTemplateSelections(EMPTY_PARTY_TEMPLATE_SELECTIONS);
   }, [selectedId]);
 
+  const currentUser = useMemo(
+    () => users.find((user) => user.id === currentUserId && user.active && user.approvalStatus === "approved") ?? null,
+    [users, currentUserId],
+  );
+  const visibleProjects = useMemo(
+    () => projects.filter((project) => canUserAccessProject(project, currentUser)),
+    [currentUser, projects],
+  );
   const selectedProject = useMemo(
     () =>
-      projects.find((project) => project.projectId === selectedId)
+      visibleProjects.find((project) => project.projectId === selectedId)
       ?? createBlankProject({ projectId: "" }),
-    [projects, selectedId],
+    [visibleProjects, selectedId],
   );
   const hasSelectedProject = useMemo(
-    () => !!selectedId && projects.some((project) => project.projectId === selectedId),
-    [projects, selectedId],
+    () => !!selectedId && visibleProjects.some((project) => project.projectId === selectedId),
+    [visibleProjects, selectedId],
   );
   const filteredProjectOptions = useMemo(() => {
     const keyword = projectSearchText.trim().toLowerCase();
     if (!keyword) {
-      return projects.slice(0, 100);
+      return visibleProjects.slice(0, 100);
     }
-    return projects
+    return visibleProjects
       .filter((project) => {
         const haystack = [
           project.projectId,
@@ -2705,11 +4076,7 @@ useEffect(() => {
         return haystack.includes(keyword);
       })
       .slice(0, 100);
-  }, [projects, projectSearchText]);
-  const currentUser = useMemo(
-    () => users.find((user) => user.id === currentUserId && user.active && user.approvalStatus === "approved") ?? null,
-    [users, currentUserId],
-  );
+  }, [visibleProjects, projectSearchText]);
   const userScopedProjectAuditLogs = useMemo(() => {
     if (!currentUser) {
       return [] as AuditLog[];
@@ -2728,11 +4095,19 @@ useEffect(() => {
     if (!currentUser || !isAdminLikeRole(currentUser.role)) {
       return [] as AuditLog[];
     }
-    if (operationLogUserFilter === "all") {
-      return auditLogs;
-    }
-    return auditLogs.filter((log) => log.userId === operationLogUserFilter);
-  }, [auditLogs, currentUser, operationLogUserFilter]);
+    return auditLogs.filter((log) => {
+      if (operationLogUserFilter !== "all" && log.userId !== operationLogUserFilter) {
+        return false;
+      }
+      if (operationLogScreenFilter !== "all" && formatAuditScreen(log.action) !== operationLogScreenFilter) {
+        return false;
+      }
+      if (operationLogActionFilter !== "all" && formatAuditAction(log.action) !== operationLogActionFilter) {
+        return false;
+      }
+      return true;
+    });
+  }, [auditLogs, currentUser, operationLogActionFilter, operationLogScreenFilter, operationLogUserFilter]);
   const adminVisibleAuditLogs = useMemo(
     () => (operationLogExpanded ? adminFilteredAuditLogs : adminFilteredAuditLogs.slice(0, 5)),
     [adminFilteredAuditLogs, operationLogExpanded],
@@ -2754,6 +4129,18 @@ useEffect(() => {
       .map(([id, label]) => ({ id, label }))
       .sort((a, b) => a.label.localeCompare(b.label, "ja-JP"));
   }, [auditLogs, currentUser, users]);
+  const adminAuditScreenOptions = useMemo(() => {
+    if (!currentUser || !isAdminLikeRole(currentUser.role)) {
+      return [] as string[];
+    }
+    return Array.from(new Set(auditLogs.map((log) => formatAuditScreen(log.action)))).sort((a, b) => a.localeCompare(b, "ja-JP"));
+  }, [auditLogs, currentUser]);
+  const adminAuditActionOptions = useMemo(() => {
+    if (!currentUser || !isAdminLikeRole(currentUser.role)) {
+      return [] as string[];
+    }
+    return Array.from(new Set(auditLogs.map((log) => formatAuditAction(log.action)))).sort((a, b) => a.localeCompare(b, "ja-JP"));
+  }, [auditLogs, currentUser]);
   const canEdit = !!currentUser && currentUser.role !== "viewer";
   const canAdmin = !!currentUser && isAdminLikeRole(currentUser.role);
   const canApprove = !!currentUser && (isAdminLikeRole(currentUser.role) || currentUser.role === "editor");
@@ -2761,7 +4148,9 @@ useEffect(() => {
     () => formatProjectEditLockNotice(projectEditLock, currentUser?.id),
     [currentUser?.id, projectEditLock],
   );
-  const canEditSelectedProject = canEdit && (!hasSelectedProject || projectEditLockStatus !== "locked_by_other");
+  const canEditSelectedProject = canEdit
+    && (!hasSelectedProject || canUserEditProject(selectedProject, currentUser))
+    && (!hasSelectedProject || projectEditLockStatus !== "locked_by_other");
   const cropEditorFrameAspectRatio = useMemo(() => {
     if (!cropEditorImageSize || !cropEditorImageSize.width || !cropEditorImageSize.height) {
       return 4 / 3;
@@ -2786,15 +4175,51 @@ useEffect(() => {
     const pendingUsers = users.filter((user) => user.approvalStatus === "pending").length;
     return { total, admins, activeAdmins, activeUsers, approvedUsers, pendingUsers };
   }, [users]);
+  const localStorageUsageBytes = useMemo(() => {
+    if (typeof window === "undefined") {
+      return 0;
+    }
+    let total = 0;
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+      if (!key || !key.startsWith("sekou-")) {
+        continue;
+      }
+      const value = window.localStorage.getItem(key) ?? "";
+      total += new Blob([key]).size + new Blob([value]).size;
+    }
+    return total;
+  }, [
+    auditLogs,
+    csvDraftRows,
+    csvHeaders,
+    detailPhotoTemplates,
+    layoutTemplates,
+    partyCompanyTemplates,
+    partyTemplates,
+    projects,
+    revisions,
+    scheduleTemplates,
+    users,
+  ]);
   const otherProjects = useMemo(
-    () => projects.filter((project) => project.projectId !== selectedProject.projectId),
-    [projects, selectedProject.projectId],
+    () => visibleProjects.filter((project) => project.projectId !== selectedProject.projectId),
+    [visibleProjects, selectedProject.projectId],
   );
   const hasOtherProjects = otherProjects.length > 0;
   const copySourceProject = useMemo(
-    () => projects.find((project) => project.projectId === copySourceProjectId),
-    [projects, copySourceProjectId],
+    () => visibleProjects.find((project) => project.projectId === copySourceProjectId),
+    [visibleProjects, copySourceProjectId],
   );
+  useEffect(() => {
+    if (!selectedId) {
+      return;
+    }
+    if (visibleProjects.some((project) => project.projectId === selectedId)) {
+      return;
+    }
+    setSelectedId("");
+  }, [selectedId, visibleProjects]);
   const selectedScheduleTemplate = useMemo(
     () => scheduleTemplates.find((template) => template.id === selectedScheduleTemplateId),
     [scheduleTemplates, selectedScheduleTemplateId],
@@ -2890,10 +4315,27 @@ useEffect(() => {
       detail,
     };
     setAuditLogs((prev) => [log, ...prev].slice(0, MAX_AUDIT_LOGS));
+    if (!hydrated || !currentUserId) {
+      return;
+    }
+    if (!isOnline) {
+      setConfigDbSyncState("pending");
+      return;
+    }
+    void appendAuditLogEntry(log).then((result) => {
+      if (result.ok) {
+        setLastConfigDbSavedAt(formatSyncTimestampLabel(result.updatedAt));
+        setConfigDbSyncState("synced");
+        return;
+      }
+      setConfigDbSyncState("pending");
+      setConfigDbError("監査ログのサーバー追記に失敗しました。ローカル保存から再送します。");
+    });
   }
 
   function buildSnapshot(project: Project): ProjectSnapshot {
     return {
+      projectPresetId: project.projectPresetId,
       propertyName: project.propertyName,
       propertyAddress: project.propertyAddress,
       titleSubject: project.titleSubject,
@@ -2907,6 +4349,7 @@ useEffect(() => {
       selectedWorkCodes: [...project.selectedWorkCodes],
       noteSpecial: project.noteSpecial,
       noteApprovalExtra: project.noteApprovalExtra,
+      approvalRequestItems: cloneApprovalRequestItems(project.approvalRequestItems),
       coverRecipientSuffix: project.coverRecipientSuffix,
       pdfTemplateId: project.pdfTemplateId,
       pdfCompanyName: project.pdfCompanyName,
@@ -2918,6 +4361,7 @@ useEffect(() => {
       pdfFax: project.pdfFax,
       pdfExportCount: project.pdfExportCount,
       pdfLastExportedAt: project.pdfLastExportedAt,
+      noticeTemplateId: project.noticeTemplateId,
       noticePropertyName: project.noticePropertyName,
       noticeRecipientName: project.noticeRecipientName,
       noticeSenderCompany: project.noticeSenderCompany,
@@ -2941,6 +4385,7 @@ useEffect(() => {
       layoutAnnotations: cloneLayoutAnnotations(project.layoutAnnotations),
       layoutAnnotationsV2: cloneLayoutAnnotationsV2(project.layoutAnnotationsV2),
       scheduleRows: project.scheduleRows.map((row) => ({ ...row })),
+      deletedScheduleRowIds: [...project.deletedScheduleRowIds],
       relatedParties: cloneRelatedParties(project.relatedParties),
     };
   }
@@ -2960,11 +4405,50 @@ useEffect(() => {
     };
     setRevisions((prev) => [revision, ...prev].slice(0, MAX_REVISIONS));
     setSelectedRevisionId(revision.id);
+    if (!hydrated || !currentUserId) {
+      return;
+    }
+    if (!isOnline) {
+      setConfigDbSyncState("pending");
+      return;
+    }
+    void appendRevisionEntry(revision).then((result) => {
+      if (result.ok) {
+        setLastConfigDbSavedAt(formatSyncTimestampLabel(result.updatedAt));
+        setConfigDbSyncState("synced");
+        return;
+      }
+      setConfigDbSyncState("pending");
+      setConfigDbError("履歴のサーバー追記に失敗しました。ローカル保存から再送します。");
+    });
   }
 
   const dateRangeLabel = useMemo(
     () => formatDateRange(selectedProject.workDateStart, selectedProject.workDateEnd),
     [selectedProject.workDateStart, selectedProject.workDateEnd],
+  );
+  const approvalRequestItems = selectedProject.approvalRequestItems;
+  const approvalDuplicateTemplateIds = useMemo(() => {
+    const counts = new Map<string, number>();
+    approvalRequestItems.forEach((item) => {
+      if (!item.templateId) {
+        return;
+      }
+      counts.set(item.templateId, (counts.get(item.templateId) || 0) + 1);
+    });
+    return new Set([...counts.entries()].filter(([, count]) => count > 1).map(([templateId]) => templateId));
+  }, [approvalRequestItems]);
+  const approvalSelectedPrintItems = useMemo(
+    () => approvalRequestItems.filter((item) => item.templateId && item.title.trim() && item.body.trim()),
+    [approvalRequestItems],
+  );
+  const approvalHasUnselectedRows = useMemo(
+    () => approvalRequestItems.some((item) => !item.templateId),
+    [approvalRequestItems],
+  );
+  const approvalHasEmptyBodyRows = useMemo(
+    () => approvalRequestItems.some((item) => item.templateId && !item.body.trim()),
+    [approvalRequestItems],
   );
   const outageDateTimeLabel = useMemo(
     () =>
@@ -3547,7 +5031,7 @@ useEffect(() => {
         layoutAnnotations: cloneLayoutAnnotations(selectedProject.layoutAnnotations),
         layoutAnnotationsV2: cloneLayoutAnnotationsV2(selectedProject.layoutAnnotationsV2),
       };
-      const nextProject = syncProjectWorkRange(updater(baseProject));
+      const nextProject = attachProjectOwner(syncProjectWorkRange(updater(baseProject)), "private");
       setProjects((prev) => [nextProject, ...prev]);
       setSelectedId(nextProject.projectId);
       setProjectSearchText("");
@@ -3689,22 +5173,21 @@ useEffect(() => {
       return;
     }
     const roleToCreate = roleOverride ?? newUserRole;
-    const account: UserAccount = {
-      id: uid("user"),
-      name,
-      email,
-      password,
-      role: roleToCreate,
-      active: true,
-      approvalStatus: "approved",
-      approvedAt: new Date().toISOString(),
-      approvedById: currentUser?.id || "unknown",
-      approvedByName: currentUser?.name || "不明",
-      createdAt: new Date().toISOString(),
-      createdById: currentUser?.id || "unknown",
-      createdByName: currentUser?.name || "不明",
-    };
-    setUsers((prev) => [account, ...prev]);
+    const result = await createUserByAdmin(name, email, password, roleToCreate);
+    if (!result.user) {
+      if (result.error === "duplicate_email") {
+        setUserCreateNotice({ type: "error", text: "このメールアドレスは既に登録済みです。" });
+        return;
+      }
+      if (result.error === "forbidden") {
+        setUserCreateNotice({ type: "error", text: "この権限ではユーザー追加ができません。" });
+        return;
+      }
+      setUserCreateNotice({ type: "error", text: "ユーザー追加に失敗しました。時間をおいて再試行してください。" });
+      return;
+    }
+    await pullAuthUsersSnapshot();
+    setUsers(ensureUsers() as UserAccount[]);
     setNewUserName("");
     setNewUserEmail("");
     setNewUserPassword("");
@@ -3861,43 +5344,215 @@ useEffect(() => {
     appendAudit("backup_save", "手動で履歴保存", selectedProject.projectId);
   }
 
+  function attachProjectOwner(project: Project, scopeOverride?: Project["accessScope"]): Project {
+    if (!currentUser) {
+      return {
+        ...project,
+        accessScope: scopeOverride ?? project.accessScope,
+      };
+    }
+    return {
+      ...project,
+      accessScope: scopeOverride ?? project.accessScope,
+      ownerUserId: project.ownerUserId || currentUser.id,
+      ownerUserName: project.ownerUserName || currentUser.name,
+    };
+  }
+
+  const excludedExportKeys = new Set([
+    AUTH_SESSION_STORAGE_KEY,
+    AUTH_LOGIN_GUARD_STORAGE_KEY,
+    LOCAL_SAVE_META_STORAGE_KEY,
+    TEST_EDITOR_SEED_STORAGE_KEY,
+  ]);
+
+  function sanitizeLocalStorageImportItems(items: LocalStorageExportItem[]): LocalStorageExportItem[] {
+    return items.filter((item) => !excludedExportKeys.has(item.key));
+  }
+
+  function collectLocalStorageExportItems(): LocalStorageExportItem[] {
+    const items: LocalStorageExportItem[] = [];
+    for (let i = 0; i < window.localStorage.length; i += 1) {
+      const key = window.localStorage.key(i);
+      if (!key || excludedExportKeys.has(key)) {
+        continue;
+      }
+      items.push({
+        key,
+        value: window.localStorage.getItem(key) ?? "",
+      });
+    }
+    return items.sort((a, b) => a.key.localeCompare(b.key, "ja"));
+  }
+
+  function createLocalStorageExportPayload(): LocalStorageExportPayload {
+    return {
+      app: "sekou-manual-editor",
+      exportedAt: new Date().toISOString(),
+      items: collectLocalStorageExportItems(),
+    };
+  }
+
+  function downloadLocalStorageExportPayload(payload: LocalStorageExportPayload, prefix: string): void {
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json;charset=utf-8",
+    });
+    const url = window.URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    const suffix = payload.exportedAt.replaceAll(":", "-").replaceAll(".", "-");
+    anchor.href = url;
+    anchor.download = `${prefix}-${suffix}.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    window.URL.revokeObjectURL(url);
+  }
+
+  function replaceLocalStorageItems(items: LocalStorageExportItem[]): void {
+    const existingKeys = collectLocalStorageExportItems().map((item) => item.key);
+    existingKeys.forEach((key) => window.localStorage.removeItem(key));
+    items.forEach((item) => {
+      window.localStorage.setItem(item.key, item.value);
+    });
+    window.localStorage.removeItem(LOCAL_SAVE_META_STORAGE_KEY);
+  }
+
   function exportLocalStorageData(): void {
     if (typeof window === "undefined") {
       return;
     }
     try {
-      const items: LocalStorageExportItem[] = [];
-      for (let i = 0; i < window.localStorage.length; i += 1) {
-        const key = window.localStorage.key(i);
-        if (!key) {
-          continue;
-        }
-        items.push({
-          key,
-          value: window.localStorage.getItem(key) ?? "",
-        });
-      }
-      items.sort((a, b) => a.key.localeCompare(b.key, "ja"));
-      const payload: LocalStorageExportPayload = {
-        app: "sekou-manual-editor",
-        exportedAt: new Date().toISOString(),
-        items,
-      };
-      const blob = new Blob([JSON.stringify(payload, null, 2)], {
-        type: "application/json;charset=utf-8",
-      });
-      const url = window.URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      const suffix = new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-");
-      anchor.href = url;
-      anchor.download = `sekou-localstorage-export-${suffix}.json`;
-      document.body.appendChild(anchor);
-      anchor.click();
-      document.body.removeChild(anchor);
-      window.URL.revokeObjectURL(url);
-      setUserManageNotice({ type: "ok", text: `データをエクスポートしました（${items.length}件）。` });
+      const payload = createLocalStorageExportPayload();
+      downloadLocalStorageExportPayload(payload, "sekou-localstorage-export");
+      setUserManageNotice({ type: "ok", text: `データをエクスポートしました（${payload.items.length}件）。` });
     } catch {
       setUserManageNotice({ type: "error", text: "データのエクスポートに失敗しました。" });
+    }
+  }
+
+  function backupLocalStorageBeforeImport(): LocalStorageExportPayload {
+    const payload = createLocalStorageExportPayload();
+    downloadLocalStorageExportPayload(payload, "sekou-localstorage-before-import");
+    try {
+      window.sessionStorage.setItem("sekou-localstorage-before-import-latest", JSON.stringify(payload));
+    } catch {
+      // Downloaded backup is the primary rollback path; sessionStorage is best-effort.
+    }
+    return payload;
+  }
+
+  function restoreLocalStorageBackup(payload: LocalStorageExportPayload): void {
+    replaceLocalStorageItems(payload.items);
+    resetSharedStorageSnapshotCache();
+  }
+
+  function getImportDuplicateKeys(items: LocalStorageExportItem[]): string[] {
+    const seen = new Set<string>();
+    const duplicates = new Set<string>();
+    items.forEach((item) => {
+      if (seen.has(item.key)) {
+        duplicates.add(item.key);
+      }
+      seen.add(item.key);
+    });
+    return Array.from(duplicates).sort((a, b) => a.localeCompare(b, "ja"));
+  }
+
+  function getImportChangeSummary(currentItems: LocalStorageExportItem[], nextItems: LocalStorageExportItem[]): string {
+    const currentMap = new Map(currentItems.map((item) => [item.key, item.value]));
+    const nextMap = new Map(nextItems.map((item) => [item.key, item.value]));
+    let added = 0;
+    let updated = 0;
+    let removed = 0;
+    nextMap.forEach((value, key) => {
+      if (!currentMap.has(key)) {
+        added += 1;
+      } else if (currentMap.get(key) !== value) {
+        updated += 1;
+      }
+    });
+    currentMap.forEach((_, key) => {
+      if (!nextMap.has(key)) {
+        removed += 1;
+      }
+    });
+    return `追加 ${added}件 / 更新 ${updated}件 / 削除 ${removed}件`;
+  }
+
+  async function importLocalStorageData(event: ChangeEvent<HTMLInputElement>): Promise<void> {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+    let preImportBackup: LocalStorageExportPayload | null = null;
+    try {
+      const raw = await file.text();
+      const parsed: unknown = JSON.parse(raw);
+      if (!isLocalStorageExportPayload(parsed)) {
+        throw new Error("invalid-structure");
+      }
+      const sanitizedItems = sanitizeLocalStorageImportItems(parsed.items);
+      const ignoredKeyCount = parsed.items.length - sanitizedItems.length;
+      const duplicateKeys = getImportDuplicateKeys(sanitizedItems);
+      if (duplicateKeys.length > 0) {
+        throw new Error(`duplicate-keys:${duplicateKeys.slice(0, 5).join(",")}`);
+      }
+      const currentItems = collectLocalStorageExportItems();
+      const changeSummary = getImportChangeSummary(currentItems, sanitizedItems);
+      const ok = window.confirm(
+        [
+          "現在の端末データを上書きしてインポートします。",
+          "実行前に現在のデータを自動バックアップとしてダウンロードします。",
+          `変更内容: ${changeSummary}`,
+          ...(ignoredKeyCount > 0 ? [`補足: セッションや一時状態など ${ignoredKeyCount}件は安全のため読み込み対象から外します。`] : []),
+          "続行しますか？",
+        ].join("\n"),
+      );
+      if (!ok) {
+        return;
+      }
+      preImportBackup = backupLocalStorageBeforeImport();
+      replaceLocalStorageItems(sanitizedItems);
+      resetSharedStorageSnapshotCache();
+      commitRestoreStatus({
+        version: 1,
+        recordedAt: currentTimeLabel(),
+        workspaceSource: "json_import",
+        configSource: "json_import",
+        note: buildRestoreStatusNote("json_import", "json_import"),
+        detail: `${changeSummary}${ignoredKeyCount > 0 ? ` / 除外 ${ignoredKeyCount}件` : ""}`,
+      });
+      const sharedUpdated = await pushSharedStorageSnapshot({ force: true });
+      if (!sharedUpdated) {
+        setSharedSyncState("pending");
+      }
+      alert(
+        sharedUpdated
+          ? "データをインポートしました。インポート前の自動バックアップもダウンロード済みです。画面を再読み込みします。"
+          : "データをインポートしました。共有同期は再送待ちです。インポート前の自動バックアップもダウンロード済みです。画面を再読み込みします。",
+      );
+      window.location.reload();
+    } catch {
+      if (preImportBackup) {
+        try {
+          restoreLocalStorageBackup(preImportBackup);
+          commitRestoreStatus({
+            version: 1,
+            recordedAt: currentTimeLabel(),
+            workspaceSource: "browser_local",
+            configSource: "browser_local",
+            note: "インポートに失敗したため、実行前バックアップへ戻しました。",
+            detail: "インポート前にダウンロードした自動バックアップと同じ内容へロールバックしました。",
+          });
+          alert("インポートに失敗したため、実行前のデータへ戻しました。JSON形式とデータ構造を確認してください。");
+        } catch {
+          alert("インポートに失敗し、自動復元にも失敗しました。ダウンロード済みの before-import バックアップから復元してください。");
+        }
+      } else {
+        alert("インポートに失敗しました。JSON形式とデータ構造を確認してください。");
+      }
+    } finally {
+      event.target.value = "";
     }
   }
 
@@ -3907,6 +5562,9 @@ useEffect(() => {
     }
     const candidate = value as Partial<LocalStorageExportPayload> & { items?: unknown };
     if (candidate.app !== "sekou-manual-editor") {
+      return false;
+    }
+    if (typeof candidate.exportedAt !== "string") {
       return false;
     }
     if (!Array.isArray(candidate.items)) {
@@ -3923,35 +5581,6 @@ useEffect(() => {
 
   function openImportFileDialog(): void {
     importFileInputRef.current?.click();
-  }
-
-  async function importLocalStorageData(event: ChangeEvent<HTMLInputElement>): Promise<void> {
-    const file = event.target.files?.[0];
-    if (!file) {
-      return;
-    }
-    try {
-      const raw = await file.text();
-      const parsed: unknown = JSON.parse(raw);
-      if (!isLocalStorageExportPayload(parsed)) {
-        throw new Error("invalid-structure");
-      }
-      const ok = window.confirm("現在のデータを上書きしてインポートします。よろしいですか？");
-      if (!ok) {
-        return;
-      }
-      window.localStorage.clear();
-      parsed.items.forEach((item) => {
-        window.localStorage.setItem(item.key, item.value);
-      });
-      resetSharedStorageSnapshotCache();
-      alert("データをインポートしました。画面を再読み込みします。");
-      window.location.reload();
-    } catch {
-      alert("インポートに失敗しました。JSON形式とデータ構造を確認してください。");
-    } finally {
-      event.target.value = "";
-    }
   }
 
   function restoreRevision(): void {
@@ -3973,6 +5602,7 @@ useEffect(() => {
             || legacyLayoutAnnotationsToV2(selectedRevision.snapshot.layoutAnnotations || []),
         ),
         scheduleRows: cloneScheduleRows(selectedRevision.snapshot.scheduleRows),
+        deletedScheduleRowIds: [...(selectedRevision.snapshot.deletedScheduleRowIds || [])],
         relatedParties: cloneRelatedParties(selectedRevision.snapshot.relatedParties),
       }),
       {
@@ -4010,15 +5640,23 @@ useEffect(() => {
     updateSelectedProject((project) => {
       const beforeOutage = pickOutageWindow(project);
       const end = project.workDateEnd && project.workDateEnd >= normalized ? project.workDateEnd : normalized;
-      const rows = project.scheduleRows.map((row) => fitRowIntoRange(row, normalized, end));
+      const rows = shiftScheduleRowsByDateDelta(project.scheduleRows, project.workDateStart, normalized, end);
+      const shiftedOutageStart = project.outageDateStart ? addDays(project.outageDateStart, diffDays(project.workDateStart, normalized)) : normalized;
+      const shiftedOutageEnd = project.outageDateEnd ? addDays(project.outageDateEnd, diffDays(project.workDateStart, normalized)) : end;
       const outage = fitOutageIntoRange(
-        project.outageDateStart,
+        shiftedOutageStart,
         project.outageTimeStart,
-        project.outageDateEnd,
+        shiftedOutageEnd,
         project.outageTimeEnd,
         normalized,
         end,
       );
+      const nextNoticeMainWorkDate = project.noticeMainWorkDate === project.workDateStart
+        ? normalized
+        : project.noticeMainWorkDate;
+      const nextNoticeOutageDate = project.noticeOutageDate === project.outageDateStart
+        ? outage.startDate
+        : project.noticeOutageDate;
       const nextProject = {
         ...project,
         workDateStart: normalized,
@@ -4028,6 +5666,8 @@ useEffect(() => {
         outageDateEnd: outage.endDate,
         outageTimeEnd: outage.endTime,
         scheduleRows: rows,
+        noticeMainWorkDate: nextNoticeMainWorkDate,
+        noticeOutageDate: nextNoticeOutageDate,
       };
       traceOutageAdjustment(
         "work_date_start_change",
@@ -4155,11 +5795,40 @@ useEffect(() => {
     });
   }
 
+  function applyProjectPresetSelection(presetId: ProjectPresetId): void {
+    const preset = PROJECT_PRESET_MAP.get(presetId);
+    updateSelectedProject(
+      (project) => applyProjectPreset(project, presetId, { overwriteScheduleRows: true, overwriteNotice: true }),
+      {
+        action: "template_apply",
+        detail: `工事プリセット適用: ${preset?.label ?? presetId}`,
+        snapshotLabel: "工事プリセット適用前バックアップ",
+      },
+    );
+    if (preset?.scheduleProcedureTemplateId) {
+      setSelectedScheduleProcedureTemplateId(preset.scheduleProcedureTemplateId);
+    }
+  }
+
+  function applyNoticeTemplateSelection(noticeTemplateId: NoticeTemplateId): void {
+    updateSelectedProject(
+      (project) => ({
+        ...project,
+        ...buildNoticeTemplatePatch(project, noticeTemplateId),
+      }),
+      {
+        action: "template_apply",
+        detail: `案内文テンプレート適用: ${NOTICE_TEMPLATE_LABELS[noticeTemplateId]}`,
+        snapshotLabel: "案内文テンプレート適用前バックアップ",
+      },
+    );
+  }
+
   function createProject(): void {
     if (!canEdit) {
       return;
     }
-    const created = createBlankProject();
+    const created = attachProjectOwner(createBlankProject(), "private");
     setProjects((prev) => [created, ...prev]);
     setSelectedId(created.projectId);
     appendAudit("project_create", `新規案件を作成: ${created.projectId}`, created.projectId);
@@ -4199,12 +5868,14 @@ useEffect(() => {
     setImportStatus(`削除しました: ${targetProject.projectId}`);
   }
 
-  function setCsvEditorData(records: CsvRecord[]): void {
+  function setCsvEditorData(records: CsvRecord[]): CsvRepairStats {
     const headers = inferCsvHeaders(records);
-    setCsvHeaders(headers);
-    setCsvDraftRows(normalizeCsvRows(records, headers));
+    const repairedSnapshot = repairCsvSnapshot(headers, records);
+    setCsvHeaders(repairedSnapshot.headers);
+    setCsvDraftRows(normalizeCsvRows(repairedSnapshot.records, repairedSnapshot.headers));
     setCsvPage(0);
     setCsvSelectedRows([]);
+    return repairedSnapshot.stats;
   }
 
   function applyCsvRowsToProjects(rows: CsvRecord[], sourceLabel: "import" | "editor" = "editor"): void {
@@ -4231,7 +5902,7 @@ useEffect(() => {
         const existing = map.get(importedProject.projectId);
         map.set(
           importedProject.projectId,
-          existing ? mergeProjectFromCsvRecord(existing, record) : importedProject,
+          existing ? mergeProjectFromCsvRecord(existing, record) : attachProjectOwner(importedProject, "shared"),
         );
       });
       return Array.from(map.values());
@@ -4264,7 +5935,7 @@ useEffect(() => {
 
     const nextProject = existing
       ? mergeProjectForNoticeFromCsv(existing, imported)
-      : imported;
+      : attachProjectOwner(imported, "shared");
 
     setProjects((prev) => {
       const map = new Map<string, Project>();
@@ -4298,6 +5969,9 @@ useEffect(() => {
     csvHeaders.forEach((header) => {
       next[header] = "";
     });
+    next[CSV_INTERNAL_ROW_ID_KEY] = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? `csv_${crypto.randomUUID()}`
+      : `csv_${Math.random().toString(36).slice(2, 10)}_${Date.now().toString(36)}`;
     setCsvDraftRows((prev) => {
       const appended = [...prev, next];
       setCsvPage(Math.max(0, Math.ceil(appended.length / csvPageSize) - 1));
@@ -4450,31 +6124,41 @@ useEffect(() => {
     URL.revokeObjectURL(url);
   }
 
-  function handleCsvImport(event: ChangeEvent<HTMLInputElement>): void {
+  async function handleCsvImport(event: ChangeEvent<HTMLInputElement>): Promise<void> {
+    const input = event.currentTarget;
     if (!canEdit) {
-      event.target.value = "";
+      input.value = "";
       return;
     }
-    const file = event.target.files?.[0];
+    const file = input.files?.[0];
     if (!file) {
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const records = parseCsv(String(reader.result ?? ""));
-        if (!records.length) {
-          setImportStatus("取込失敗: project_id列があるCSVを選択してください");
-          return;
-        }
-        setCsvEditorData(records);
-        setImportStatus(`${records.length}件をCSV編集スペースへ取り込みました。内容確認後に「この編集内容を案件に反映」を押してください。`);
-      } catch {
-        setImportStatus("取込失敗: CSV形式を確認してください");
+    input.value = "";
+    try {
+      const decoded = await decodeCsvFile(file);
+      const records = parseCsv(decoded.text);
+      if (!records.length) {
+        setImportStatus("取込失敗: project_id列があるCSVを選択してください");
+        return;
       }
-    };
-    reader.readAsText(file, "utf-8");
-    event.target.value = "";
+      if (decoded.replacementCount > 0) {
+        setImportStatus(`取込失敗: 文字化けを検知しました。CSVの文字コードをご確認ください（判定: ${decoded.label}）。`);
+        return;
+      }
+      const repairStats = setCsvEditorData(records);
+      if (repairStats.unrecoverableCount > 0) {
+        setImportStatus(`文字化けしたCSVデータが ${repairStats.unrecoverableCount} 箇所あります。元CSVを再取込してください。`);
+        return;
+      }
+      if (repairStats.repairedCount > 0) {
+        setImportStatus(`${records.length}件をCSV編集スペースへ取り込み、文字化けを ${repairStats.repairedCount} 箇所自動補正しました（文字コード: ${decoded.label}）。内容確認後に「この編集内容を案件に反映」を押してください。`);
+        return;
+      }
+      setImportStatus(`${records.length}件をCSV編集スペースへ取り込みました（文字コード: ${decoded.label}）。内容確認後に「この編集内容を案件に反映」を押してください。`);
+    } catch {
+      setImportStatus("取込失敗: CSV形式または文字コードを確認してください");
+    }
   }
 
   function toggleWork(code: WorkCode): void {
@@ -4687,6 +6371,7 @@ useEffect(() => {
       (project) => ({
         ...project,
         scheduleRows: project.scheduleRows.filter((row) => row.id !== rowId),
+        deletedScheduleRowIds: Array.from(new Set([...project.deletedScheduleRowIds, rowId])),
       }),
       { action: "schedule_remove_row", detail: "工程表の行を削除", snapshotLabel: "工程表行削除" },
     );
@@ -5151,6 +6836,60 @@ useEffect(() => {
       office: template.office,
       tel: template.tel,
     });
+  }
+
+  function addApprovalRequestItem(): void {
+    updateSelectedProject((project) => ({
+      ...project,
+      approvalRequestItems: [
+        ...project.approvalRequestItems,
+        {
+          id: uid("approval_row"),
+          templateId: "",
+          title: "",
+          body: "",
+          category: "",
+        },
+      ],
+    }));
+  }
+
+  function updateApprovalRequestTemplate(rowId: string, templateId: string): void {
+    const template = APPROVAL_REQUEST_TEMPLATE_MAP.get(templateId);
+    updateSelectedProject((project) => ({
+      ...project,
+      approvalRequestItems: project.approvalRequestItems.map((item) => {
+        if (item.id !== rowId) {
+          return item;
+        }
+        if (!template) {
+          return { ...item, templateId: "", title: "", body: "", category: "" };
+        }
+        return {
+          ...item,
+          templateId: template.id,
+          title: template.title,
+          body: template.body,
+          category: template.category,
+        };
+      }),
+    }));
+  }
+
+  function updateApprovalRequestBody(rowId: string, body: string): void {
+    updateSelectedProject((project) => ({
+      ...project,
+      approvalRequestItems: project.approvalRequestItems.map((item) => (
+        item.id === rowId ? { ...item, body } : item
+      )),
+    }));
+  }
+
+  function removeApprovalRequestItem(rowId: string): void {
+    updateSelectedProject((project) => ({
+      ...project,
+      approvalRequestItems: project.approvalRequestItems.filter((item) => item.id !== rowId),
+    }));
   }
 
   function saveRelatedPartyCompanyTemplate(key: RelatedPartyKey): void {
@@ -7219,6 +8958,28 @@ useEffect(() => {
     () => Array.from({ length: Math.ceil(layoutPhotosFilled.length / 4) }, (_, i) => layoutPhotosFilled.slice(i * 4, i * 4 + 4)),
     [layoutPhotosFilled],
   );
+  const overviewScheduleChunks = useMemo(() => {
+    const firstPageSize = Math.max(
+      1,
+      PDF_LAYOUT_LIMITS.overviewScheduleRowsFirstPage - (selectedProject.outageEnabled ? 1 : 0),
+    );
+    const firstChunk = selectedProject.scheduleRows.slice(0, firstPageSize);
+    const remaining = selectedProject.scheduleRows.slice(firstPageSize);
+    const continuationChunks = remaining.length
+      ? chunkItems(remaining, PDF_LAYOUT_LIMITS.overviewScheduleRowsContinuationPage)
+      : [];
+    return [firstChunk, ...continuationChunks];
+  }, [selectedProject.outageEnabled, selectedProject.scheduleRows]);
+  const detailScheduleChunks = useMemo(
+    () => chunkItems(selectedProject.scheduleRows, PDF_LAYOUT_LIMITS.detailRowsPerPage),
+    [selectedProject.scheduleRows],
+  );
+  const approvalScheduleChunks = useMemo(() => {
+    const firstChunk = selectedProject.scheduleRows.slice(0, 5);
+    const remaining = selectedProject.scheduleRows.slice(5);
+    const continuationChunks = remaining.length ? chunkItems(remaining, 10) : [];
+    return [firstChunk, ...continuationChunks];
+  }, [selectedProject.scheduleRows]);
   const cardStatus = useMemo(() => {
     const pdf1Missing: string[] = [];
     if (!selectedProject.propertyName.trim()) pdf1Missing.push("物件名");
@@ -7264,6 +9025,179 @@ useEffect(() => {
   const cardOrder: Array<keyof typeof cardStatus> = ["pdf1", "pdf2", "pdf3", "pdf4", "pdf5", "pdf6", "pdf7"];
   const incompleteCards = cardOrder.filter((key) => !cardStatus[key].done);
   const completionRate = Math.round(((cardOrder.length - incompleteCards.length) / cardOrder.length) * 100);
+  const localStorageUsageTone = getUsageTone(
+    localStorageUsageBytes,
+    OPERATION_LIMITS.localStorageWarnBytes,
+    OPERATION_LIMITS.localStorageCriticalBytes,
+  );
+  const projectSaveStatusLabel = projectSaveState === "saving"
+    ? "案件保存中..."
+    : projectSaveState === "dirty"
+      ? "案件に未保存変更あり"
+      : projectSaveState === "error"
+        ? "案件保存エラー"
+        : lastSavedAt === "-"
+          ? "案件未保存"
+          : `案件保存済み ${lastSavedAt}`;
+  const csvSaveStatusLabel = csvSaveState === "saving"
+    ? "CSV保存中..."
+    : csvSaveState === "dirty"
+      ? "CSVに未保存変更あり"
+      : csvSaveState === "error"
+        ? "CSV保存エラー"
+        : lastCsvSavedAt === "-"
+          ? "CSV未保存"
+          : `CSV保存済み ${lastCsvSavedAt}`;
+  const workspaceDbStatusLabel = !currentUserId
+    ? "ログイン後に有効化"
+    : workspaceDbSyncState === "syncing"
+      ? "サーバー保存中..."
+      : workspaceDbSyncState === "pending"
+        ? (lastWorkspaceDbSavedAt === "-" ? "送信待ち" : `再送待ち / 前回 ${lastWorkspaceDbSavedAt}`)
+        : workspaceDbSyncState === "error"
+          ? "サーバー保存エラー"
+          : lastWorkspaceDbSavedAt === "-"
+            ? "未バックアップ"
+            : `保存済み ${lastWorkspaceDbSavedAt}`;
+  const configDbStatusLabel = !currentUserId
+    ? "ログイン後に有効化"
+    : configDbSyncState === "syncing"
+      ? "サーバー保存中..."
+      : configDbSyncState === "pending"
+        ? (lastConfigDbSavedAt === "-" ? "送信待ち" : `再送待ち / 前回 ${lastConfigDbSavedAt}`)
+        : configDbSyncState === "error"
+          ? "サーバー保存エラー"
+          : lastConfigDbSavedAt === "-"
+            ? "未バックアップ"
+            : `保存済み ${lastConfigDbSavedAt}`;
+  const workspaceStatusFootnote = "端末保存はこのブラウザ内の即時復元用、DB保存は再ログイン・別端末復元用、共有同期は既存共有APIとの互換用です。オフライン時は端末保存を先に守り、再接続後にDB/共有へ送信します。";
+  const workspaceStatusItems: StatusSummaryItem[] = [
+    {
+      id: "restore-source",
+      label: "現在採用中の復元元",
+      value: restoreStatus ? buildRestoreStatusValue(restoreStatus) : "判定中...",
+      tone: restoreStatus
+        ? restoreStatus.workspaceSource === "empty" && restoreStatus.configSource === "empty"
+          ? "info"
+          : restoreStatus.workspaceSource === "server_backup" || restoreStatus.configSource === "server_backup"
+            ? "ok"
+            : restoreStatus.workspaceSource === "json_import" || restoreStatus.configSource === "json_import"
+              ? "ok"
+              : "info"
+        : "info",
+      detail: restoreStatus
+        ? `${restoreStatus.note} (${restoreStatus.recordedAt})${restoreStatus.detail ? ` / ${restoreStatus.detail}` : ""}`
+        : "初回読込時に、この端末保存・共有同期・サーバーバックアップのどれを採用したかを表示します。",
+    },
+    {
+      id: "project-save",
+      label: "端末保存（案件）",
+      value: projectSaveStatusLabel,
+      tone: projectSaveState === "error" ? "warn" : projectSaveState === "dirty" || projectSaveState === "saving" ? "info" : "ok",
+      detail: projectSaveError || "このブラウザに保存します。再読込時に最初に復元される一次退避です。",
+    },
+    {
+      id: "csv-save",
+      label: "端末保存（CSV）",
+      value: csvSaveStatusLabel,
+      tone: csvSaveState === "error" ? "warn" : csvSaveState === "dirty" || csvSaveState === "saving" ? "info" : "ok",
+      detail: csvSaveError || "CSV編集スペースの行・列編集内容をこのブラウザに保存します。",
+    },
+    {
+      id: "workspace-backup",
+      label: "DB保存（案件/CSV）",
+      value: workspaceDbStatusLabel,
+      tone: workspaceDbSyncState === "error"
+        ? "warn"
+        : workspaceDbSyncState === "pending" || workspaceDbSyncState === "syncing" || workspaceDbSyncState === "idle"
+          ? "info"
+          : "ok",
+      detail: workspaceDbError || "再ログイン・別端末復元に使うサーバー側の構造化保存です。",
+    },
+    {
+      id: "config-backup",
+      label: "DB保存（テンプレ/履歴）",
+      value: configDbStatusLabel,
+      tone: configDbSyncState === "error"
+        ? "warn"
+        : configDbSyncState === "pending" || configDbSyncState === "syncing" || configDbSyncState === "idle"
+          ? "info"
+          : "ok",
+      detail: configDbError || "テンプレート、履歴、監査ログをサーバー側へ保全します。",
+    },
+    {
+      id: "shared-sync",
+      label: "共有同期",
+      value: !isOnline
+        ? "オフライン / 再接続待ち"
+        : sharedSyncState === "pending"
+          ? "同期待ち"
+          : sharedSyncState === "syncing"
+            ? "同期中..."
+            : sharedSyncState === "error"
+              ? "同期エラー"
+              : lastSharedSyncAt === "-"
+                ? "共有未同期"
+                : `同期済み ${lastSharedSyncAt}`,
+      tone: !isOnline || sharedSyncState === "error" ? "warn" : sharedSyncState === "pending" || sharedSyncState === "syncing" ? "info" : "ok",
+      detail: "オンライン時に shared storage API へ反映します。DB保存とは別系統です。",
+    },
+    {
+      id: "local-capacity",
+      label: "端末容量",
+      value: `${formatByteSize(localStorageUsageBytes)} / ${formatByteSize(OPERATION_LIMITS.localStorageCriticalBytes)}`,
+      tone: localStorageUsageTone,
+      detail: "画像付き案件が増えるほど先に容量へ到達します。",
+    },
+  ];
+  const operationStatusItems: StatusSummaryItem[] = [
+    {
+      id: "op-users",
+      label: "承認済みユーザー",
+      value: `${userStats.approvedUsers} / ${OPERATION_LIMITS.recommendedApprovedUsers}名`,
+      tone: getUsageTone(userStats.approvedUsers, OPERATION_LIMITS.recommendedApprovedUsers),
+      detail: "現行構成での推奨運用目安です。",
+    },
+    {
+      id: "op-projects",
+      label: "案件数",
+      value: `${projects.length} / ${OPERATION_LIMITS.recommendedProjects}件`,
+      tone: getUsageTone(projects.length, OPERATION_LIMITS.recommendedProjects),
+      detail: "画像付き案件は件数より先に容量制約が効きます。",
+    },
+    {
+      id: "op-csv",
+      label: "CSV行数",
+      value: `${csvDraftRows.length} / ${OPERATION_LIMITS.recommendedCsvRows}行`,
+      tone: getUsageTone(csvDraftRows.length, OPERATION_LIMITS.recommendedCsvRows),
+      detail: "一括編集や検索の体感速度を保つ目安です。",
+    },
+    {
+      id: "op-schedule",
+      label: "工程行数",
+      value: `${selectedProject.scheduleRows.length} / ${OPERATION_LIMITS.recommendedScheduleRowsPerProject}行`,
+      tone: getUsageTone(selectedProject.scheduleRows.length, OPERATION_LIMITS.recommendedScheduleRowsPerProject),
+      detail: "超過時はPDFを自動で追加ページへ分割します。",
+    },
+    {
+      id: "op-storage",
+      label: "端末保存量",
+      value: `${formatByteSize(localStorageUsageBytes)} / ${formatByteSize(OPERATION_LIMITS.localStorageCriticalBytes)}`,
+      tone: localStorageUsageTone,
+      detail: "容量が増えると保存失敗や上書きリスクが高まります。",
+    },
+  ];
+  const operationRiskNotes = [
+    ...(selectedProject.scheduleRows.length > OPERATION_LIMITS.recommendedScheduleRowsPerProject
+      ? ["工程行数が多いため、PDF3/PDF4/PDF5は追加ページへ自動分割します。"]
+      : []),
+    ...(csvDraftRows.length > OPERATION_LIMITS.recommendedCsvRows
+      ? ["CSV行数が多めです。操作負荷を抑えるには案件単位で分割したCSV運用がおすすめです。"]
+      : []),
+    ...(localStorageUsageBytes >= OPERATION_LIMITS.localStorageWarnBytes
+      ? ["端末保存量が増えています。JSONエクスポート取得と古い案件の整理を先に行うと安全です。"]
+      : []),
+  ];
   const enabledPartyKeys = useMemo(
     () => partyEntries.filter((key) => selectedProject.relatedParties[key].enabled),
     [partyEntries, selectedProject.relatedParties],
@@ -7391,40 +9325,81 @@ useEffect(() => {
     });
     return Array.from(sectionMap.entries()).map(([section, items]) => ({ section, items }));
   }, [requiredMissingItems]);
-  const syncStatusLabel = !isOnline
-    ? "オフライン"
-    : sharedSyncState === "pending"
-      ? "保存待ち"
-      : sharedSyncState === "syncing"
-        ? "同期中"
-        : sharedSyncState === "error"
-          ? "再試行待ち"
-          : "保存済み";
-  const syncStatusTone = !isOnline || sharedSyncState === "error"
+  const syncStatusLabel = projectSaveStatusLabel;
+  const syncStatusTone = projectSaveState === "error"
+    ? "warn"
+    : projectSaveState === "dirty" || projectSaveState === "saving"
+      ? "info"
+      : "ok";
+  const saveStatusLabel = csvSaveStatusLabel;
+  const saveStatusTone = csvSaveState === "error"
+    ? "warn"
+    : csvSaveState === "dirty" || csvSaveState === "saving"
+      ? "info"
+      : "ok";
+  const cloudSyncLabel = !isOnline
+    ? (lastSharedSyncAt === "-" ? "クラウド再接続待ち" : `クラウド再接続待ち / 前回 ${lastSharedSyncAt}`)
+    : (lastSharedSyncAt === "-" ? "クラウド未同期" : `クラウド同期 ${lastSharedSyncAt}`);
+  const cloudSyncTone = !isOnline || sharedSyncState === "error"
     ? "warn"
     : sharedSyncState === "syncing" || sharedSyncState === "pending"
       ? "info"
       : "ok";
-  const saveStatusLabel = lastSavedAt === "-" ? "未保存" : `端末保存 ${lastSavedAt}`;
-  const cloudSyncLabel = !isOnline
-    ? (lastSharedSyncAt === "-" ? "クラウド再接続待ち" : `クラウド再接続待ち / 前回 ${lastSharedSyncAt}`)
-    : (lastSharedSyncAt === "-" ? "クラウド未同期" : `クラウド同期 ${lastSharedSyncAt}`);
+  const scheduleStatusItems: StatusSummaryItem[] = [
+    {
+      id: "schedule-count",
+      label: "工程行数",
+      value: `${selectedProject.scheduleRows.length} / ${OPERATION_LIMITS.recommendedScheduleRowsPerProject}行`,
+      tone: getUsageTone(selectedProject.scheduleRows.length, OPERATION_LIMITS.recommendedScheduleRowsPerProject),
+      detail: "入力は増やせますが、多いほど確認負荷が上がります。",
+    },
+    {
+      id: "schedule-pages",
+      label: "自動追加ページ",
+      value: `PDF3 ${overviewScheduleChunks.length} / PDF4 ${detailScheduleChunks.length} / PDF5 ${approvalScheduleChunks.length}`,
+      tone: overviewScheduleChunks.length > 1 || detailScheduleChunks.length > 1 || approvalScheduleChunks.length > 1 ? "info" : "ok",
+      detail: "行数が多い場合は印刷時に自動で続きページへ分割します。",
+    },
+    {
+      id: "schedule-guideline",
+      label: "出力の目安",
+      value: "工程は1行1作業を基本化",
+      tone: "ok",
+      detail: "停電時間を含めて 12 行以内に収めると調整しやすいです。",
+    },
+  ];
+  function scrollToFieldTarget(selector: string, reveal?: () => void): void {
+    const performScroll = () => {
+      const target = document.querySelector(selector) as HTMLElement | null;
+      if (!target) {
+        return;
+      }
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+      target.classList.add("required-scroll-highlight");
+      window.setTimeout(() => target.classList.remove("required-scroll-highlight"), 1200);
+      const focusTarget = target.matches("input, select, textarea")
+        ? target
+        : (target.querySelector("input, select, textarea, button") as HTMLElement | null);
+      focusTarget?.focus();
+    };
+
+    if (reveal) {
+      reveal();
+      window.setTimeout(performScroll, 120);
+      return;
+    }
+    performScroll();
+  }
+
   function scrollToMissingField(targetKey?: string): void {
     const key = targetKey || requiredMissingKeys[0];
     if (!key) {
       return;
     }
-    const target = document.querySelector(`[data-required-key="${key}"]`) as HTMLElement | null;
-    if (!target) {
-      return;
-    }
-    target.scrollIntoView({ behavior: "smooth", block: "center" });
-    target.classList.add("required-scroll-highlight");
-    window.setTimeout(() => target.classList.remove("required-scroll-highlight"), 1200);
-    const focusTarget = target.matches("input, select, textarea")
-      ? target
-      : (target.querySelector("input, select, textarea, button") as HTMLElement | null);
-    focusTarget?.focus();
+    const reveal = isEditorMode && isMobileFieldViewport()
+      ? () => setMobileEditorSection(getMobileEditorSectionForRequiredKey(key))
+      : undefined;
+    scrollToFieldTarget(`[data-required-key="${key}"]`, reveal);
   }
 
   function scrollToMiniInput(): void {
@@ -7432,16 +9407,13 @@ useEffect(() => {
       scrollToMissingField();
       return;
     }
-    const firstRequired = document.querySelector('[data-required-key="propertyName"]') as HTMLElement | null;
+    const selector = '[data-required-key="propertyName"]';
+    const firstRequired = document.querySelector(selector) as HTMLElement | null;
     if (!firstRequired) {
       window.scrollTo({ top: 0, behavior: "smooth" });
       return;
     }
-    firstRequired.scrollIntoView({ behavior: "smooth", block: "center" });
-    const focusTarget = firstRequired.matches("input, select, textarea")
-      ? firstRequired
-      : (firstRequired.querySelector("input, select, textarea, button") as HTMLElement | null);
-    focusTarget?.focus();
+    scrollToFieldTarget(selector, isEditorMode && isMobileFieldViewport() ? () => setMobileEditorSection("pdf1") : undefined);
   }
 
   async function handleManualSave(): Promise<void> {
@@ -7534,7 +9506,28 @@ useEffect(() => {
 
   useEffect(() => {
     setMobileMenuOpen(false);
+    setMobileEditorSection("pdf1");
   }, [mode, selectedId]);
+
+  const mobileEditorStepIndex = Math.max(
+    0,
+    MOBILE_EDITOR_SECTION_OPTIONS.findIndex((option) => option.key === mobileEditorSection),
+  );
+  const mobileEditorCurrentStep = MOBILE_EDITOR_SECTION_OPTIONS[mobileEditorStepIndex] ?? MOBILE_EDITOR_SECTION_OPTIONS[0];
+  const mobileEditorPrevStep = MOBILE_EDITOR_SECTION_OPTIONS[mobileEditorStepIndex - 1];
+  const mobileEditorNextStep = MOBILE_EDITOR_SECTION_OPTIONS[mobileEditorStepIndex + 1];
+
+  function jumpToMobileEditorSection(section: MobileEditorSection): void {
+    setMobileEditorSection(section);
+    if (isMobileFieldViewport()) {
+      window.setTimeout(() => window.scrollTo({ top: 0, behavior: "smooth" }), 0);
+    }
+  }
+
+  function getMobileEditorSectionClass(section: MobileEditorSection | MobileEditorSection[]): string {
+    const sections = Array.isArray(section) ? section : [section];
+    return `mobile-workflow-section${sections.includes(mobileEditorSection) ? " is-active" : ""}`;
+  }
 
   return (
     <>
@@ -7575,6 +9568,7 @@ useEffect(() => {
                       <span className="project-picker-current-label">選択中</span>
                       <span className="project-picker-current-name">{hasSelectedProject ? (selectedProject.propertyName || "（物件名未設定）") : "未選択"}</span>
                       <span className="project-picker-current-id">{hasSelectedProject ? `案件ID: ${selectedProject.projectId}` : "検索または入力開始で新規案件を作成できます"}</span>
+                      {hasSelectedProject ? <span className="project-picker-current-id">{describeProjectAccess(selectedProject)}</span> : null}
                     </p>
                     {filteredProjectOptions.length ? (
                       filteredProjectOptions.map((project) => (
@@ -7587,6 +9581,7 @@ useEffect(() => {
                         >
                           <span className="project-picker-item-name">{project.propertyName || "（物件名未設定）"}</span>
                           <small className="project-picker-item-id">案件ID: {project.projectId}</small>
+                          <small className="project-picker-item-id">{project.accessScope === "private" ? "自分専用" : "共有案件"} / {project.ownerUserName || "所有者未設定"}</small>
                         </button>
                       ))
                     ) : (
@@ -7713,6 +9708,27 @@ useEffect(() => {
             <Link href="/menu" className="workspace-link subtle workspace-link-back mobile-menu-back-link" onClick={() => setMobileMenuOpen(false)}>メニューへ戻る</Link>
           </div>
         </aside>
+        {isEditorMode ? (
+          <section className="mobile-workflow-switcher" aria-label="現場モード">
+            <div className="mobile-workflow-tabs" role="tablist" aria-label="施工計画書の入力セクション">
+              {MOBILE_EDITOR_SECTION_OPTIONS.map((option) => (
+                <button
+                  key={`mobile_editor_section_${option.key}`}
+                  type="button"
+                  className={`mobile-workflow-tab ${mobileEditorSection === option.key ? "is-active" : ""}`}
+                  onClick={() => jumpToMobileEditorSection(option.key)}
+                  role="tab"
+                  aria-selected={mobileEditorSection === option.key}
+                >
+                  <span>{option.label}</span>
+                  <span className={`mobile-workflow-tab-status ${cardStatus[option.key].done ? "is-done" : "is-todo"}`}>
+                    {cardStatus[option.key].done ? "完了" : `${cardStatus[option.key].missing.length}件`}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </section>
+        ) : null}
         {isEditorMode && hasSelectedProject && coreMissingRequiredCount > 0 ? (
           <button
             type="button"
@@ -7788,6 +9804,66 @@ useEffect(() => {
           </section>
         ) : null}
 
+        {isEditorMode ? (
+          <section className="editor-sticky-status" aria-label="保存状態">
+            <div className="editor-sticky-status-shell">
+              <StatusSummaryPanel
+                compact
+                title="保存状態"
+                lead="案件データ、CSV、サーバーバックアップの状態を常時表示します。"
+                items={workspaceStatusItems}
+                footnote={<p className="mini">{workspaceStatusFootnote}</p>}
+              />
+              {hasSelectedProject ? (
+                <section className="panel" aria-label="案件アクセス設定">
+                  <div className="panel-head">
+                    <h3 className="section-title"><span className="section-icon"><UiIcon name="userPlus" /></span>案件アクセス</h3>
+                    <div className="inline-row wrap">
+                      <span className={`status-chip ${selectedProject.accessScope === "private" ? "warn" : "ok"}`}>
+                        {selectedProject.accessScope === "private" ? "自分専用" : "共有案件"}
+                      </span>
+                      <span className="status-chip info">所有者: {selectedProject.ownerUserName || "未設定"}</span>
+                    </div>
+                  </div>
+                  <p className="mini">
+                    {selectedProject.accessScope === "private"
+                      ? "自分専用の案件は、所有者本人と管理者だけが閲覧・編集できます。"
+                      : "共有案件は、承認済みユーザー全体で閲覧できます。編集は通常の権限と編集ロックに従います。"}
+                  </p>
+                  {canUserManageProjectAccess(selectedProject, currentUser) ? (
+                    <div className="inline-row wrap">
+                      <button
+                        type="button"
+                        className="btn btn-subtle"
+                        onClick={() => updateSelectedProject((project) => ({ ...project, accessScope: "shared" }), {
+                          action: "project_access_update",
+                          detail: "案件アクセス変更: 共有案件",
+                        })}
+                        disabled={selectedProject.accessScope === "shared"}
+                      >
+                        共有案件にする
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-subtle"
+                        onClick={() => updateSelectedProject((project) => ({ ...project, accessScope: "private" }), {
+                          action: "project_access_update",
+                          detail: "案件アクセス変更: 自分専用",
+                        })}
+                        disabled={selectedProject.accessScope === "private"}
+                      >
+                        自分専用にする
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="mini">アクセス設定を変更できるのは、所有者本人または管理者です。</p>
+                  )}
+                </section>
+              ) : null}
+            </div>
+          </section>
+        ) : null}
+
         <CsvEditorSection
           isCsvMode={isCsvMode}
           importStatus={importStatus}
@@ -7833,6 +9909,8 @@ useEffect(() => {
           csvPage={csvPage}
           setCsvPage={setCsvPage}
           csvTotalPages={csvTotalPages}
+          workspaceStatusItems={workspaceStatusItems}
+          workspaceStatusFootnote={workspaceStatusFootnote}
         />
 
         {isNoticeMode ? (
@@ -7841,7 +9919,7 @@ useEffect(() => {
           selectedProject={selectedProject}
           canEdit={canEdit}
           canEditSelectedProject={canEditSelectedProject}
-          projectOptions={projects.map((project) => ({
+          projectOptions={visibleProjects.map((project) => ({
             projectId: project.projectId,
             propertyName: project.propertyName,
             propertyAddress: project.propertyAddress,
@@ -7889,7 +9967,13 @@ useEffect(() => {
           accessLogs={accessLogs}
           operationLogUserFilter={operationLogUserFilter}
           setOperationLogUserFilter={setOperationLogUserFilter}
+          operationLogScreenFilter={operationLogScreenFilter}
+          setOperationLogScreenFilter={setOperationLogScreenFilter}
+          operationLogActionFilter={operationLogActionFilter}
+          setOperationLogActionFilter={setOperationLogActionFilter}
           adminAuditUserOptions={adminAuditUserOptions}
+          adminAuditScreenOptions={adminAuditScreenOptions}
+          adminAuditActionOptions={adminAuditActionOptions}
           saveManualRevision={saveManualRevision}
           exportLocalStorageData={exportLocalStorageData}
           importFileInputRef={importFileInputRef}
@@ -7906,9 +9990,15 @@ useEffect(() => {
           setOperationLogExpanded={setOperationLogExpanded}
           userScopedProjectAuditLogs={userScopedProjectAuditLogs}
           userScopedGlobalAuditLogs={userScopedGlobalAuditLogs}
+          operationStatusItems={operationStatusItems}
+          operationStatusFootnote="上限ではなく推奨運用目安です。特に画像付き案件は件数より先に端末容量がボトルネックになります。"
+          operationRiskNotes={operationRiskNotes}
+          workspaceStatusItems={workspaceStatusItems}
+          workspaceStatusFootnote={workspaceStatusFootnote}
         />
 
         {isEditorMode && showEditorAssist ? (
+        <div className={getMobileEditorSectionClass("pdf1")}>
         <section className="panel onboarding-panel">
           <div className="onboarding-head">
             <h2>このツールでできること</h2>
@@ -7920,9 +10010,11 @@ useEffect(() => {
             <article className="onboarding-item"><strong>3.</strong> 完成チェック後にPDF出力</article>
           </div>
         </section>
+        </div>
         ) : null}
 
         {isEditorMode && showEditorAssist ? (
+        <div className={getMobileEditorSectionClass("pdf1")}>
         <section className="panel progress-panel">
           <div className="panel-head">
             <h3>施工計画書の完成チェック</h3>
@@ -7944,9 +10036,11 @@ useEffect(() => {
             </div>
           ) : null}
         </section>
+        </div>
         ) : null}
 
         {isEditorMode && showEditorAssist ? (
+        <div className={getMobileEditorSectionClass("pdf1")}>
         <section className="panel card-nav-panel">
           <h3>入力ナビゲーション（どこを埋めればいいか）</h3>
           <div className="card-nav-grid">
@@ -7959,9 +10053,11 @@ useEffect(() => {
             <a href="#card-pdf7" className={`card-nav-item ${cardStatus.pdf7.done ? "done" : "todo"}`}>PDF7 配置図・写真</a>
           </div>
         </section>
+        </div>
         ) : null}
 
         {isEditorMode && showEditorAssist ? (
+        <div className={getMobileEditorSectionClass("pdf1")}>
         <section className="panel template-center-panel">
           <div className="panel-head">
             <h3 className="section-title"><span className="section-icon"><UiIcon name="template" /></span>テンプレート管理センター</h3>
@@ -8047,17 +10143,33 @@ useEffect(() => {
             </article>
           </div>
         </section>
+        </div>
         ) : null}
 
         {isEditorMode && !hasSelectedProject ? (
+        <div className={getMobileEditorSectionClass("pdf1")}>
         <section className="panel project-empty-panel">
           <h3>未入力状態で開始できます</h3>
           <p className="mini">PDF1〜7を空欄のまま表示しています。上部検索で既存案件を開くか、このまま入力を始めると新規案件を自動作成します。</p>
+          <div className="inline-row wrap">
+            {PROJECT_PRESETS.map((preset) => (
+              <button
+                key={`empty_preset_${preset.id}`}
+                type="button"
+                className="btn btn-subtle"
+                onClick={() => applyProjectPresetSelection(preset.id)}
+              >
+                <span className="btn-icon"><UiIcon name="template" /></span>{preset.label}
+              </button>
+            ))}
+          </div>
         </section>
+        </div>
         ) : null}
 
         {isEditorMode ? (
         <>
+        <div className={getMobileEditorSectionClass(["pdf1", "pdf2"])}>
         <PdfCoverAndTocSection
           canExportPdf={canExportPdf}
           totalMissingRequiredCount={totalMissingRequiredCount}
@@ -8075,7 +10187,9 @@ useEffect(() => {
           onCoverRecipientSuffixChange={(value) => handleProjectField("coverRecipientSuffix", value)}
           onTitleSubjectChange={(value) => handleProjectField("titleSubject", value)}
         />
+        </div>
 
+        <div className={getMobileEditorSectionClass("pdf3")}>
         <section className="panel page-card" id="card-pdf3">
           <div className="page-card-head">
             <p className="page-card-index">PDF 3</p>
@@ -8101,11 +10215,31 @@ useEffect(() => {
             getRowColorType={getRowColorType}
             formatDateWithWeekday={formatDateWithWeekday}
           />
+          <StatusSummaryPanel
+            compact
+            title="工程表の運用状態"
+            lead="工程行が増えた場合は、PDF3/PDF4/PDF5を自動で続きページへ分割します。"
+            items={scheduleStatusItems}
+            footnote={
+              selectedProject.scheduleRows.length > OPERATION_LIMITS.recommendedScheduleRowsPerProject
+                ? <p className="mini warn-text">工程行数が多いため、PDF3/PDF4/PDF5は続きページを自動追加します。</p>
+                : undefined
+            }
+          />
           <div className="grid-2 pdf3-info-stack">
             <article className="sub-panel">
               <h3>基本情報</h3>
               <p className="field-help">日付は「開始→終了」の順で入力してください。停電期間は下段に自動表示されます。</p>
               <div className="field-grid">
+                <label className="field span-2">
+                  <span>工事プリセット</span>
+                  <select className="control" value={selectedProject.projectPresetId} onChange={(event) => applyProjectPresetSelection(event.target.value as ProjectPresetId)}>
+                    <option value="custom">手動入力</option>
+                    {PROJECT_PRESETS.map((preset) => (
+                      <option key={`project_preset_${preset.id}`} value={preset.id}>{preset.label}</option>
+                    ))}
+                  </select>
+                </label>
                 <label className="field span-2"><span>住所</span><input data-required-key="propertyAddress" className={`control ${requiredMissingMap.propertyAddress ? "control-missing" : ""}`} value={selectedProject.propertyAddress} onChange={(event) => handleProjectField("propertyAddress", event.target.value)} /></label>
                 <label className="field"><span>工事開始日</span><input data-required-key="workDateStart" className={`control ${requiredMissingMap.workDateStart ? "control-missing" : ""}`} type="date" value={selectedProject.workDateStart} onChange={(event) => updateWorkDateStart(event.target.value)} /></label>
                 <label className="field"><span>工事終了日</span><input data-required-key="workDateEnd" className={`control ${requiredMissingMap.workDateEnd ? "control-missing" : ""}`} type="date" value={selectedProject.workDateEnd} onChange={(event) => updateWorkDateEnd(event.target.value)} /></label>
@@ -8114,6 +10248,14 @@ useEffect(() => {
                 <label className="field"><span>停電開始時間</span><input data-required-key="outageTimeStart" className={`control ${requiredMissingMap.outageTimeStart ? "control-missing" : ""}`} type="time" value={selectedProject.outageTimeStart} onChange={(event) => updateOutageRange({ outageTimeStart: normalizeTime(event.target.value, selectedProject.outageTimeStart) }, "field_outage_time_start")} /></label>
                 <label className="field"><span>停電終了時間</span><input data-required-key="outageTimeEnd" className={`control ${requiredMissingMap.outageTimeEnd ? "control-missing" : ""}`} type="time" value={selectedProject.outageTimeEnd} onChange={(event) => updateOutageRange({ outageTimeEnd: normalizeTime(event.target.value, selectedProject.outageTimeEnd) }, "field_outage_time_end")} /></label>
                 <label className="field span-2"><span>停電を工程表に表示</span><span className="check-pill"><input type="checkbox" checked={selectedProject.outageEnabled} onChange={(event) => handleProjectField("outageEnabled", event.target.checked)} /> 停電時間バーを表示する</span></label>
+                <label className="field span-2">
+                  <span>案内文テンプレート</span>
+                  <select className="control" value={selectedProject.noticeTemplateId} onChange={(event) => applyNoticeTemplateSelection(event.target.value as NoticeTemplateId)}>
+                    {(Object.keys(NOTICE_TEMPLATE_LABELS) as NoticeTemplateId[]).map((templateId) => (
+                      <option key={`notice_template_${templateId}`} value={templateId}>{NOTICE_TEMPLATE_LABELS[templateId]}</option>
+                    ))}
+                  </select>
+                </label>
                 <label className="field span-2"><span>停電期間（自動）</span><div className="date-range-preview">{outageDateTimeLabel}</div></label>
               </div>
             </article>
@@ -8297,6 +10439,9 @@ useEffect(() => {
             ))}
           </div>
 
+          {overviewScheduleChunks.length > 1 || detailScheduleChunks.length > 1 ? (
+            <p className="mini">工程行が多いため、印刷時は続きページを自動追加します。</p>
+          ) : null}
           <div className="table-wrap">
             <table className="schedule-table timeline-edit-table">
               <thead>
@@ -8366,11 +10511,22 @@ useEffect(() => {
                       />
                     </td>
                     <td className="timeline-action-cell" data-label="操作">
-                      <div className="row-action-group">
-                        <button type="button" className="btn btn-subtle row-action-btn" onClick={() => moveScheduleRow(row.id, -1)}><span className="btn-icon"><UiIcon name="up" /></span>上へ</button>
-                        <button type="button" className="btn btn-subtle row-action-btn" onClick={() => moveScheduleRow(row.id, 1)}><span className="btn-icon"><UiIcon name="down" /></span>下へ</button>
-                        <button type="button" className="btn btn-danger row-action-btn" onClick={() => removeScheduleRow(row.id)}><span className="btn-icon"><UiIcon name="delete" /></span>削除</button>
-                      </div>
+                      <details className="secondary-action-details schedule-row-action-menu">
+                        <summary>
+                          <span className="btn-icon"><UiIcon name="menu" /></span>操作
+                        </summary>
+                        <div className="secondary-action-content schedule-row-action-content">
+                          <button type="button" className="btn btn-subtle row-action-btn" onClick={() => moveScheduleRow(row.id, -1)}>
+                            <span className="btn-icon"><UiIcon name="up" /></span>上へ
+                          </button>
+                          <button type="button" className="btn btn-subtle row-action-btn" onClick={() => moveScheduleRow(row.id, 1)}>
+                            <span className="btn-icon"><UiIcon name="down" /></span>下へ
+                          </button>
+                          <button type="button" className="btn btn-danger row-action-btn" onClick={() => removeScheduleRow(row.id)}>
+                            <span className="btn-icon"><UiIcon name="delete" /></span>削除
+                          </button>
+                        </div>
+                      </details>
                     </td>
                   </tr>
                 ))}
@@ -8378,7 +10534,9 @@ useEffect(() => {
             </table>
           </div>
         </section>
+        </div>
 
+        <div className={getMobileEditorSectionClass("pdf4")}>
         <section className="panel page-card" id="card-pdf4">
           <div className="page-card-head">
             <p className="page-card-index">PDF 4</p>
@@ -8393,13 +10551,14 @@ useEffect(() => {
               {selectedProject.scheduleRows.length === 0 ? (
                 <p className="mini">工程表の作業行が未設定です。</p>
               ) : null}
-              {selectedProject.scheduleRows.map((row) => (
+              {detailScheduleChunks[0]?.map((row) => (
                 <section key={`preview_pdf4_${row.id}`} className="preview-work-detail">
                   <h4>■ {row.label}</h4>
                   <p>作業時間: {formatDateWithWeekday(row.startDate)} {row.start}〜{formatDateWithWeekday(row.endDate)} {row.end}{row.outage ? "（停電あり）" : "（停電なし）"}</p>
                   {row.note ? <p>備考: {row.note}</p> : null}
                 </section>
               ))}
+              {detailScheduleChunks.length > 1 ? <p className="mini">残りの工程は追加ページへ自動で分割されます。</p> : null}
               <h4>参考写真</h4>
               <div className="preview-photo-grid">
                 {detailPhotosFilled.slice(0, 4).map((slot) => (
@@ -8429,7 +10588,7 @@ useEffect(() => {
                 <tr><th>項目</th><th>開始日時</th><th>終了日時</th><th>備考</th></tr>
               </thead>
               <tbody>
-                {selectedProject.scheduleRows.map((row) => (
+                {detailScheduleChunks[0]?.map((row) => (
                   <tr key={`detail_card_${row.id}`}>
                     <td>{row.label}</td>
                     <td>{`${formatDateWithWeekday(row.startDate)} ${row.start}`}</td>
@@ -8494,261 +10653,53 @@ useEffect(() => {
             </div>
           </div>
         </section>
+        </div>
 
-        <section className="panel page-card" id="card-pdf5">
-          <div className="page-card-head">
-            <p className="page-card-index">PDF 5</p>
-            <div>
-              <h2>ご承認いただきたい事項</h2>
-              <p className="mini">工程表の内容 + 追記メモがPDF5ページに反映されます</p>
-            </div>
-          </div>
-          <CardPreview title="PDF5 ご承認いただきたい事項">
-            <article className="preview-page">
-              <h3>3．ご承認いただきたい事項</h3>
-              <div className="table-wrap">
-                <table className="schedule-table preview-table">
-                  <thead>
-                    <tr><th style={{ width: "56px" }}>No</th><th style={{ width: "180px" }}>項目</th><th>内容</th></tr>
-                  </thead>
-                  <tbody>
-                    {selectedProject.scheduleRows.slice(0, 5).map((row, idx) => (
-                      <tr key={`preview_pdf5_${row.id}`}>
-                        <td>{idx + 1}</td>
-                        <td>{row.label}</td>
-                        <td>{`時間: ${formatDateWithWeekday(row.startDate)} ${row.start}〜${formatDateWithWeekday(row.endDate)} ${row.end}`}</td>
-                      </tr>
-                    ))}
-                    <tr>
-                      <td>9</td>
-                      <td>特記事項</td>
-                      <td>{selectedProject.noteSpecial || "なし"}</td>
-                    </tr>
-                    <tr>
-                      <td>10</td>
-                      <td>承認事項追記</td>
-                      <td>{selectedProject.noteApprovalExtra || "なし"}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </article>
-          </CardPreview>
-          <div className="inline-row wrap">
-            <label className="field csv-small-field">
-              <span>承認事項テンプレート</span>
-              <select
-                className="control"
-                value={selectedApprovalNoteTemplateId}
-                onChange={(event) => setSelectedApprovalNoteTemplateId(event.target.value)}
-                disabled={!approvalNoteTemplates.length}
-              >
-                {!approvalNoteTemplates.length ? <option value="">テンプレート未登録</option> : null}
-                {approvalNoteTemplates.map((template) => (
-                  <option key={`approval_note_template_${template.id}`} value={template.id}>
-                    {template.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button type="button" className="btn btn-subtle" onClick={applyApprovalNoteTemplate} disabled={!selectedApprovalNoteTemplate}>
-              <span className="btn-icon"><UiIcon name="apply" /></span>テンプレ適用
-            </button>
-            <button type="button" className="btn btn-subtle" onClick={saveApprovalNoteTemplate} disabled={!canEdit}>
-              <span className="btn-icon"><UiIcon name="save" /></span>今の文面を登録
-            </button>
-            <button type="button" className="btn btn-danger" onClick={deleteApprovalNoteTemplate} disabled={!canEdit || !selectedApprovalNoteTemplateId}>
-              <span className="btn-icon"><UiIcon name="delete" /></span>削除
-            </button>
-          </div>
-          <label className="field">
-            <span>承認事項 追記</span>
-            <textarea className="control textarea" value={selectedProject.noteApprovalExtra} onChange={(event) => handleProjectField("noteApprovalExtra", event.target.value)} />
-          </label>
-        </section>
+        <PdfApprovalSection
+          className={getMobileEditorSectionClass("pdf5")}
+          selectedProject={selectedProject}
+          canEdit={canEdit}
+          approvalScheduleChunks={approvalScheduleChunks}
+          approvalSelectedPrintItems={approvalSelectedPrintItems}
+          approvalRequestItems={approvalRequestItems}
+          approvalHasUnselectedRows={approvalHasUnselectedRows}
+          approvalHasEmptyBodyRows={approvalHasEmptyBodyRows}
+          approvalDuplicateTemplateIds={approvalDuplicateTemplateIds}
+          formatDateWithWeekday={formatDateWithWeekday}
+          addApprovalRequestItem={addApprovalRequestItem}
+          removeApprovalRequestItem={removeApprovalRequestItem}
+          updateApprovalRequestTemplate={updateApprovalRequestTemplate}
+          updateApprovalRequestBody={updateApprovalRequestBody}
+          onNoteApprovalExtraChange={(value) => handleProjectField("noteApprovalExtra", value)}
+        />
 
-        <section className="panel page-card" id="card-pdf6">
-          <div className="page-card-head">
-            <p className="page-card-index">PDF 6</p>
-            <div>
-              <h2>{activePdfTemplate.sectionOrganization}・{activePdfTemplate.sectionEmergency}</h2>
-              <p className="mini">関係各社カードの「反映する」をONにしたものだけPDF6ページへ反映されます</p>
-            </div>
-          </div>
-          <CardPreview title={`PDF6 ${activePdfTemplate.sectionOrganization}・${activePdfTemplate.sectionEmergency}`}>
-            <article className="preview-page">
-              <h3>4．{activePdfTemplate.sectionOrganization}</h3>
-              <div className="preview-org-grid">
-                {activeParties.owner.enabled ? (
-                  <div className="preview-org-box">
-                    <p>{activeParties.owner.title}：{activeParties.owner.company || "-"}</p>
-                    {activeParties.owner.person ? <p>担当者：{activeParties.owner.person}</p> : null}
-                    {activeParties.owner.office ? <p>部署：{activeParties.owner.office}</p> : null}
-                    <p>電話番号（TEL）：{activeParties.owner.tel || "-"}</p>
-                  </div>
-                ) : null}
-                {activeParties.utility.enabled ? (
-                  <div className="preview-org-box">
-                    <p>{activeParties.utility.company || "-"}</p>
-                    {activeParties.utility.office ? <p>事業所：{activeParties.utility.office}</p> : null}
-                    <p>電話番号（TEL）：{activeParties.utility.tel || "-"}</p>
-                  </div>
-                ) : null}
-                {activeParties.contractor.enabled ? (
-                  <div className="preview-org-box preview-org-large">
-                    <p>{activeParties.contractor.title}：{activeParties.contractor.company || "-"}</p>
-                    {activeParties.contractor.office ? <p>{activeParties.contractor.office}</p> : null}
-                    {activeParties.contractor.person ? <p>担当者：{activeParties.contractor.person}</p> : null}
-                    <p>電話番号（TEL）：{activeParties.contractor.tel || "-"}</p>
-                  </div>
-                ) : null}
-              </div>
-              <h3>5．{activePdfTemplate.sectionEmergency}</h3>
-              <div className="preview-org-grid compact">
-                {activeParties.management.enabled ? <div className="preview-org-box">{activeParties.management.company || "-"}</div> : null}
-                {activeParties.owner.enabled ? <div className="preview-org-box">{activeParties.owner.company || "-"}<br />電話番号（TEL）：{activeParties.owner.tel || "-"}</div> : null}
-                {activeParties.utility.enabled ? <div className="preview-org-box">{activeParties.utility.company || "-"}<br />電話番号（TEL）：{activeParties.utility.tel || "-"}</div> : null}
-                {activeParties.contractor.enabled ? <div className="preview-org-box">{activeParties.contractor.company || "-"}<br />電話番号（TEL）：{activeParties.contractor.tel || "-"}</div> : null}
-                {activeParties.residents.enabled ? <div className="preview-org-box">{activeParties.residents.company || "-"}</div> : null}
-              </div>
-            </article>
-          </CardPreview>
-          <div className="party-template-row">
-            <label className="field party-template-field">
-              <span>体制表テンプレート</span>
-              <select
-                className="control"
-                value={selectedPartyTemplateId}
-                onChange={(event) => setSelectedPartyTemplateId(event.target.value)}
-              >
-                <option value="">テンプレートを選択</option>
-                {partyTemplates.map((template) => (
-                  <option key={`party_template_local_${template.id}`} value={template.id}>
-                    {template.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="inline-row wrap">
-              <button
-                type="button"
-                className="btn btn-subtle"
-                onClick={applyPartyTemplate}
-                disabled={!selectedPartyTemplate}
-              >
-                <span className="btn-icon"><UiIcon name="apply" /></span>
-                テンプレート適用
-              </button>
-              <button
-                type="button"
-                className="btn btn-subtle"
-                onClick={savePartyTemplate}
-                disabled={!canEdit}
-              >
-                <span className="btn-icon"><UiIcon name="save" /></span>
-                現在内容をテンプレート登録
-              </button>
-              <button
-                type="button"
-                className="btn btn-danger"
-                onClick={deletePartyTemplate}
-                disabled={!canEdit || !selectedPartyTemplateId}
-              >
-                <span className="btn-icon"><UiIcon name="delete" /></span>
-                テンプレート削除
-              </button>
-            </div>
-          </div>
-          <div className={`party-grid ${requiredMissingMap.relatedPartiesEnabled ? "required-missing-block" : ""}`} data-required-key="relatedPartiesEnabled">
-            <div className="party-slider-nav">
-              <button type="button" className="btn btn-subtle" onClick={() => setPartySlide((prev) => Math.max(0, prev - 1))} disabled={partySlide <= 0}>
-                <span className="btn-icon"><UiIcon name="arrowLeft" /></span>
-                前のスライド
-              </button>
-              <span className="mini">
-                {partySlide + 1} / {totalPartySlides}
-              </span>
-              <button
-                type="button"
-                className="btn btn-subtle"
-                onClick={() => setPartySlide((prev) => Math.min(totalPartySlides - 1, prev + 1))}
-                disabled={partySlide >= totalPartySlides - 1}
-              >
-                <span className="btn-icon"><UiIcon name="arrowRight" /></span>
-                次のスライド
-              </button>
-            </div>
-            <div className="party-slider-window">
-              <div className="party-slider-track" style={{ transform: `translateX(-${partySlide * 100}%)` }}>
-                {Array.from({ length: totalPartySlides }, (_, slideIndex) => {
-                  const start = slideIndex * partySlideSize;
-                  const end = start + partySlideSize;
-                  const keys = partyEntries.slice(start, end);
-                  return (
-                    <div key={`party_slide_${slideIndex}`} className="party-slide">
-                      {keys.map((key) => {
-                        const party = selectedProject.relatedParties[key];
-                        const companyTemplateOptions = [
-                          ...(partyCompanyTemplates[key] || []),
-                          ...PARTY_COMPANY_TEMPLATE_PRESETS[key],
-                        ];
-                        return (
-                          <article key={`party_${key}`} className="sub-panel party-card">
-                            <div className="party-head">
-                              <h3>{party.title}</h3>
-                              <label className="party-check">
-                                <input
-                                  type="checkbox"
-                                  checked={party.enabled}
-                                  onChange={(event) => updateRelatedParty(key, { enabled: event.target.checked })}
-                                />
-                                計画書に反映する
-                              </label>
-                            </div>
-                            <div className="field-grid">
-                              <label className="field span-2">
-                                <span>会社テンプレート（選択すると自動反映）</span>
-                                <select
-                                  className="control"
-                                  value={partyTemplateSelections[key]}
-                                  onChange={(event) => applyRelatedPartyCompanyTemplate(key, event.target.value)}
-                                >
-                                  <option value="">テンプレートを選択（任意）</option>
-                                  {companyTemplateOptions.map((template) => (
-                                    <option key={`party_company_template_${key}_${template.id}`} value={template.id}>
-                                      {template.label}
-                                    </option>
-                                  ))}
-                                </select>
-                              </label>
-                              <div className="inline-row wrap span-2 party-company-template-actions">
-                                <button
-                                  type="button"
-                                  className="btn btn-subtle"
-                                  onClick={() => saveRelatedPartyCompanyTemplate(key)}
-                                  disabled={!canEdit}
-                                >
-                                  <span className="btn-icon"><UiIcon name="save" /></span>
-                                  この内容をテンプレート登録
-                                </button>
-                              </div>
-                              <label className="field"><span>見出し</span><input className="control" value={party.title} onChange={(event) => updateRelatedParty(key, { title: event.target.value })} /></label>
-                              <label className="field"><span>会社名 / 表示名</span><input data-required-key={`relatedPartyCompany:${key}`} className={`control ${party.enabled && !party.company.trim() ? "control-missing" : ""}`} value={party.company} onChange={(event) => updateRelatedParty(key, { company: event.target.value })} /></label>
-                              <label className="field"><span>担当者</span><input className="control" value={party.person} onChange={(event) => updateRelatedParty(key, { person: event.target.value })} /></label>
-                              <label className="field"><span>部署・事業所</span><input className="control" value={party.office} onChange={(event) => updateRelatedParty(key, { office: event.target.value })} /></label>
-                              <label className="field span-2"><span>電話番号（TEL）</span><input className="control" value={party.tel} onChange={(event) => updateRelatedParty(key, { tel: event.target.value })} /></label>
-                            </div>
-                          </article>
-                        );
-                      })}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        </section>
+        <PdfOrganizationSection
+          className={getMobileEditorSectionClass("pdf6")}
+          activePdfTemplate={activePdfTemplate}
+          selectedProject={selectedProject}
+          activeParties={activeParties}
+          canEdit={canEdit}
+          partyTemplates={partyTemplates}
+          selectedPartyTemplateId={selectedPartyTemplateId}
+          selectedPartyTemplate={selectedPartyTemplate}
+          partyCompanyTemplates={partyCompanyTemplates}
+          partyTemplateSelections={partyTemplateSelections}
+          requiredMissingMap={requiredMissingMap}
+          partySlide={partySlide}
+          totalPartySlides={totalPartySlides}
+          partySlideSize={partySlideSize}
+          partyEntries={partyEntries}
+          onSelectPartyTemplateId={setSelectedPartyTemplateId}
+          onApplyPartyTemplate={applyPartyTemplate}
+          onSavePartyTemplate={savePartyTemplate}
+          onDeletePartyTemplate={deletePartyTemplate}
+          onPartySlideChange={setPartySlide}
+          onUpdateRelatedParty={updateRelatedParty}
+          onApplyRelatedPartyCompanyTemplate={applyRelatedPartyCompanyTemplate}
+          onSaveRelatedPartyCompanyTemplate={saveRelatedPartyCompanyTemplate}
+        />
 
+        <div className={getMobileEditorSectionClass("pdf7")}>
         <section className="panel page-card" id="card-pdf7">
           <div className="page-card-head">
             <p className="page-card-index">PDF 7</p>
@@ -8758,36 +10709,11 @@ useEffect(() => {
             </div>
           </div>
           <CardPreview title="PDF7 配置図・写真">
-            <article className="preview-page">
-              <h3>【工事車両、作業場所等の配置図】</h3>
-              <div className="preview-layout-photo">
-                <LayoutAnnotatedImage
-                  imageUrl={selectedProject.layoutImageDataUrl}
-                  annotations={selectedProject.layoutAnnotations}
-                  alt="配置図プレビュー"
-                />
-              </div>
-              <div className="preview-photo-grid">
-                {layoutPhotosFilled.slice(0, 4).map((slot) => (
-                  <figure key={`preview_pdf7_photo_${slot.id}`} className="preview-photo-item">
-                    <div>
-                      {slot.dataUrl ? (
-                        <LayoutAnnotatedImage imageUrl={slot.dataUrl} annotations={slot.layoutAnnotations || []} alt={slot.label} />
-                      ) : (
-                        <span>写真未設定</span>
-                      )}
-                    </div>
-                    <figcaption>{slot.label}</figcaption>
-                  </figure>
-                ))}
-                {!layoutPhotosFilled.length ? (
-                  <figure className="preview-photo-item">
-                    <div><span>写真が未設定です</span></div>
-                    <figcaption>写真を追加するとここに表示されます</figcaption>
-                  </figure>
-                ) : null}
-              </div>
-            </article>
+            <PdfLayoutPhotoPreview
+              selectedProject={selectedProject}
+              layoutPhotosFilled={layoutPhotosFilled}
+              renderAnnotatedImage={(props) => <LayoutAnnotatedImage {...props} />}
+            />
           </CardPreview>
           <article className={`photo-card ${requiredMissingMap.layoutAssets ? "required-missing-block" : ""}`} data-required-key="layoutAssets">
             <p className="mini">配置図画像（PDFの「工事車両、作業場所等の配置図」上段）</p>
@@ -8897,6 +10823,47 @@ useEffect(() => {
             </div>
           </div>
         </section>
+        </div>
+        <nav className="mobile-step-footer" aria-label="PDF入力ステップ操作">
+          <div className="mobile-step-footer-head">
+            <span>{mobileEditorCurrentStep.label}</span>
+            <span className={`status-chip ${cardStatus[mobileEditorCurrentStep.key].done ? "ok" : "warn"}`}>
+              {cardStatus[mobileEditorCurrentStep.key].done ? "このページ完了" : `未入力 ${cardStatus[mobileEditorCurrentStep.key].missing.length}件`}
+            </span>
+          </div>
+          <div className="mobile-step-footer-progress" aria-label={`完成度 ${completionRate}%`}>
+            <span style={{ width: `${completionRate}%` }} />
+          </div>
+          <div className="mobile-step-footer-actions">
+            <button
+              type="button"
+              className="btn btn-subtle"
+              onClick={() => mobileEditorPrevStep && jumpToMobileEditorSection(mobileEditorPrevStep.key)}
+              disabled={!mobileEditorPrevStep}
+            >
+              <span className="btn-icon"><UiIcon name="arrowLeft" /></span>前へ
+            </button>
+            {mobileEditorNextStep ? (
+              <button
+                type="button"
+                className="btn btn-accent"
+                onClick={() => jumpToMobileEditorSection(mobileEditorNextStep.key)}
+              >
+                次へ<span className="btn-icon"><UiIcon name="arrowRight" /></span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-accent"
+                onClick={exportPdf}
+                disabled={!canExportPdf}
+                title={!canExportPdf ? "必須項目を入力するとPDF出力できます" : ""}
+              >
+                <span className="btn-icon"><UiIcon name="pdf" /></span>PDF出力
+              </button>
+            )}
+          </div>
+        </nav>
         </>
         ) : null}
 
@@ -10036,8 +12003,8 @@ useEffect(() => {
           </p>
           <div className="bottom-bar-status-chips">
             <span className={`status-chip ${syncStatusTone}`}>{syncStatusLabel}</span>
-            <span className="status-chip">{saveStatusLabel}</span>
-            <span className={`status-chip ${!isOnline ? "warn" : "info"}`}>{cloudSyncLabel}</span>
+            <span className={`status-chip ${saveStatusTone}`}>{saveStatusLabel}</span>
+            <span className={`status-chip ${cloudSyncTone}`}>{cloudSyncLabel}</span>
             <span className={`status-chip ${incompleteCards.length ? "warn" : "ok"}`}>
               {incompleteCards.length ? `未完了 ${incompleteCards.length}カード` : "PDF出力OK"}
             </span>
@@ -10045,24 +12012,38 @@ useEffect(() => {
           </div>
         </div>
         <div className="bottom-bar-actions">
-          <button type="button" className="btn btn-subtle" onClick={() => void handleManualSave()} disabled={!canEditSelectedProject}>
+          <button
+            type="button"
+            className="btn btn-subtle bottom-bar-save-action"
+            data-testid="editor-manual-save"
+            onClick={() => void handleManualSave()}
+            disabled={!canEditSelectedProject}
+            title="現在の案件内容を端末・DB保存へ反映します"
+          >
             <span className="btn-icon"><UiIcon name="save" /></span>保存
           </button>
-          <button type="button" className="btn btn-subtle" onClick={() => setMissingPanelOpen(true)} disabled={totalMissingRequiredCount === 0}>
+          <button type="button" className="btn btn-subtle bottom-bar-missing-action" onClick={() => setMissingPanelOpen(true)} disabled={totalMissingRequiredCount === 0}>
             <span className="btn-icon"><UiIcon name="down" /></span>{totalMissingRequiredCount > 0 ? `未入力一覧 ${totalMissingRequiredCount}件` : "未入力なし"}
           </button>
           <button
             type="button"
-            className="btn btn-accent"
+            className="btn btn-accent bottom-bar-pdf-action"
             onClick={exportPdf}
             disabled={!canExportPdf}
             title={!canExportPdf ? "必須項目を入力するとPDF出力できます" : ""}
           >
             <span className="btn-icon"><UiIcon name="pdf" /></span>PDF出力
           </button>
-          <button type="button" className="btn btn-subtle" onClick={openActionMenu}>
-            <span className="btn-icon"><UiIcon name="menu" /></span>メニュー
-          </button>
+          <details className="secondary-action-details bottom-bar-secondary-actions">
+            <summary>
+              <span className="btn-icon"><UiIcon name="menu" /></span>その他
+            </summary>
+            <div className="secondary-action-content">
+              <button type="button" className="btn btn-subtle" onClick={openActionMenu}>
+                <span className="btn-icon"><UiIcon name="menu" /></span>メニュー
+              </button>
+            </div>
+          </details>
         </div>
       </footer>
       ) : null}
@@ -10195,7 +12176,7 @@ useEffect(() => {
                     <td>全館停電</td>
                   </tr>
                 ) : null}
-                {selectedProject.scheduleRows.map((row) => (
+                {overviewScheduleChunks[0]?.map((row) => (
                   <tr key={`print_summary_${row.id}`}>
                     <td>{row.label}</td>
                     <td>{`${formatDateWithWeekday(row.startDate)} ${row.start}`}</td>
@@ -10210,12 +12191,36 @@ useEffect(() => {
             </table>
           </article>
 
+          {overviewScheduleChunks.slice(1).map((chunk, chunkIndex) => (
+            <article className="print-page" key={`overview_schedule_page_${chunkIndex}`}>
+              <h2>1．{activePdfTemplate.sectionOverview}（工程表続き）</h2>
+              <table className="schedule-table print-schedule">
+                <thead>
+                  <tr><th>項目</th><th>開始日時</th><th>終了日時</th><th>停電</th><th>備考</th></tr>
+                </thead>
+                <tbody>
+                  {chunk.map((row) => (
+                    <tr key={`print_summary_cont_${row.id}`}>
+                      <td>{row.label}</td>
+                      <td>{`${formatDateWithWeekday(row.startDate)} ${row.start}`}</td>
+                      <td>{`${formatDateWithWeekday(row.endDate)} ${row.end}`}</td>
+                      <td>
+                        <span className={row.outage ? "print-outage-on" : ""}>{row.outage ? "有" : "無"}</span>
+                      </td>
+                      <td>{row.note || "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </article>
+          ))}
+
           <article className="print-page">
             <h2>2．{activePdfTemplate.sectionDetail}</h2>
             {selectedProject.scheduleRows.length === 0 && (
               <p>工程表の作業行が未設定です。工程表を編集すると本セクションにも反映されます。</p>
             )}
-            {selectedProject.scheduleRows.map((row) => (
+            {detailScheduleChunks[0]?.map((row) => (
               <section key={`detail_${row.id}`} className="work-detail">
                 <h3>■ {row.label}</h3>
                 <p>作業時間: {formatDateWithWeekday(row.startDate)} {row.start}〜{formatDateWithWeekday(row.endDate)} {row.end}{row.outage ? "（停電あり）" : "（停電なし）"}</p>
@@ -10232,6 +12237,19 @@ useEffect(() => {
             {detailPhotoChunks.length > 0 ? <p className="mini">参考写真は次ページ以降に出力されます</p> : null}
           </article>
 
+          {detailScheduleChunks.slice(1).map((chunk, chunkIndex) => (
+            <article className="print-page" key={`detail_schedule_page_${chunkIndex}`}>
+              <h2>2．{activePdfTemplate.sectionDetail}（作業詳細続き）</h2>
+              {chunk.map((row) => (
+                <section key={`detail_more_${row.id}`} className="work-detail">
+                  <h3>■ {row.label}</h3>
+                  <p>作業時間: {formatDateWithWeekday(row.startDate)} {row.start}〜{formatDateWithWeekday(row.endDate)} {row.end}{row.outage ? "（停電あり）" : "（停電なし）"}</p>
+                  {row.note ? <p>備考: {row.note}</p> : null}
+                </section>
+              ))}
+            </article>
+          ))}
+
           {detailPhotoChunks.map((chunk, index) => (
             <article className="print-page" key={`detail_photo_page_${index}`}>
               <h2>2．{activePdfTemplate.sectionDetail}（参考写真）</h2>
@@ -10246,142 +12264,24 @@ useEffect(() => {
             </article>
           ))}
 
-          <article className="print-page">
-            <h2>3．{activePdfTemplate.sectionApproval}</h2>
-            <table className="schedule-table approval-table">
-              <thead>
-                <tr><th style={{ width: "48px" }}>No</th><th style={{ width: "180px" }}>項目</th><th>内容</th></tr>
-              </thead>
-              <tbody>
-                {selectedProject.scheduleRows.map((row, idx) => (
-                  <tr key={`approval_${row.id}`}>
-                    <td>{idx + 1}</td>
-                    <td>{row.label}</td>
-                    <td>
-                      {row.label || "内容未入力"}
-                      {row.note ? ` / 備考: ${row.note}` : ""}
-                      {` / 時間: ${formatDateWithWeekday(row.startDate)} ${row.start}〜${formatDateWithWeekday(row.endDate)} ${row.end}`}
-                    </td>
-                  </tr>
-                ))}
-                <tr>
-                  <td>9</td>
-                  <td>特記事項</td>
-                  <td>{selectedProject.noteSpecial || "なし"}</td>
-                </tr>
-                <tr>
-                  <td>10</td>
-                  <td>承認事項追記</td>
-                  <td>{selectedProject.noteApprovalExtra || "なし"}</td>
-                </tr>
-              </tbody>
-            </table>
-          </article>
+          <PdfApprovalPrintPages
+            activePdfTemplate={activePdfTemplate}
+            selectedProject={selectedProject}
+            approvalScheduleChunks={approvalScheduleChunks}
+            approvalSelectedPrintItems={approvalSelectedPrintItems}
+            formatDateWithWeekday={formatDateWithWeekday}
+          />
 
-          <article className="print-page">
-            <h2>4．{activePdfTemplate.sectionOrganization}</h2>
-            <div className="organization-grid">
-              {activeParties.owner.enabled ? (
-                <div className="org-box">
-                  <p>{activeParties.owner.title}：{activeParties.owner.company || "-"}</p>
-                  {activeParties.owner.person ? <p>担当者：{activeParties.owner.person}</p> : null}
-                  {activeParties.owner.office ? <p>部署：{activeParties.owner.office}</p> : null}
-                  <p>電話番号（TEL）：{activeParties.owner.tel || "-"}</p>
-                </div>
-              ) : null}
-              {activeParties.owner.enabled && activeParties.utility.enabled ? <div className="org-arrow horizontal">↔</div> : null}
-              {activeParties.utility.enabled ? (
-                <div className="org-box">
-                  <p>{activeParties.utility.company || "-"}</p>
-                  {activeParties.utility.office ? <p>事業所：{activeParties.utility.office}</p> : null}
-                  <p>電話番号（TEL）：{activeParties.utility.tel || "-"}</p>
-                </div>
-              ) : null}
-              {(activeParties.owner.enabled || activeParties.utility.enabled) && activeParties.contractor.enabled ? <div className="org-arrow down">↓</div> : null}
-              {activeParties.contractor.enabled ? (
-                <div className="org-box large">
-                  <p>{activeParties.contractor.title}：{activeParties.contractor.company || "-"}</p>
-                  {activeParties.contractor.office ? <p>{activeParties.contractor.office}</p> : null}
-                  {activeParties.contractor.person ? <p>担当者：{activeParties.contractor.person}</p> : null}
-                  <p>電話番号（TEL）：{activeParties.contractor.tel || "-"}</p>
-                </div>
-              ) : null}
-            </div>
+          <PdfOrganizationPrintPages
+            activePdfTemplate={activePdfTemplate}
+            activeParties={activeParties}
+          />
 
-            <h2>5．{activePdfTemplate.sectionEmergency}</h2>
-            <div className="emergency-grid">
-              {activeParties.management.enabled ? <div className="org-box emergency-a">{activeParties.management.company || "-"}</div> : null}
-              {activeParties.management.enabled && activeParties.owner.enabled ? <div className="org-arrow horizontal emergency-ab">↔</div> : null}
-              {activeParties.owner.enabled ? (
-                <div className="org-box emergency-b">
-                  {activeParties.owner.company || "-"}
-                  <br />
-                  電話番号（TEL）：{activeParties.owner.tel || "-"}
-                </div>
-              ) : null}
-              {activeParties.owner.enabled && activeParties.utility.enabled ? <div className="org-arrow down emergency-bc">↕</div> : null}
-              {activeParties.utility.enabled ? (
-                <div className="org-box emergency-c">
-                  {activeParties.utility.company || "-"}
-                  <br />
-                  電話番号（TEL）：{activeParties.utility.tel || "-"}
-                </div>
-              ) : null}
-              {activeParties.owner.enabled && activeParties.contractor.enabled ? <div className="org-arrow horizontal emergency-bd">↔</div> : null}
-              {activeParties.contractor.enabled ? (
-                <div className="org-box emergency-d">
-                  {activeParties.contractor.company || "-"}
-                  {activeParties.contractor.person ? (
-                    <>
-                      <br />
-                      担当者：{activeParties.contractor.person}
-                    </>
-                  ) : null}
-                  <br />
-                  電話番号（TEL）：{activeParties.contractor.tel || "-"}
-                </div>
-              ) : null}
-              {activeParties.residents.enabled ? <div className="org-box emergency-resident">{activeParties.residents.company || "-"}</div> : null}
-            </div>
-          </article>
-
-          {(selectedProject.layoutImageDataUrl || layoutPhotoChunks.length > 0) && (
-            <article className="print-page">
-              <h2>【工事車両、作業場所等の配置図】</h2>
-              {selectedProject.layoutImageDataUrl ? (
-                <div className="layout-photo">
-                  <LayoutAnnotatedImage
-                    imageUrl={selectedProject.layoutImageDataUrl}
-                    annotations={selectedProject.layoutAnnotations}
-                    alt="配置図"
-                  />
-                </div>
-              ) : null}
-              {layoutPhotoChunks[0]?.length ? (
-                <div className="detail-photo-grid">
-                  {layoutPhotoChunks[0].map((slot) => (
-                    <figure key={`layout_photo_first_${slot.id}`}>
-                      <div><LayoutAnnotatedImage imageUrl={slot.dataUrl} annotations={slot.layoutAnnotations || []} alt={slot.label} /></div>
-                      <figcaption>{slot.label}</figcaption>
-                    </figure>
-                  ))}
-                </div>
-              ) : null}
-            </article>
-          )}
-          {layoutPhotoChunks.slice(1).map((chunk, index) => (
-            <article className="print-page" key={`layout_photo_page_${index}`}>
-              <h2>【工事車両、作業場所等の配置図（写真）】</h2>
-              <div className="detail-photo-grid">
-                {chunk.map((slot) => (
-                  <figure key={`layout_photo_${slot.id}`}>
-                    <div><LayoutAnnotatedImage imageUrl={slot.dataUrl} annotations={slot.layoutAnnotations || []} alt={slot.label} /></div>
-                    <figcaption>{slot.label}</figcaption>
-                  </figure>
-                ))}
-              </div>
-            </article>
-          ))}
+          <PdfLayoutPhotoPrintPages
+            selectedProject={selectedProject}
+            layoutPhotoChunks={layoutPhotoChunks}
+            renderAnnotatedImage={(props) => <LayoutAnnotatedImage {...props} />}
+          />
         </div>
       </section>
       ) : null}

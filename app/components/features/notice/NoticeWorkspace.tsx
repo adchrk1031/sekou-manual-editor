@@ -1,11 +1,13 @@
 "use client";
 
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { createBlankProject } from "../project-core/project-normalize";
-import { CSV_PROJECT_FIELD_ALIASES } from "../../planner/constants";
+import { CSV_PROJECT_FIELD_ALIASES, NOTICE_TEMPLATE_STORAGE_KEY } from "../../planner/constants";
+import { deleteTemplateItem, saveTemplateItem } from "../../planner/itemPersistence";
 import { formatDateWithWeekday } from "../../planner/utils/dateTime";
 import { createCsvValueGetter } from "../../planner/utils/csv";
-import type { CsvRecord, NoticeAdviceItem, NoticeAdvicePhase, NoticeOutageState, NoticeScheduleRow, NoticeWorkType, Project } from "../../planner/types";
+import { parseStorageJson, stringifyForStorage } from "../../planner/utils/storage";
+import type { CsvRecord, NoticeAdviceItem, NoticeAdvicePhase, NoticeOutageState, NoticeScheduleRow, NoticeWorkType, Project, SimpleTemplate } from "../../planner/types";
 import { UiIcon } from "../../planner/ui/UiIcon";
 
 const NOTICE_PHASE_ORDER: NoticeAdvicePhase[] = ["before", "during", "after"];
@@ -54,6 +56,60 @@ type NoticeScenarioOptions = {
   meterReplacement: boolean;
   unitInspectionEnabled: boolean;
 };
+
+type NoticePatternKey =
+  | "rezil_basic"
+  | "equipment_pas"
+  | "equipment_ugs"
+  | "rezil_meter"
+  | "nttae_basic"
+  | "nttae_meter";
+
+type NoticeTemplatePayload = Pick<
+  Project,
+  | "noticeTemplateId"
+  | "noticeSenderCompany"
+  | "noticeHeadline"
+  | "noticeIntroText"
+  | "noticeMainWorkDate"
+  | "noticeOutageDate"
+  | "noticeOutageTimeStart"
+  | "noticeOutageTimeEnd"
+  | "noticeUnitInspectionEnabled"
+  | "noticeScheduleRows"
+  | "noticePrivateAreaText"
+  | "noticeCommonAreaText"
+  | "noticeCompensationText"
+  | "noticeContactCompany"
+  | "noticeContactDepartment"
+  | "noticeContactAddress"
+  | "noticeContactTel"
+  | "noticeContactHours"
+  | "noticeAdviceItems"
+>;
+
+type MobileNoticeSection = "select" | "basic" | "schedule" | "advice" | "preview";
+
+const MOBILE_NOTICE_SECTION_OPTIONS: Array<{ key: MobileNoticeSection; label: string }> = [
+  { key: "select", label: "案件選択" },
+  { key: "basic", label: "基本情報" },
+  { key: "schedule", label: "工事日程" },
+  { key: "advice", label: "注意文" },
+  { key: "preview", label: "プレビュー" },
+];
+
+const NOTICE_PATTERN_OPTIONS: Array<{ key: NoticePatternKey; label: string }> = [
+  { key: "rezil_basic", label: "レジル / 設備改修標準" },
+  { key: "equipment_pas", label: "設備改修 PAS" },
+  { key: "equipment_ugs", label: "設備改修 UGS" },
+  { key: "rezil_meter", label: "レジル / メーター交換あり" },
+  { key: "nttae_basic", label: "NTTAE / 設備改修標準" },
+  { key: "nttae_meter", label: "NTTAE / メーター交換あり" },
+];
+
+function isMobileFieldViewport(): boolean {
+  return typeof window !== "undefined" && window.matchMedia("(max-width: 1023px)").matches;
+}
 
 function splitMultilineText(value: string): string[] {
   return String(value ?? "")
@@ -212,6 +268,9 @@ function buildNoticeDefaultsFromProject(project: Project): Pick<
 }
 
 function inferNoticeScenarioProvider(project: Project): NoticeScenarioProvider {
+  if (project.noticeTemplateId === "nttae_basic" || project.noticeTemplateId === "nttae_meter") {
+    return "nttae";
+  }
   const source = `${project.noticeSenderCompany} ${project.noticeContactCompany}`.toLowerCase();
   return source.includes("ntt") ? "nttae" : "rezil";
 }
@@ -248,6 +307,10 @@ function buildNoticeScenarioPatch(project: Project, options: NoticeScenarioOptio
   });
 
   return {
+    noticeTemplateId:
+      options.provider === "nttae"
+        ? (options.meterReplacement ? "nttae_meter" : "nttae_basic")
+        : (options.meterReplacement ? "rezil_meter" : "rezil_basic"),
     noticeSenderCompany: companyName,
     noticeContactCompany: companyName,
     noticeHeadline: `${workLabel}に伴う全館停電のお知らせ`,
@@ -256,6 +319,57 @@ function buildNoticeScenarioPatch(project: Project, options: NoticeScenarioOptio
     noticeCommonAreaText: commonAreaText,
     noticeUnitInspectionEnabled: options.unitInspectionEnabled,
     noticeScheduleRows: nextScheduleRows,
+  };
+}
+
+function cloneNoticeTemplatePayload(project: Project): NoticeTemplatePayload {
+  return {
+    noticeTemplateId: project.noticeTemplateId,
+    noticeSenderCompany: project.noticeSenderCompany,
+    noticeHeadline: project.noticeHeadline,
+    noticeIntroText: project.noticeIntroText,
+    noticeMainWorkDate: project.noticeMainWorkDate,
+    noticeOutageDate: project.noticeOutageDate,
+    noticeOutageTimeStart: project.noticeOutageTimeStart,
+    noticeOutageTimeEnd: project.noticeOutageTimeEnd,
+    noticeUnitInspectionEnabled: project.noticeUnitInspectionEnabled,
+    noticeScheduleRows: project.noticeScheduleRows.map((row) => ({ ...row })),
+    noticePrivateAreaText: project.noticePrivateAreaText,
+    noticeCommonAreaText: project.noticeCommonAreaText,
+    noticeCompensationText: project.noticeCompensationText,
+    noticeContactCompany: project.noticeContactCompany,
+    noticeContactDepartment: project.noticeContactDepartment,
+    noticeContactAddress: project.noticeContactAddress,
+    noticeContactTel: project.noticeContactTel,
+    noticeContactHours: project.noticeContactHours,
+    noticeAdviceItems: project.noticeAdviceItems.map((item) => ({ ...item })),
+  };
+}
+
+function buildNoticePatternPatch(project: Project, patternKey: NoticePatternKey): Partial<Project> {
+  const patternMap: Record<NoticePatternKey, NoticeScenarioOptions> = {
+    rezil_basic: { provider: "rezil", meterReplacement: false, unitInspectionEnabled: false },
+    equipment_pas: { provider: "rezil", meterReplacement: false, unitInspectionEnabled: false },
+    equipment_ugs: { provider: "rezil", meterReplacement: false, unitInspectionEnabled: false },
+    rezil_meter: { provider: "rezil", meterReplacement: true, unitInspectionEnabled: false },
+    nttae_basic: { provider: "nttae", meterReplacement: false, unitInspectionEnabled: false },
+    nttae_meter: { provider: "nttae", meterReplacement: true, unitInspectionEnabled: false },
+  };
+  const base = buildNoticeScenarioPatch(project, patternMap[patternKey]);
+  if (patternKey !== "equipment_pas" && patternKey !== "equipment_ugs") {
+    return base;
+  }
+  const workLabel = patternKey === "equipment_pas" ? "PAS交換工事" : "UGS交換工事";
+  const introLines = [
+    "平素より弊社サービスをご利用いただき誠にありがとうございます。",
+    `この度、以下日程にて${workLabel}を実施いたします。`,
+    "今回は共用部および設備点検のみの実施で、各戸点検はございません。",
+    "お客さまにはご不便をお掛け致しますが、ご理解とご協力のほどよろしくお願い申し上げます。",
+  ];
+  return {
+    ...base,
+    noticeHeadline: `${workLabel}に伴う全館停電のお知らせ`,
+    noticeIntroText: introLines.join("\n"),
   };
 }
 
@@ -416,12 +530,18 @@ export function NoticeWorkspace({
   onPrint,
 }: NoticeWorkspaceProps) {
   const previewProject = useDeferredValue(selectedProject);
+  const [mobileNoticeSection, setMobileNoticeSection] = useState<MobileNoticeSection>("select");
   const [noticeSearchText, setNoticeSearchText] = useState("");
   const deferredNoticeSearchText = useDeferredValue(noticeSearchText);
   const [printErrorMessage, setPrintErrorMessage] = useState("");
   const [noticeScenarioProvider, setNoticeScenarioProvider] = useState<NoticeScenarioProvider>(() => inferNoticeScenarioProvider(selectedProject));
   const [noticeScenarioMeterReplacement, setNoticeScenarioMeterReplacement] = useState(false);
   const [noticeScenarioUnitInspection, setNoticeScenarioUnitInspection] = useState<boolean>(selectedProject.noticeUnitInspectionEnabled);
+  const [noticePatternKey, setNoticePatternKey] = useState<NoticePatternKey>("rezil_basic");
+  const [noticeTemplates, setNoticeTemplates] = useState<Array<SimpleTemplate<NoticeTemplatePayload>>>([]);
+  const [selectedNoticeTemplateId, setSelectedNoticeTemplateId] = useState("");
+  const [noticeTemplateSyncMessage, setNoticeTemplateSyncMessage] = useState("");
+  const noticeTemplateUpdatedAtRef = useRef<Record<string, string>>({});
   const noticeMissingFields = useMemo(
     () => [
       { key: "noticePropertyName", label: "物件名", missing: !selectedProject.noticePropertyName.trim() },
@@ -474,6 +594,29 @@ export function NoticeWorkspace({
   const readOnly = hasSelectedProject && !canEditSelectedProject;
 
   useEffect(() => {
+    try {
+      const raw = localStorage.getItem(NOTICE_TEMPLATE_STORAGE_KEY);
+      const parsed = parseStorageJson<Array<SimpleTemplate<NoticeTemplatePayload>>>(raw) ?? [];
+      const normalized = parsed.filter(
+        (template): template is SimpleTemplate<NoticeTemplatePayload> =>
+          Boolean(template)
+          && typeof template.id === "string"
+          && typeof template.name === "string"
+          && typeof template.createdAt === "string"
+          && Boolean(template.payload),
+      );
+      setNoticeTemplates(normalized);
+      setSelectedNoticeTemplateId(normalized[0]?.id ?? "");
+    } catch {
+      // ignore invalid template cache
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(NOTICE_TEMPLATE_STORAGE_KEY, stringifyForStorage(noticeTemplates));
+  }, [noticeTemplates]);
+
+  useEffect(() => {
     if (!noticeMissingFields.length) {
       setPrintErrorMessage("");
       return;
@@ -485,17 +628,58 @@ export function NoticeWorkspace({
 
   useEffect(() => {
     setNoticeScenarioProvider(inferNoticeScenarioProvider(selectedProject));
-    setNoticeScenarioMeterReplacement(selectedProject.noticeHeadline.includes("メーター交換"));
-    setNoticeScenarioUnitInspection(selectedProject.noticeUnitInspectionEnabled);
+    setNoticeScenarioMeterReplacement(
+      selectedProject.noticeTemplateId === "rezil_meter"
+      || selectedProject.noticeTemplateId === "nttae_meter"
+      || selectedProject.noticeHeadline.includes("メーター交換"),
+    );
+    setNoticeScenarioUnitInspection(false);
   }, [
     selectedProject.noticeContactCompany,
     selectedProject.noticeHeadline,
     selectedProject.noticeSenderCompany,
+    selectedProject.noticeTemplateId,
     selectedProject.noticeUnitInspectionEnabled,
   ]);
 
+  useEffect(() => {
+    if (noticePatternKey === "rezil_meter" || noticePatternKey === "nttae_meter") {
+      setNoticeScenarioMeterReplacement(true);
+    } else {
+      setNoticeScenarioMeterReplacement(false);
+    }
+    if (noticePatternKey === "nttae_basic" || noticePatternKey === "nttae_meter") {
+      setNoticeScenarioProvider("nttae");
+    } else {
+      setNoticeScenarioProvider("rezil");
+    }
+    setNoticeScenarioUnitInspection(false);
+  }, [noticePatternKey]);
+
+  useEffect(() => {
+    setMobileNoticeSection(hasSelectedProject ? "basic" : "select");
+  }, [hasSelectedProject, selectedProject.projectId]);
+
   function updateNoticeField<K extends keyof Project>(field: K, value: Project[K]) {
     updateSelectedProject((project) => ({ ...project, [field]: value }));
+  }
+
+  function scrollToNoticeFieldTarget(selector: string, reveal?: () => void) {
+    const performScroll = () => {
+      const target = document.querySelector(selector) as HTMLElement | null;
+      if (!target) {
+        return;
+      }
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+      target.focus({ preventScroll: true });
+    };
+
+    if (reveal) {
+      reveal();
+      window.setTimeout(performScroll, 120);
+      return;
+    }
+    performScroll();
   }
 
   function updateManagementCompany(value: string) {
@@ -557,12 +741,10 @@ export function NoticeWorkspace({
   }
 
   function scrollToMissingNoticeField() {
-    const firstField = document.querySelector("[data-notice-required-key]") as HTMLElement | null;
-    if (!firstField) {
-      return;
-    }
-    firstField.scrollIntoView({ behavior: "smooth", block: "center" });
-    firstField.focus({ preventScroll: true });
+    scrollToNoticeFieldTarget(
+      "[data-notice-required-key]",
+      isMobileFieldViewport() ? () => setMobileNoticeSection("basic") : undefined,
+    );
   }
 
   function handlePrint() {
@@ -595,15 +777,99 @@ export function NoticeWorkspace({
     }));
   }
 
-  function applyNoticeScenario() {
+  function applyNoticePattern() {
     updateSelectedProject((project) => ({
       ...project,
-      ...buildNoticeScenarioPatch(project, {
-        provider: noticeScenarioProvider,
-        meterReplacement: noticeScenarioMeterReplacement,
-        unitInspectionEnabled: noticeScenarioUnitInspection,
-      }),
+      ...buildNoticePatternPatch(project, noticePatternKey),
     }));
+  }
+
+  function saveNoticeTemplate() {
+    if (!canEditSelectedProject) {
+      return;
+    }
+    const defaultName = selectedProject.noticeHeadline.trim() || `${selectedProject.propertyName || "案内文"}テンプレート`;
+    const name = window.prompt("保存する案内文テンプレート名を入力してください。", defaultName)?.trim();
+    if (!name) {
+      return;
+    }
+    const item: SimpleTemplate<NoticeTemplatePayload> = {
+      id: crypto.randomUUID(),
+      name,
+      createdAt: new Date().toISOString(),
+      payload: cloneNoticeTemplatePayload(selectedProject),
+    };
+    setNoticeTemplates((prev) => [item, ...prev]);
+    setSelectedNoticeTemplateId(item.id);
+    setNoticeTemplateSyncMessage("案内文テンプレートを保存しています...");
+    void (async () => {
+      const response = await saveTemplateItem({
+        storageKey: NOTICE_TEMPLATE_STORAGE_KEY,
+        itemId: item.id,
+        itemName: item.name,
+        itemScope: "",
+        itemCategory: "notice",
+        itemOrder: 0,
+        rawJson: JSON.stringify(item),
+      }, noticeTemplateUpdatedAtRef.current[item.id] ?? null);
+      if (response.ok && response.updatedAt) {
+        noticeTemplateUpdatedAtRef.current[item.id] = response.updatedAt;
+        setNoticeTemplateSyncMessage(
+          response.resolvedConflict
+            ? "案内文テンプレートを保存し、他端末の変更を自動マージしました。"
+            : "案内文テンプレートを保存しました。",
+        );
+        return;
+      }
+      setNoticeTemplateSyncMessage("案内文テンプレートのサーバー保存に失敗しました。端末保存は継続しています。");
+    })();
+  }
+
+  function applySavedNoticeTemplate() {
+    const template = noticeTemplates.find((item) => item.id === selectedNoticeTemplateId);
+    if (!template) {
+      return;
+    }
+    updateSelectedProject((project) => ({
+      ...project,
+      ...template.payload,
+      noticeScheduleRows: template.payload.noticeScheduleRows.map((row) => ({ ...row })),
+      noticeAdviceItems: template.payload.noticeAdviceItems.map((item) => ({ ...item })),
+    }));
+  }
+
+  function deleteSavedNoticeTemplate() {
+    if (!canEdit || !selectedNoticeTemplateId) {
+      return;
+    }
+    const template = noticeTemplates.find((item) => item.id === selectedNoticeTemplateId);
+    if (!template) {
+      return;
+    }
+    if (!window.confirm(`案内文テンプレート「${template.name}」を削除します。よろしいですか？`)) {
+      return;
+    }
+    const next = noticeTemplates.filter((item) => item.id !== selectedNoticeTemplateId);
+    setNoticeTemplates(next);
+    setSelectedNoticeTemplateId(next[0]?.id ?? "");
+    setNoticeTemplateSyncMessage("案内文テンプレートを削除しています...");
+    void (async () => {
+      const response = await deleteTemplateItem(
+        NOTICE_TEMPLATE_STORAGE_KEY,
+        template.id,
+        noticeTemplateUpdatedAtRef.current[template.id] ?? null,
+      );
+      if (response.ok) {
+        delete noticeTemplateUpdatedAtRef.current[template.id];
+        setNoticeTemplateSyncMessage("案内文テンプレートを削除しました。");
+        return;
+      }
+      setNoticeTemplateSyncMessage("案内文テンプレートのサーバー削除に失敗しました。次回同期で再試行します。");
+    })();
+  }
+
+  function getMobileNoticeSectionClass(section: MobileNoticeSection): string {
+    return `mobile-workflow-section${mobileNoticeSection === section ? " is-active" : ""}`;
   }
 
   return (
@@ -621,12 +887,6 @@ export function NoticeWorkspace({
           </p>
         </div>
         <div className="inline-row wrap notice-actions">
-          <button type="button" className="btn btn-subtle" onClick={syncFromProject} disabled={!canEdit || !canEditSelectedProject}>
-            <span className="btn-icon"><UiIcon name="refresh" /></span>案件情報から初期化
-          </button>
-          <button type="button" className="btn btn-subtle" onClick={resetAdviceItems} disabled={!canEdit || !canEditSelectedProject}>
-            <span className="btn-icon"><UiIcon name="undo" /></span>テンプレートへ戻す
-          </button>
           {noticeMissingFields.length ? (
             <button type="button" className="btn btn-subtle" onClick={scrollToMissingNoticeField}>
               <span className="btn-icon"><UiIcon name="down" /></span>未入力へ移動
@@ -635,9 +895,40 @@ export function NoticeWorkspace({
           <button type="button" className="btn btn-accent" onClick={handlePrint} disabled={!hasSelectedProject}>
             <span className="btn-icon"><UiIcon name="pdf" /></span>案内文を印刷 / PDF出力
           </button>
+          <details className="secondary-action-details notice-secondary-actions">
+            <summary>
+              <span className="btn-icon"><UiIcon name="menu" /></span>その他
+            </summary>
+            <div className="secondary-action-content">
+              <button type="button" className="btn btn-subtle" onClick={syncFromProject} disabled={!canEdit || !canEditSelectedProject}>
+                <span className="btn-icon"><UiIcon name="refresh" /></span>案件情報から初期化
+              </button>
+              <button type="button" className="btn btn-subtle" onClick={resetAdviceItems} disabled={!canEdit || !canEditSelectedProject}>
+                <span className="btn-icon"><UiIcon name="undo" /></span>テンプレートへ戻す
+              </button>
+            </div>
+          </details>
         </div>
       </div>
 
+      <section className="mobile-workflow-switcher" aria-label="停電案内文の現場モード">
+        <div className="mobile-workflow-tabs" role="tablist" aria-label="停電案内文の入力セクション">
+          {MOBILE_NOTICE_SECTION_OPTIONS.map((option) => (
+            <button
+              key={`mobile_notice_section_${option.key}`}
+              type="button"
+              className={`mobile-workflow-tab ${mobileNoticeSection === option.key ? "is-active" : ""}`}
+              onClick={() => setMobileNoticeSection(option.key)}
+              role="tab"
+              aria-selected={mobileNoticeSection === option.key}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <div className={getMobileNoticeSectionClass("select")}>
       <section className="sub-panel notice-search-panel">
         <div className="panel-head">
           <div>
@@ -663,7 +954,7 @@ export function NoticeWorkspace({
             onChange={(event) => setNoticeSearchText(event.target.value)}
           />
         </label>
-        <div className="notice-search-grid">
+        <div className="notice-search-grid notice-pattern-grid">
           <section className="notice-search-column">
             <div className="notice-search-column-head">
               <div>
@@ -738,86 +1029,135 @@ export function NoticeWorkspace({
           </section>
         </div>
       </section>
+      </div>
 
+      <div className={getMobileNoticeSectionClass("basic")}>
       <section className="sub-panel notice-search-panel">
         <div className="panel-head">
           <div>
             <h4>案内文パターン</h4>
-            <p className="mini">メーター交換あり、各戸点検有無、レジル / NTTAE 物件の条件で文面を整えられます。</p>
+            <p className="mini">設備改修 PAS / UGS、メーター交換あり、レジル / NTTAE 物件などのパターンをプルダウンから選べます。</p>
           </div>
-          <button type="button" className="btn btn-subtle" onClick={applyNoticeScenario} disabled={!canEditSelectedProject}>
+          <button type="button" className="btn btn-subtle" onClick={applyNoticePattern} disabled={!canEditSelectedProject}>
             <span className="btn-icon"><UiIcon name="apply" /></span>この条件を反映
           </button>
         </div>
         <div className="notice-search-grid">
           <label className="field">
-            <span>物件種別</span>
+            <span>案内文パターン</span>
             <select
               className="control"
-              value={noticeScenarioProvider}
-              onChange={(event) => setNoticeScenarioProvider(event.target.value as NoticeScenarioProvider)}
+              value={noticePatternKey}
+              onChange={(event) => setNoticePatternKey(event.target.value as NoticePatternKey)}
               disabled={!canEditSelectedProject}
             >
-              {NOTICE_PROVIDER_OPTIONS.map((option) => (
-                <option key={`notice_provider_${option}`} value={option}>{NOTICE_PROVIDER_LABELS[option]}</option>
+              {NOTICE_PATTERN_OPTIONS.map((option) => (
+                <option key={`notice_pattern_${option.key}`} value={option.key}>{option.label}</option>
               ))}
             </select>
           </label>
-          <label className="check-pill">
+          <label className="check-pill notice-pattern-pill">
             <input
               type="checkbox"
               checked={noticeScenarioMeterReplacement}
               onChange={(event) => setNoticeScenarioMeterReplacement(event.target.checked)}
-              disabled={!canEditSelectedProject}
+              disabled
             />
             <span>メーター交換ありバージョン</span>
           </label>
-          <label className="check-pill">
+          <label className="check-pill notice-pattern-pill">
             <input
               type="checkbox"
               checked={noticeScenarioUnitInspection}
               onChange={(event) => setNoticeScenarioUnitInspection(event.target.checked)}
-              disabled={!canEditSelectedProject}
+              disabled
             />
-            <span>各戸点検ありとして案内する</span>
+            <span>各戸点検は一旦なし</span>
           </label>
         </div>
+        <div className="notice-search-grid">
+          <label className="field">
+            <span>保存済み案内文テンプレート</span>
+            <select
+              className="control"
+              value={selectedNoticeTemplateId}
+              onChange={(event) => setSelectedNoticeTemplateId(event.target.value)}
+              disabled={!noticeTemplates.length}
+            >
+              {!noticeTemplates.length ? <option value="">テンプレート未登録</option> : null}
+              {noticeTemplates.map((template) => (
+                <option key={`saved_notice_template_${template.id}`} value={template.id}>{template.name}</option>
+              ))}
+            </select>
+          </label>
+          <div className="inline-row wrap notice-actions">
+            <button type="button" className="btn btn-subtle" onClick={applySavedNoticeTemplate} disabled={!selectedNoticeTemplateId}>
+              <span className="btn-icon"><UiIcon name="apply" /></span>保存済みを反映
+            </button>
+            <details className="secondary-action-details notice-secondary-actions">
+              <summary>
+                <span className="btn-icon"><UiIcon name="menu" /></span>保存管理
+              </summary>
+              <div className="secondary-action-content">
+                <button type="button" className="btn btn-subtle" onClick={saveNoticeTemplate} disabled={!canEditSelectedProject}>
+                  <span className="btn-icon"><UiIcon name="save" /></span>今の案内文をテンプレ保存
+                </button>
+                <button type="button" className="btn btn-danger" onClick={deleteSavedNoticeTemplate} disabled={!canEdit || !selectedNoticeTemplateId}>
+                  <span className="btn-icon"><UiIcon name="delete" /></span>削除
+                </button>
+              </div>
+            </details>
+          </div>
+        </div>
+        {noticeTemplateSyncMessage ? (
+          <p className="mini">{noticeTemplateSyncMessage}</p>
+        ) : null}
       </section>
+      </div>
 
       {!hasSelectedProject ? (
+        <div className={getMobileNoticeSectionClass("select")}>
         <section className="sub-panel project-empty-panel">
           <h4>案件を選択してください</h4>
           <p className="mini">
             上の検索から既存案件を開くか、CSV 取込データを選んで案内文用の案件を開始してください。
           </p>
         </section>
+        </div>
       ) : null}
 
       {readOnly ? (
+        <div className={getMobileNoticeSectionClass("basic")}>
         <section className="sub-panel required-summary-panel">
           <p className="mini error-text">
             この案件は現在ほかのユーザーが編集中のため、案内文は読み取り専用です。印刷 / PDF 出力のみ利用できます。
           </p>
         </section>
+        </div>
       ) : null}
 
       {printErrorMessage ? (
+        <div className={getMobileNoticeSectionClass("basic")}>
         <section className="sub-panel required-summary-panel">
           <h4>案内文を出力できない理由</h4>
           <p className="mini error-text">{printErrorMessage}</p>
         </section>
+        </div>
       ) : null}
 
       {noticeMissingFields.length ? (
+        <div className={getMobileNoticeSectionClass("basic")}>
         <section className="sub-panel required-summary-panel">
           <h4>印刷前に入力したい項目</h4>
           <p className="mini notice-toolbar-meta">{noticeMissingFields.map((field) => field.label).join(" / ")}</p>
         </section>
+        </div>
       ) : null}
 
       {!hasSelectedProject ? null : (
         <>
 
+      <div className={getMobileNoticeSectionClass("basic")}>
       <section className="sub-panel">
         <h4>ヘッダー・停電情報</h4>
         <div className="field-grid">
@@ -914,7 +1254,9 @@ export function NoticeWorkspace({
           </label>
         </div>
       </section>
+      </div>
 
+      <div className={getMobileNoticeSectionClass("schedule")}>
       <section className="sub-panel">
         <div className="panel-head">
           <div>
@@ -970,7 +1312,9 @@ export function NoticeWorkspace({
           </table>
         </div>
       </section>
+      </div>
 
+      <div className={getMobileNoticeSectionClass("basic")}>
       <section className="sub-panel">
         <h4>停電設備・問い合わせ先</h4>
         <div className="field-grid">
@@ -1018,7 +1362,9 @@ export function NoticeWorkspace({
           </label>
         </div>
       </section>
+      </div>
 
+      <div className={getMobileNoticeSectionClass("advice")}>
       <section className="sub-panel">
         <h4>停電時のご注意</h4>
         <p className="mini notice-toolbar-meta">各区分ごとに行追加できます。出力時は 2 ページ目へ整列して反映します。</p>
@@ -1067,7 +1413,9 @@ export function NoticeWorkspace({
           </section>
         ))}
       </section>
+      </div>
 
+      <div className={getMobileNoticeSectionClass("preview")}>
       <section className="sub-panel">
         <div className="panel-head">
           <div>
@@ -1079,6 +1427,7 @@ export function NoticeWorkspace({
           <NoticePrintDocument project={previewProject} preview />
         </div>
       </section>
+      </div>
         </>
       )}
     </section>

@@ -56,6 +56,9 @@ jobs:
       - name: Smoke test key routes
         run: npm run smoke:routes
 
+      - name: Run API / conflict harness
+        run: npm run test:harness
+
       - name: Validate required secrets
         run: |
           test -n "${{ secrets.VERCEL_TOKEN }}" || (echo "Missing secret: VERCEL_TOKEN" && exit 1)

@@ -10,17 +10,20 @@ import {
   LAYOUT_TEXT_FONT_OPTIONS,
 } from "../../planner/constants";
 import type {
+  ApprovalRequestItem,
   LayoutAnnotation,
   LayoutAnnotationV2,
   LayoutAnnotationV2Style,
   LayoutAnnotationV2Transform,
   LayoutTextAlign,
+  NoticeTemplateId,
   NoticeAdviceItem,
   NoticeScheduleRow,
   PdfTemplateId,
   PhotoSlot,
   PhotoSlots,
   Project,
+  ProjectPresetId,
   RelatedParty,
   ScheduleRow,
   WorkCode,
@@ -32,6 +35,75 @@ export type ProjectNormalizationInput = Partial<Project> & {
   photos?: Record<string, Partial<PhotoSlot>>;
   relatedParties?: Partial<Project["relatedParties"]>;
 };
+
+function normalizeProjectPresetId(value: unknown): ProjectPresetId {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (
+    normalized === "kouatsu_cable"
+    || normalized === "pas"
+    || normalized === "ugs"
+    || normalized === "pas_ugs"
+    || normalized === "digital_meter"
+    || normalized === "ntt_ae"
+  ) {
+    return normalized;
+  }
+  return "custom";
+}
+
+function normalizeNoticeTemplateId(value: unknown): NoticeTemplateId {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (
+    normalized === "rezil_basic"
+    || normalized === "rezil_meter"
+    || normalized === "nttae_basic"
+    || normalized === "nttae_meter"
+  ) {
+    return normalized;
+  }
+  return "default";
+}
+
+function normalizeApprovalRequestItems(value: unknown): ApprovalRequestItem[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item, index) => {
+      if (!item || typeof item !== "object") {
+        return null;
+      }
+      const raw = item as Partial<ApprovalRequestItem>;
+      return {
+        id: typeof raw.id === "string" && raw.id.trim() ? raw.id.trim() : nextUuid(`approval_request_${index + 1}`),
+        templateId: typeof raw.templateId === "string" ? raw.templateId.trim() : "",
+        title: typeof raw.title === "string" ? raw.title.trim() : "",
+        body: typeof raw.body === "string" ? raw.body : "",
+        category: typeof raw.category === "string" ? raw.category.trim() : "",
+      } satisfies ApprovalRequestItem;
+    })
+    .filter((item): item is ApprovalRequestItem => item !== null);
+}
+
+function normalizeStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  value.forEach((item) => {
+    if (typeof item !== "string") {
+      return;
+    }
+    const text = item.trim();
+    if (!text || seen.has(text)) {
+      return;
+    }
+    seen.add(text);
+    normalized.push(text);
+  });
+  return normalized;
+}
 
 function nextId(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
@@ -818,6 +890,10 @@ export function createBlankProject(seed?: Partial<Project>): Project {
 
   return {
     projectId: seed?.projectId ?? `PJ-${new Date().getFullYear()}-${Math.floor(Math.random() * 9000 + 1000)}`,
+    accessScope: seed?.accessScope === "private" ? "private" : "shared",
+    ownerUserId: seed?.ownerUserId ?? "",
+    ownerUserName: seed?.ownerUserName ?? "",
+    projectPresetId: normalizeProjectPresetId(seed?.projectPresetId),
     propertyName: seed?.propertyName ?? "",
     propertyAddress: seed?.propertyAddress ?? "",
     titleSubject: seed?.titleSubject ?? "",
@@ -832,6 +908,7 @@ export function createBlankProject(seed?: Partial<Project>): Project {
     selectedWorkCodes: seed?.selectedWorkCodes ?? [],
     noteSpecial: seed?.noteSpecial ?? "",
     noteApprovalExtra: seed?.noteApprovalExtra ?? "",
+    approvalRequestItems: seed?.approvalRequestItems ? normalizeApprovalRequestItems(seed.approvalRequestItems) : [],
     coverRecipientSuffix: seed?.coverRecipientSuffix ?? "",
     pdfTemplateId: normalizePdfTemplateId(seed?.pdfTemplateId),
     pdfCompanyName: seed?.pdfCompanyName ?? "",
@@ -845,6 +922,7 @@ export function createBlankProject(seed?: Partial<Project>): Project {
     layoutAnnotations: legacyLayoutAnnotations,
     layoutAnnotationsV2,
     scheduleRows: seed?.scheduleRows ?? [],
+    deletedScheduleRowIds: normalizeStringList(seed?.deletedScheduleRowIds),
     detailPhotos: seed?.detailPhotos ?? createPhotoSlots(),
     layoutPhotos: seed?.layoutPhotos ?? createPhotoSlots(["写真A（配置図）", "写真B（配置図）", "写真C（配置図）", "写真D（配置図）"]),
     relatedParties: seed?.relatedParties ?? createDefaultRelatedParties(),
@@ -854,6 +932,7 @@ export function createBlankProject(seed?: Partial<Project>): Project {
     approvedAt: seed?.approvedAt ?? "",
     pdfExportCount: seed?.pdfExportCount ?? 0,
     pdfLastExportedAt: seed?.pdfLastExportedAt ?? "",
+    noticeTemplateId: normalizeNoticeTemplateId(seed?.noticeTemplateId),
     noticePropertyName: seed?.noticePropertyName ?? seed?.propertyName ?? "",
     noticeRecipientName: seed?.noticeRecipientName ?? "お住まいの皆さまへ",
     noticeSenderCompany: seed?.noticeSenderCompany ?? seed?.pdfCompanyName ?? "レジル株式会社",
@@ -969,10 +1048,14 @@ export function normalizeProject(project: ProjectNormalizationInput): Project {
   relatedParties.owner.person = project.pdfContactPerson || relatedParties.owner.person;
   relatedParties.owner.tel = project.pdfTel || relatedParties.owner.tel;
 
-  return {
-    ...createBlankProject({
-      projectId: project.projectId,
-      propertyName: project.propertyName,
+    return {
+      ...createBlankProject({
+        projectId: project.projectId,
+        accessScope: project.accessScope === "private" ? "private" : "shared",
+        ownerUserId: typeof project.ownerUserId === "string" ? project.ownerUserId : "",
+        ownerUserName: typeof project.ownerUserName === "string" ? project.ownerUserName : "",
+        projectPresetId: normalizeProjectPresetId(project.projectPresetId),
+        propertyName: project.propertyName,
       propertyAddress: project.propertyAddress,
       titleSubject: project.titleSubject,
       workDateStart: start,
@@ -985,6 +1068,7 @@ export function normalizeProject(project: ProjectNormalizationInput): Project {
       selectedWorkCodes: project.selectedWorkCodes,
       noteSpecial: project.noteSpecial,
       noteApprovalExtra: project.noteApprovalExtra,
+      approvalRequestItems: normalizeApprovalRequestItems(project.approvalRequestItems),
       coverRecipientSuffix: project.coverRecipientSuffix,
       pdfTemplateId,
       pdfCompanyName: project.pdfCompanyName,
@@ -998,16 +1082,18 @@ export function normalizeProject(project: ProjectNormalizationInput): Project {
       layoutAnnotations,
       layoutAnnotationsV2,
       scheduleRows: normalizedRows,
+      deletedScheduleRowIds: normalizeStringList(project.deletedScheduleRowIds),
       detailPhotos,
       layoutPhotos,
       relatedParties,
       approvalStatus: project.approvalStatus,
       approvalComment: project.approvalComment,
       approvedBy: project.approvedBy,
-      approvedAt: project.approvedAt,
-      pdfExportCount: Number.isFinite(project.pdfExportCount) ? Number(project.pdfExportCount) : 0,
-      pdfLastExportedAt: project.pdfLastExportedAt,
-      noticePropertyName: project.noticePropertyName,
+        approvedAt: project.approvedAt,
+        pdfExportCount: Number.isFinite(project.pdfExportCount) ? Number(project.pdfExportCount) : 0,
+        pdfLastExportedAt: project.pdfLastExportedAt,
+        noticeTemplateId: normalizeNoticeTemplateId(project.noticeTemplateId),
+        noticePropertyName: project.noticePropertyName,
       noticeRecipientName: project.noticeRecipientName,
       noticeSenderCompany: project.noticeSenderCompany,
       noticeHeadline: project.noticeHeadline,

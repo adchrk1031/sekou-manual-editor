@@ -46,6 +46,8 @@ export type LoginAttemptLog = {
   source: "login_page" | "tracking_page";
 };
 
+export type SessionStateReason = "active" | "missing" | "expired" | "inactive_timeout" | "user_unavailable";
+
 export const USERS_STORAGE_KEY = "sekou-tool-users-v1";
 export const SESSION_STORAGE_KEY = "sekou-tool-session-v1";
 export const ACCESS_LOG_STORAGE_KEY = "sekou-auth-attempts-v1";
@@ -437,7 +439,7 @@ function sanitizeUsers(users: AuthUser[]): AuthUser[] {
       ...user,
       name: canonicalizeKnownPersonName(typeof user.name === "string" ? user.name : "", normalizedEmail || user.email),
       email: normalizedEmail || user.email,
-      password: typeof user.password === "string" ? user.password : "",
+      password: "",
       active: normalizedRole === "system_admin" ? true : (typeof user.active === "boolean" ? user.active : true),
       role: normalizedRole,
       approvalStatus: normalizedApprovalStatus,
@@ -741,6 +743,54 @@ export async function registerSelfUser(name: string, email: string, password: st
   return { user: createdUser };
 }
 
+export async function createUserByAdmin(
+  name: string,
+  email: string,
+  password: string,
+  role: AuthRole,
+): Promise<{ user: AuthUser | null; users: AuthUser[]; error?: string }> {
+  if (typeof window === "undefined") {
+    return { user: null, users: [], error: "client_only" };
+  }
+  const trimmedName = name.trim();
+  const trimmedEmail = normalizeEmail(email);
+  const trimmedPassword = password.trim();
+  if (!trimmedName || !trimmedEmail || !trimmedPassword) {
+    return { user: null, users: [], error: "missing" };
+  }
+
+  const response = await requestJson<AuthSessionResponse>(AUTH_USERS_API_PATH, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: trimmedName,
+      email: trimmedEmail,
+      password: trimmedPassword,
+      role,
+    }),
+  });
+
+  if (!response.ok || response.body?.ok !== true || !isAuthUserLike(response.body.user)) {
+    if (response.status === 409 && response.body?.error === "duplicate_email") {
+      return { user: null, users: [], error: "duplicate_email" };
+    }
+    if (response.status === 403) {
+      return { user: null, users: [], error: "forbidden" };
+    }
+    return { user: null, users: [], error: "request_failed" };
+  }
+
+  const createdUser = response.body.user;
+  const users = Array.isArray(response.body.users) && response.body.users.every((user) => isAuthUserLike(user))
+    ? persistUsers(response.body.users, { syncRemote: false })
+    : persistUsers([createdUser, ...ensureUsers().filter((user) => user.id !== createdUser.id)], { syncRemote: false });
+
+  return {
+    user: users.find((user) => user.id === createdUser.id) ?? createdUser,
+    users,
+  };
+}
+
 export function getLoginAttempts(): LoginAttemptLog[] {
   if (typeof window === "undefined") {
     return [];
@@ -780,29 +830,47 @@ export function appendLoginAttempt(entry: Omit<LoginAttemptLog, "id" | "at">): v
 }
 
 export function getSessionUser(): AuthUser | null {
+  const state = getSessionState();
+  return state.user;
+}
+
+export function getSessionState(): { user: AuthUser | null; reason: SessionStateReason } {
   if (typeof window === "undefined") {
-    return null;
+    return { user: null, reason: "missing" };
   }
   const users = ensureUsers();
   const sessionRaw = localStorage.getItem(SESSION_STORAGE_KEY);
   const session = parseSessionPayload(sessionRaw);
   if (!session) {
-    return null;
+    return { user: null, reason: "missing" };
   }
   if (session.expiresAt < nowMs()) {
     localStorage.removeItem(SESSION_STORAGE_KEY);
-    return null;
+    return { user: null, reason: "expired" };
   }
   if (nowMs() - session.lastActivityAt > SESSION_INACTIVITY_TIMEOUT_MS) {
     localStorage.removeItem(SESSION_STORAGE_KEY);
-    return null;
+    return { user: null, reason: "inactive_timeout" };
   }
   const found = users.find((user) => user.id === session.userId);
   if (!found || !canUseTool(found)) {
     localStorage.removeItem(SESSION_STORAGE_KEY);
-    return null;
+    return { user: null, reason: "user_unavailable" };
   }
-  return found;
+  return { user: found, reason: "active" };
+}
+
+export function getSessionStateMessage(reason: SessionStateReason): string {
+  if (reason === "expired") {
+    return "セッションの有効期限が切れたため、再ログインしてください。";
+  }
+  if (reason === "inactive_timeout") {
+    return "操作が一定時間なかったため、再ログインしてください。";
+  }
+  if (reason === "user_unavailable") {
+    return "利用権限が確認できなかったため、再ログインしてください。";
+  }
+  return "ログインして続行してください。";
 }
 
 export async function loginWithCredentials(
