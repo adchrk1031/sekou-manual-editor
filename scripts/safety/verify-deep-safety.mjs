@@ -83,6 +83,7 @@ assertFileIncludes("scripts/safety/verify-change-scope.mjs", [
   "slack-mention-todo-tool/",
   "rezil-ai-unified-demo/",
   "rezil-ai-division-brief/",
+  "sales-ledger-gas/",
 ]);
 
 assertFileIncludes("scripts/github/apply-repo-safety.sh", [

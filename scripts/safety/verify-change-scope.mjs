@@ -11,6 +11,7 @@ const BLOCKED_PREFIXES = [
   "slack-mention-todo-tool/",
   "rezil-ai-unified-demo/",
   "rezil-ai-division-brief/",
+  "sales-ledger-gas/",
 ];
 
 function runGit(args) {

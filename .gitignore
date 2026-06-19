@@ -32,3 +32,8 @@ artifacts/
 **/__pycache__/
 *.pyc
 scripts/safety/ev_extract_candidates.py
+meter-ocr-ledger-tool/
+rezil-ai-unified-demo/
+rezil-ai-division-brief/
+slack-mention-todo-tool/
+sales-ledger-gas/
